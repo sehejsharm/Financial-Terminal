@@ -16,8 +16,8 @@ if [ ! -d .venv ]; then
 fi
 
 echo "Installing/updating components (can take a minute the first time)..."
-.venv/bin/python -m pip install --quiet --upgrade pip setuptools wheel
-.venv/bin/python -m pip install --quiet --prefer-binary -r requirements.txt
+.venv/bin/python -m pip install --upgrade --no-cache-dir pip setuptools wheel
+.venv/bin/python -m pip install --prefer-binary --no-cache-dir -r requirements.txt
 
 if [ ! -f .env ] && [ -f .env.example ]; then
   cp .env.example .env

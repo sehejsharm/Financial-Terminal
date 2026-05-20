@@ -17,8 +17,8 @@ if not exist .venv (
 )
 
 echo Installing/updating components (can take a minute the first time)...
-.venv\Scripts\python -m pip install --quiet --upgrade pip setuptools wheel
-.venv\Scripts\python -m pip install --quiet --prefer-binary -r requirements.txt
+.venv\Scripts\python -m pip install --upgrade --no-cache-dir pip setuptools wheel
+.venv\Scripts\python -m pip install --prefer-binary --no-cache-dir -r requirements.txt
 
 if not exist .env if exist .env.example copy .env.example .env >nul
 
