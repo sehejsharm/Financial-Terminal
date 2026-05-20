@@ -1,0 +1,229 @@
+"""Plotly chart helpers.
+
+The signature feature is render_price_chart with four views and a green/red
+split at a baseline (zero for Performance, starting price for Area), including
+linearly interpolated zero crossings so the color flips exactly where the line
+crosses the baseline rather than at the next data point.
+"""
+from __future__ import annotations
+
+from datetime import datetime
+
+import pandas as pd
+import plotly.graph_objects as go
+from plotly.subplots import make_subplots
+
+GREEN = "#22c55e"
+RED = "#ef4444"
+GREEN_FILL = "rgba(34, 197, 94, 0.18)"
+RED_FILL = "rgba(239, 68, 68, 0.18)"
+NEUTRAL = "#9ca3af"
+VOLUME_COLOR = "rgba(120, 130, 150, 0.45)"
+
+VIEWS = ("Performance", "Price", "Candlestick", "Area")
+
+
+def _interp_x(x0, x1, y0, y1, baseline):
+    """X-coordinate where the segment (x0,y0)->(x1,y1) crosses baseline."""
+    if y1 == y0:
+        return x0
+    frac = (baseline - y0) / (y1 - y0)
+    if isinstance(x0, (pd.Timestamp, datetime)):
+        t0 = pd.Timestamp(x0).value
+        t1 = pd.Timestamp(x1).value
+        return pd.Timestamp(int(t0 + frac * (t1 - t0)))
+    return x0 + frac * (x1 - x0)
+
+
+def split_traces(x, y, baseline: float):
+    """Split a line at a horizontal baseline into above/below series.
+
+    Returns (xs, above, below) where xs has interpolated crossing points
+    inserted, and above/below carry None where the series is on the other
+    side of the baseline. Crossing points are set to the baseline value in
+    both series so the colored segments meet exactly on the line.
+    """
+    xs: list = []
+    above: list = []
+    below: list = []
+    n = len(y)
+    for i in range(n):
+        yi = y[i]
+        xs.append(x[i])
+        above.append(yi if yi >= baseline else None)
+        below.append(yi if yi <= baseline else None)
+        if i < n - 1:
+            y0, y1 = y[i], y[i + 1]
+            if (y0 - baseline) * (y1 - baseline) < 0:
+                xc = _interp_x(x[i], x[i + 1], y0, y1, baseline)
+                xs.append(xc)
+                above.append(baseline)
+                below.append(baseline)
+    return xs, above, below
+
+
+def _badge(fig, x_last, y_last, pct: float):
+    """Anchor a colored return badge at the last data point."""
+    color = GREEN if pct >= 0 else RED
+    sign = "+" if pct >= 0 else ""
+    fig.add_annotation(
+        x=x_last,
+        y=y_last,
+        text=f"  {sign}{pct:.2f}%  ",
+        showarrow=False,
+        xanchor="left",
+        font=dict(color="#ffffff", size=13, family="Arial Black"),
+        bgcolor=color,
+        borderpad=4,
+        opacity=0.95,
+    )
+
+
+def _empty_fig(message: str, height: int) -> go.Figure:
+    fig = go.Figure()
+    fig.add_annotation(text=message, showarrow=False,
+                       font=dict(color=NEUTRAL, size=15))
+    fig.update_layout(template="plotly_dark", height=height,
+                      margin=dict(l=10, r=10, t=30, b=10),
+                      xaxis=dict(visible=False), yaxis=dict(visible=False))
+    return fig
+
+
+def render_price_chart(
+    df: pd.DataFrame,
+    view: str = "Performance",
+    baseline_price: float | None = None,
+    title: str = "",
+    show_volume: bool = False,
+    height: int = 460,
+) -> go.Figure:
+    """Render a price chart in one of four views.
+
+    baseline_price: optional reference price. For 1D intraday charts pass
+    yesterday's close so the Performance/Area split and the return badge are
+    measured against the prior close instead of the first intraday bar.
+    """
+    if df is None or df.empty or "Close" not in df.columns:
+        return _empty_fig("No data available", height)
+
+    df = df.dropna(subset=["Close"])
+    if df.empty:
+        return _empty_fig("No data available", height)
+
+    x = list(df.index)
+    close = df["Close"].astype(float)
+    base = float(baseline_price) if baseline_price is not None else float(close.iloc[0])
+
+    if show_volume and "Volume" in df.columns:
+        fig = make_subplots(
+            rows=2, cols=1, shared_xaxes=True, vertical_spacing=0.03,
+            row_heights=[0.78, 0.22],
+        )
+    else:
+        fig = go.Figure()
+        show_volume = False
+
+    def add(trace, secondary_row=False):
+        if show_volume:
+            fig.add_trace(trace, row=2 if secondary_row else 1, col=1)
+        else:
+            fig.add_trace(trace)
+
+    end_pct = (float(close.iloc[-1]) / base - 1.0) * 100.0 if base else 0.0
+
+    if view == "Candlestick":
+        add(go.Candlestick(
+            x=x, open=df["Open"], high=df["High"], low=df["Low"], close=df["Close"],
+            increasing_line_color=GREEN, decreasing_line_color=RED,
+            increasing_fillcolor=GREEN, decreasing_fillcolor=RED,
+            name="Price", showlegend=False,
+        ))
+        fig.update_layout(xaxis_rangeslider_visible=False)
+
+    elif view == "Price":
+        line_color = GREEN if end_pct >= 0 else RED
+        add(go.Scatter(x=x, y=close, mode="lines", line=dict(color=line_color, width=2),
+                       name="Price", showlegend=False))
+
+    elif view == "Area":
+        xs, above, below = split_traces(x, list(close.values), base)
+        flat = [base] * len(xs)
+        # Green fill above baseline.
+        add(go.Scatter(x=xs, y=flat, mode="lines", line=dict(width=0),
+                       hoverinfo="skip", showlegend=False))
+        add(go.Scatter(x=xs, y=above, mode="lines", line=dict(color=GREEN, width=2),
+                       fill="tonexty", fillcolor=GREEN_FILL, connectgaps=False,
+                       name="Above", showlegend=False))
+        # Red fill below baseline.
+        add(go.Scatter(x=xs, y=flat, mode="lines", line=dict(width=0),
+                       hoverinfo="skip", showlegend=False))
+        add(go.Scatter(x=xs, y=below, mode="lines", line=dict(color=RED, width=2),
+                       fill="tonexty", fillcolor=RED_FILL, connectgaps=False,
+                       name="Below", showlegend=False))
+
+    else:  # Performance
+        pct = (close / base - 1.0) * 100.0
+        xs, above, below = split_traces(x, list(pct.values), 0.0)
+        add(go.Scatter(x=xs, y=above, mode="lines", line=dict(color=GREEN, width=2),
+                       connectgaps=False, name="Above", showlegend=False))
+        add(go.Scatter(x=xs, y=below, mode="lines", line=dict(color=RED, width=2),
+                       connectgaps=False, name="Below", showlegend=False))
+        fig.add_hline(y=0, line=dict(color=NEUTRAL, width=1, dash="dot"))
+
+    # Return badge anchored at last point.
+    y_last = (
+        (float(close.iloc[-1]) / base - 1.0) * 100.0
+        if view == "Performance"
+        else float(close.iloc[-1])
+    )
+    _badge(fig, x[-1], y_last, end_pct)
+
+    if show_volume:
+        colors = [
+            GREEN if c >= o else RED
+            for o, c in zip(df["Open"], df["Close"])
+        ]
+        fig.add_trace(
+            go.Bar(x=x, y=df["Volume"], marker_color=colors, name="Volume",
+                   showlegend=False, opacity=0.5),
+            row=2, col=1,
+        )
+        fig.update_yaxes(title_text="Vol", row=2, col=1, showgrid=False)
+
+    fig.update_layout(
+        template="plotly_dark",
+        height=height,
+        title=title,
+        margin=dict(l=10, r=70, t=40 if title else 20, b=10),
+        hovermode="x unified",
+        showlegend=False,
+        xaxis=dict(showgrid=False),
+    )
+    return fig
+
+
+def render_sparkline(df: pd.DataFrame, baseline_price: float | None = None,
+                     height: int = 60) -> go.Figure:
+    """Small green/red split sparkline for the Market Pulse grid cards."""
+    fig = go.Figure()
+    if df is None or df.empty or "Close" not in df.columns:
+        fig.update_layout(template="plotly_dark", height=height,
+                          margin=dict(l=0, r=0, t=0, b=0),
+                          xaxis=dict(visible=False), yaxis=dict(visible=False))
+        return fig
+
+    close = df["Close"].dropna().astype(float)
+    x = list(range(len(close)))
+    base = float(baseline_price) if baseline_price is not None else float(close.iloc[0])
+    xs, above, below = split_traces(x, list(close.values), base)
+    fig.add_trace(go.Scatter(x=xs, y=above, mode="lines",
+                             line=dict(color=GREEN, width=1.6), connectgaps=False))
+    fig.add_trace(go.Scatter(x=xs, y=below, mode="lines",
+                             line=dict(color=RED, width=1.6), connectgaps=False))
+    fig.update_layout(
+        template="plotly_dark", height=height,
+        margin=dict(l=0, r=0, t=0, b=0), showlegend=False,
+        xaxis=dict(visible=False), yaxis=dict(visible=False),
+        paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
+    )
+    return fig
