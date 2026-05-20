@@ -13,14 +13,37 @@ import pandas as pd
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 
-GREEN = "#22c55e"
-RED = "#ef4444"
-GREEN_FILL = "rgba(34, 197, 94, 0.18)"
-RED_FILL = "rgba(239, 68, 68, 0.18)"
-NEUTRAL = "#9ca3af"
+GREEN = "#19d27c"
+RED = "#ff453a"
+GREEN_FILL = "rgba(25, 210, 124, 0.16)"
+RED_FILL = "rgba(255, 69, 58, 0.16)"
+AMBER = "#ffae00"
+NEUTRAL = "#8a8f99"
 VOLUME_COLOR = "rgba(120, 130, 150, 0.45)"
 
+# Terminal look.
+BG = "#0a0b0d"
+GRID = "#1b1e26"
+FONT_FAMILY = "JetBrains Mono, Menlo, Consolas, monospace"
+FONT_COLOR = "#cdd1d8"
+
 VIEWS = ("Performance", "Price", "Candlestick", "Area")
+
+
+def _apply_terminal_layout(fig, height: int, title: str = "") -> None:
+    fig.update_layout(
+        template="plotly_dark",
+        height=height,
+        title=title,
+        margin=dict(l=10, r=70, t=40 if title else 18, b=10),
+        hovermode="x unified",
+        showlegend=False,
+        paper_bgcolor=BG,
+        plot_bgcolor=BG,
+        font=dict(family=FONT_FAMILY, color=FONT_COLOR, size=13),
+    )
+    fig.update_xaxes(showgrid=False, zeroline=False, linecolor=GRID)
+    fig.update_yaxes(showgrid=True, gridcolor=GRID, zeroline=False)
 
 
 def _interp_x(x0, x1, y0, y1, baseline):
@@ -85,6 +108,8 @@ def _empty_fig(message: str, height: int) -> go.Figure:
                        font=dict(color=NEUTRAL, size=15))
     fig.update_layout(template="plotly_dark", height=height,
                       margin=dict(l=10, r=10, t=30, b=10),
+                      paper_bgcolor=BG, plot_bgcolor=BG,
+                      font=dict(family=FONT_FAMILY, color=FONT_COLOR),
                       xaxis=dict(visible=False), yaxis=dict(visible=False))
     return fig
 
@@ -190,15 +215,7 @@ def render_price_chart(
         )
         fig.update_yaxes(title_text="Vol", row=2, col=1, showgrid=False)
 
-    fig.update_layout(
-        template="plotly_dark",
-        height=height,
-        title=title,
-        margin=dict(l=10, r=70, t=40 if title else 20, b=10),
-        hovermode="x unified",
-        showlegend=False,
-        xaxis=dict(showgrid=False),
-    )
+    _apply_terminal_layout(fig, height, title)
     return fig
 
 

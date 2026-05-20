@@ -11,35 +11,57 @@ import pandas as pd
 import streamlit as st
 import yfinance as yf
 
-# Real indices / asset tickers (NOT ETFs) used across the dashboard.
-# Order is the display order for the Market Pulse grid.
+# Real indices / asset tickers used across the dashboard. India-first, with
+# commodities and a couple of global benchmarks for context. Order is the
+# display order for the Market Pulse grid.
 INDEX_TICKERS: dict[str, str] = {
-    "^GSPC": "S&P 500",
-    "^NDX": "Nasdaq 100",
-    "^DJI": "Dow Jones",
-    "^RUT": "Russell 2000",
-    "^VIX": "Volatility (VIX)",
-    "^TNX": "10Y Treasury Yield",
+    "^NSEI": "NIFTY 50",
+    "^BSESN": "SENSEX",
+    "^NSEBANK": "NIFTY Bank",
+    "^CNXIT": "NIFTY IT",
+    "^INDIAVIX": "India VIX",
+    "INR=X": "USD / INR",
     "GC=F": "Gold",
+    "SI=F": "Silver",
     "CL=F": "Crude Oil (WTI)",
+    "BZ=F": "Brent Crude",
+    "^GSPC": "S&P 500",
     "BTC-USD": "Bitcoin",
-    "DX-Y.NYB": "US Dollar (DXY)",
 }
 
-# The 11 SPDR sector ETFs for the sector heatmap.
-SECTOR_ETFS: dict[str, str] = {
-    "XLK": "Technology",
-    "XLF": "Financials",
-    "XLV": "Health Care",
-    "XLE": "Energy",
-    "XLI": "Industrials",
-    "XLY": "Consumer Discretionary",
-    "XLP": "Consumer Staples",
-    "XLU": "Utilities",
-    "XLRE": "Real Estate",
-    "XLB": "Materials",
-    "XLC": "Communication Services",
+# The primary index whose big chart anchors Market Pulse and the landing page.
+PRIMARY_INDEX = "^NSEI"
+
+# NSE sector indices for the sector heatmap.
+SECTORS: dict[str, str] = {
+    "^CNXIT": "IT",
+    "^NSEBANK": "Bank",
+    "^CNXAUTO": "Auto",
+    "^CNXPHARMA": "Pharma",
+    "^CNXFMCG": "FMCG",
+    "^CNXMETAL": "Metal",
+    "^CNXREALTY": "Realty",
+    "^CNXENERGY": "Energy",
+    "^CNXMEDIA": "Media",
+    "^CNXPSUBANK": "PSU Bank",
+    "^CNXINFRA": "Infrastructure",
 }
+
+# NIFTY 50 constituents (Yahoo .NS symbols) used to derive market movers, since
+# yfinance's predefined screeners only cover US markets.
+NIFTY50 = [
+    "RELIANCE.NS", "TCS.NS", "HDFCBANK.NS", "ICICIBANK.NS", "INFY.NS",
+    "HINDUNILVR.NS", "ITC.NS", "SBIN.NS", "BHARTIARTL.NS", "KOTAKBANK.NS",
+    "LT.NS", "BAJFINANCE.NS", "AXISBANK.NS", "ASIANPAINT.NS", "MARUTI.NS",
+    "HCLTECH.NS", "SUNPHARMA.NS", "TITAN.NS", "ULTRACEMCO.NS", "WIPRO.NS",
+    "NESTLEIND.NS", "ONGC.NS", "NTPC.NS", "POWERGRID.NS", "M&M.NS",
+    "TATAMOTORS.NS", "TATASTEEL.NS", "JSWSTEEL.NS", "ADANIENT.NS", "ADANIPORTS.NS",
+    "COALINDIA.NS", "BAJAJFINSV.NS", "GRASIM.NS", "HINDALCO.NS", "BRITANNIA.NS",
+    "CIPLA.NS", "DRREDDY.NS", "EICHERMOT.NS", "HEROMOTOCO.NS", "BPCL.NS",
+    "TATACONSUM.NS", "APOLLOHOSP.NS", "INDUSINDBK.NS", "BAJAJ-AUTO.NS",
+    "SBILIFE.NS", "HDFCLIFE.NS", "TECHM.NS", "LTIM.NS", "SHRIRAMFIN.NS",
+    "TRENT.NS",
+]
 
 # Period label -> yfinance fetch parameters.
 # Either "period" (native yfinance period) or "days" (computed start date).
@@ -139,7 +161,7 @@ def get_quote(ticker: str) -> dict:
     """
     t = yf.Ticker(ticker)
     price = prev_close = None
-    name = INDEX_TICKERS.get(ticker) or SECTOR_ETFS.get(ticker) or ticker
+    name = INDEX_TICKERS.get(ticker) or SECTORS.get(ticker) or ticker
     currency = "USD"
     try:
         fi = t.fast_info
@@ -183,8 +205,8 @@ def _display_name(ticker: str, fallback: str) -> str:
     """Best-effort human name without a slow .info call when avoidable."""
     if ticker in INDEX_TICKERS:
         return INDEX_TICKERS[ticker]
-    if ticker in SECTOR_ETFS:
-        return SECTOR_ETFS[ticker]
+    if ticker in SECTORS:
+        return SECTORS[ticker]
     try:
         info = yf.Ticker(ticker).info
         return info.get("shortName") or info.get("longName") or fallback
@@ -223,7 +245,7 @@ def get_quotes_bulk(tickers: tuple[str, ...]) -> dict[str, dict]:
             change_pct = change / prev_close * 100.0
         out[t] = {
             "symbol": t,
-            "name": INDEX_TICKERS.get(t) or SECTOR_ETFS.get(t) or t,
+            "name": INDEX_TICKERS.get(t) or SECTORS.get(t) or t,
             "price": price,
             "prev_close": prev_close,
             "change": change,
@@ -236,7 +258,7 @@ def get_quotes_bulk(tickers: tuple[str, ...]) -> dict[str, dict]:
 @st.cache_data(ttl=600, show_spinner=False)
 def is_etf(ticker: str) -> bool:
     """Heuristic check whether a ticker is an ETF."""
-    if ticker in SECTOR_ETFS:
+    if ticker in SECTORS:
         return True
     try:
         info = yf.Ticker(ticker).info
@@ -368,33 +390,58 @@ def get_etf_details(ticker: str) -> dict:
     }
 
 
-@st.cache_data(ttl=60, show_spinner=False)
-def get_movers(kind: str = "gainers", count: int = 10) -> list[dict]:
-    """Return market movers via yfinance's predefined screeners.
-
-    kind: 'gainers' | 'losers' | 'actives'. Returns a list of quote dicts.
-    """
-    screener_map = {
-        "gainers": "day_gainers",
-        "losers": "day_losers",
-        "actives": "most_actives",
-    }
-    key = screener_map.get(kind, "day_gainers")
+@st.cache_data(ttl=120, show_spinner=False)
+def _universe_quotes(universe: tuple[str, ...]) -> list[dict]:
+    """Bulk daily quotes for a universe, with price/change and volume."""
     rows: list[dict] = []
     try:
-        res = yf.screen(key, count=count)
-        quotes = (res or {}).get("quotes", [])
-        for q in quotes[:count]:
-            rows.append(
-                {
-                    "symbol": q.get("symbol"),
-                    "name": q.get("shortName") or q.get("longName") or q.get("symbol"),
-                    "price": q.get("regularMarketPrice"),
-                    "change": q.get("regularMarketChange"),
-                    "change_pct": q.get("regularMarketChangePercent"),
-                    "volume": q.get("regularMarketVolume"),
-                }
-            )
+        data = yf.download(
+            list(universe), period="5d", interval="1d", group_by="ticker",
+            auto_adjust=False, threads=True, progress=False,
+        )
     except Exception:
-        return []
+        data = None
+    if data is None or data.empty:
+        return rows
+
+    for t in universe:
+        try:
+            sub = data[t] if isinstance(data.columns, pd.MultiIndex) else data
+            closes = sub["Close"].dropna()
+            vols = sub["Volume"].dropna() if "Volume" in sub else None
+            if len(closes) < 2:
+                continue
+            price = float(closes.iloc[-1])
+            prev = float(closes.iloc[-2])
+            volume = float(vols.iloc[-1]) if vols is not None and len(vols) else None
+            rows.append({
+                "symbol": t,
+                "name": t.replace(".NS", "").replace("-", " ").title(),
+                "price": price,
+                "change": price - prev,
+                "change_pct": (price - prev) / prev * 100 if prev else None,
+                "volume": volume,
+                "turnover": (volume or 0) * price,
+            })
+        except Exception:
+            continue
     return rows
+
+
+def get_movers(kind: str = "gainers", count: int = 8,
+               universe: tuple[str, ...] | None = None) -> list[dict]:
+    """Return market movers computed from a ticker universe (default NIFTY 50).
+
+    kind: 'gainers' | 'losers' | 'actives' (actives ranked by traded turnover).
+    """
+    rows = _universe_quotes(universe or tuple(NIFTY50))
+    rows = [r for r in rows if r.get("change_pct") is not None]
+    if not rows:
+        return []
+    if kind == "gainers":
+        rows.sort(key=lambda r: r["change_pct"], reverse=True)
+    elif kind == "losers":
+        rows.sort(key=lambda r: r["change_pct"])
+    else:  # actives
+        rows.sort(key=lambda r: r.get("turnover") or 0, reverse=True)
+    return rows[:count]

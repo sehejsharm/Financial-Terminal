@@ -17,6 +17,7 @@ from lib.signals import (
     compute_technical_score,
 )
 from lib.ui import (
+    cur_symbol,
     disclosure,
     fmt_num,
     fmt_pct,
@@ -26,12 +27,12 @@ from lib.ui import (
     setup_page,
 )
 
-setup_page("Stock Analyzer", "🔍")
-st.title("🔍 Stock Analyzer")
+setup_page("Stock Analyzer")
+st.title("Stock Analyzer")
 
 c1, c2 = st.columns([2, 3])
 with c1:
-    ticker = st.text_input("Ticker", value="AAPL").strip().upper()
+    ticker = st.text_input("Ticker", value="RELIANCE.NS").strip().upper()
 with c2:
     period = st.segmented_control("Period", PERIOD_LABELS, default="1Y",
                                   key="sa_period") or "1Y"
@@ -50,6 +51,7 @@ if (f.get("price") is None and quote.get("price") is None and hist.empty):
     st.stop()
 
 price = f.get("price") or quote.get("price")
+cur = cur_symbol(f.get("currency") or quote.get("currency"))
 
 # ---- Header -------------------------------------------------------------
 h1, h2 = st.columns([1, 6])
@@ -60,9 +62,9 @@ with h2:
                 f"**{ticker}** · {f.get('sector') or '—'} / {f.get('industry') or '—'}")
 
 m1, m2, m3, m4 = st.columns(4)
-m1.metric("Price", fmt_num(price, 2),
+m1.metric("Price", f"{cur}{fmt_num(price, 2)}",
           delta=fmt_pct(quote.get("change_pct")) if quote.get("change_pct") else None)
-m2.metric("Market cap", human_number(f.get("market_cap")))
+m2.metric("Market cap", human_number(f.get("market_cap"), cur))
 m3.metric("Trailing P/E", fmt_num(f.get("trailing_pe"), 1))
 m4.metric("Beta", fmt_num(f.get("beta"), 2))
 
@@ -132,9 +134,9 @@ with k1:
         ("Price/Sales", fmt_num(f.get("price_to_sales"), 2)),
     ])
     stat_block("Income", [
-        ("Revenue", human_number(f.get("revenue"), "$")),
-        ("EBITDA", human_number(f.get("ebitda"), "$")),
-        ("Free cash flow", human_number(f.get("free_cashflow"), "$")),
+        ("Revenue", human_number(f.get("revenue"), cur)),
+        ("EBITDA", human_number(f.get("ebitda"), cur)),
+        ("Free cash flow", human_number(f.get("free_cashflow"), cur)),
         ("EPS (TTM)", fmt_num(f.get("eps_trailing"), 2)),
     ])
 with k2:

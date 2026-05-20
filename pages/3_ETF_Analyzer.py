@@ -9,6 +9,7 @@ from lib.market_data import PERIOD_LABELS, get_etf_details, get_history, get_quo
 from lib.risk import etf_risk_score
 from lib.ui import (
     color_pct_html,
+    cur_symbol,
     disclosure,
     fmt_num,
     fmt_pct,
@@ -17,8 +18,8 @@ from lib.ui import (
     setup_page,
 )
 
-setup_page("ETF Analyzer", "🧺")
-st.title("🧺 ETF Analyzer")
+setup_page("ETF Analyzer")
+st.title("ETF Analyzer")
 
 
 def er_to_pct(er):
@@ -32,7 +33,7 @@ def er_to_pct(er):
 
 c1, c2 = st.columns([2, 3])
 with c1:
-    ticker = st.text_input("ETF ticker", value="SPY").strip().upper()
+    ticker = st.text_input("ETF ticker", value="NIFTYBEES.NS").strip().upper()
 with c2:
     period = st.segmented_control("Period", PERIOD_LABELS, default="1Y",
                                   key="etf_period") or "1Y"
@@ -53,12 +54,13 @@ if hist.empty and quote.get("price") is None:
 st.markdown(f"### {details.get('name', ticker)}  \n**{ticker}** · "
             f"{details.get('category') or 'ETF'}")
 
+cur = cur_symbol(quote.get("currency"))
 m1, m2, m3, m4 = st.columns(4)
-m1.metric("Price", fmt_num(quote.get("price"), 2),
+m1.metric("Price", f"{cur}{fmt_num(quote.get('price'), 2)}",
           delta=fmt_pct(quote.get("change_pct")) if quote.get("change_pct") else None)
 m2.metric("Expense ratio", f"{er_to_pct(details.get('expense_ratio')):.2f}%"
           if er_to_pct(details.get("expense_ratio")) is not None else "—")
-m3.metric("Total assets", human_number(details.get("total_assets"), "$"))
+m3.metric("Total assets", human_number(details.get("total_assets"), cur))
 m4.metric("Yield", fmt_pct((details.get("yield") or 0) * 100)
           if details.get("yield") is not None else "—")
 
@@ -113,10 +115,12 @@ if sectors:
     items = sorted(sectors.items(), key=lambda kv: kv[1], reverse=True)
     fig = go.Figure(go.Bar(
         x=[v * 100 for _, v in items], y=[k for k, _ in items],
-        orientation="h", marker_color="#60a5fa",
+        orientation="h", marker_color="#ffae00",
         text=[f"{v * 100:.1f}%" for _, v in items], textposition="outside",
     ))
     fig.update_layout(template="plotly_dark", height=360,
+                      paper_bgcolor="#0a0b0d", plot_bgcolor="#0a0b0d",
+                      font=dict(family="JetBrains Mono, monospace", color="#cdd1d8"),
                       margin=dict(l=10, r=40, t=10, b=10),
                       yaxis=dict(autorange="reversed"), xaxis_title="Weight %")
     st.plotly_chart(fig, use_container_width=True)
@@ -165,7 +169,7 @@ if len(peers) > 1:
               '<span style="flex:0 0 110px;text-align:right;">Assets</span></div>')
     body = []
     for r in peer_rows:
-        mark = " ◀" if r["ticker"] == ticker else ""
+        mark = " (current)" if r["ticker"] == ticker else ""
         er_txt = f"{r['er']:.2f}%" if r["er"] is not None else "—"
         body.append(
             f'<div class="sma-row"><span style="flex:0 0 70px;" class="tk">{r["ticker"]}{mark}</span>'
@@ -185,7 +189,7 @@ if len(peers) > 1:
         bps = (current_er - best["er"]) * 100  # percentage points -> basis points
         dollars = (current_er - best["er"]) / 100 * 100_000
         st.info(
-            f"💡 **{best['ticker']}** has a lower expense ratio than **{ticker}** "
+            f"**{best['ticker']}** has a lower expense ratio than **{ticker}** "
             f"({best['er']:.2f}% vs {current_er:.2f}%) — about **{bps:.0f} bps** "
             f"cheaper, or roughly **${dollars:,.0f}/yr** on a $100K position. "
             "Funds may differ in holdings, tracking, and tax treatment; this is "

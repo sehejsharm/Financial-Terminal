@@ -128,7 +128,7 @@ def market_news(limit: int = 10) -> list[dict]:
     """Aggregated market headlines from a few broad tickers + RSS fallback."""
     out: list[dict] = []
     seen: set[str] = set()
-    for proxy in ("SPY", "^GSPC", "QQQ"):
+    for proxy in ("^NSEI", "RELIANCE.NS", "^GSPC"):
         try:
             raw = yf.Ticker(proxy).news or []
         except Exception:
@@ -141,7 +141,7 @@ def market_news(limit: int = 10) -> list[dict]:
 
     if len(out) < limit:
         for it in _parse_rss(
-            "https://feeds.finance.yahoo.com/rss/2.0/headline?s=^GSPC&region=US&lang=en-US",
+            "https://feeds.finance.yahoo.com/rss/2.0/headline?s=^NSEI&region=IN&lang=en-IN",
             limit,
         ):
             if it["title"] not in seen:

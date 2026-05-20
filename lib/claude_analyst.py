@@ -104,7 +104,7 @@ def deep_analysis(ticker: str, fundamentals: dict, technical: dict | None = None
 def macro_pulse_check(indicators: list[dict], yield_curve_note: str = "") -> str:
     data = _fmt({"indicators": indicators, "yield_curve": yield_curve_note})
     prompt = (
-        "Given these latest US macroeconomic indicators, write an educational "
+        "Given these latest macroeconomic indicators, write an educational "
         "'macro pulse-check' explaining what the current readings suggest about "
         "the economy's state (growth, inflation, labor, rates).\n\n"
         f"Data: {data}\n\n"
@@ -113,16 +113,3 @@ def macro_pulse_check(indicators: list[dict], yield_curve_note: str = "") -> str
         "Educational only; no market-timing or investment advice."
     )
     return _call(prompt)
-
-
-def portfolio_analysis(summary: dict) -> str:
-    prompt = (
-        "Provide an educational review of this personal portfolio's "
-        "characteristics (diversification, concentration, sector tilts, risk "
-        "profile). Help the reader understand the composition.\n\n"
-        f"Portfolio summary: {_fmt(summary)}\n\n"
-        "Structure: '## Composition', '## Concentration & diversification', "
-        "'## Risk characteristics', '## Questions to consider'. Frame the last "
-        "section as educational questions, not advice. No buy/sell guidance."
-    )
-    return _call(prompt, max_tokens=1800)

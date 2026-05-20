@@ -4,8 +4,8 @@ import streamlit as st
 from lib.news import market_news, ticker_news, time_ago
 from lib.ui import disclosure, setup_page
 
-setup_page("News", "📰")
-st.title("📰 News")
+setup_page("News")
+st.title("News")
 
 
 def render_news(items: list[dict]):
@@ -28,7 +28,7 @@ with tab_market:
     render_news(market_news(limit=20))
 
 with tab_ticker:
-    tk = st.text_input("Ticker", value="AAPL").strip().upper()
+    tk = st.text_input("Ticker", value="RELIANCE.NS").strip().upper()
     if tk:
         render_news(ticker_news(tk, limit=15))
 

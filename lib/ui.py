@@ -7,50 +7,91 @@ import streamlit as st
 from lib.config import APP_NAME, DISCLOSURE, SIDEBAR_BRAND
 
 _TONE_COLORS = {
-    "positive": "#22c55e",
-    "neutral": "#9ca3af",
-    "caution": "#f59e0b",
+    "positive": "#19d27c",
+    "neutral": "#8a8f99",
+    "caution": "#ffae00",
 }
 
+_CURRENCY_SYMBOLS = {
+    "INR": "₹", "USD": "$", "EUR": "€", "GBP": "£",
+    "JPY": "¥", "CNY": "¥", "HKD": "HK$", "AUD": "A$",
+    "CAD": "C$", "SGD": "S$",
+}
+
+# Bloomberg-style terminal theme: near-black, amber accents, monospace numerals.
 _CSS = """
 <style>
-  .block-container { padding-top: 2.2rem; max-width: 1300px; }
-  section.main, .stMarkdown, .stMetric, p, li, span { font-size: 17px; }
-  [data-testid="stSidebar"] { font-size: 16px; }
-  .sma-brand { font-size: 22px; font-weight: 800; padding: 4px 0 12px 0; }
+  :root { --amber:#ffae00; --bg:#0a0b0d; --panel:#101218; --line:#1f232c;
+          --txt:#cdd1d8; --mut:#7d828c; --green:#19d27c; --red:#ff453a; }
+  html, body, [data-testid="stAppViewContainer"], [data-testid="stHeader"] {
+    background:var(--bg) !important;
+  }
+  .block-container { padding-top: 1.4rem; max-width: 1500px; }
+  section.main, .stMarkdown, p, li, span, label, .stMetric {
+    font-family: "JetBrains Mono","Menlo","Consolas",monospace;
+  }
+  section.main, .stMarkdown, p, li { font-size: 15px; color:var(--txt); }
+  h1, h2, h3 { font-family:"JetBrains Mono",monospace !important;
+    letter-spacing:0.06em; text-transform:uppercase; }
+  h1 { font-size: 26px !important; color:#fff; border-bottom:2px solid var(--amber);
+    padding-bottom:8px; }
+  h2, h3 { color:var(--amber) !important; font-size:16px !important; }
+  [data-testid="stSidebar"] { background:#070809; border-right:1px solid var(--line); }
+  [data-testid="stMetricValue"] { font-family:"JetBrains Mono",monospace; }
+  [data-testid="stMetric"] {
+    background:var(--panel); border:1px solid var(--line); border-radius:4px;
+    padding:8px 12px;
+  }
+  .sma-brand { font-size: 18px; font-weight: 800; letter-spacing:0.18em;
+    color:var(--amber); padding: 6px 0 2px 0; border-bottom:1px solid var(--line); }
+  .sma-tag { color:var(--mut); font-size:11px; letter-spacing:0.15em;
+    text-transform:uppercase; margin-bottom:10px; }
+  .sma-card {
+    background:var(--panel); border:1px solid var(--line); border-radius:4px;
+    padding:10px 12px; height:100%;
+  }
+  .sma-card .nm { color:var(--mut); font-size:11px; letter-spacing:0.08em;
+    text-transform:uppercase; }
+  .sma-card .px { font-size:18px; font-weight:700; color:#fff; }
   .sma-chip {
     display:flex; justify-content:space-between; align-items:center;
-    padding:8px 12px; margin:6px 0; border-radius:10px;
-    background:#161a26; border-left:4px solid #9ca3af;
+    padding:7px 11px; margin:5px 0; border-radius:3px;
+    background:var(--panel); border-left:3px solid var(--mut);
+    border-top:1px solid var(--line); border-right:1px solid var(--line);
+    border-bottom:1px solid var(--line);
   }
-  .sma-chip .lab { color:#94a3b8; font-size:14px; }
-  .sma-chip .val { font-weight:700; font-size:15px; }
+  .sma-chip .lab { color:var(--mut); font-size:12px; letter-spacing:0.05em;
+    text-transform:uppercase; }
+  .sma-chip .val { font-weight:700; font-size:14px; }
   .sma-news {
-    padding:12px 14px; margin:8px 0; border-radius:10px; background:#141822;
-    border:1px solid #232838;
+    padding:11px 13px; margin:7px 0; border-radius:3px; background:var(--panel);
+    border:1px solid var(--line); border-left:3px solid var(--amber);
   }
-  .sma-news a { color:#e5e7eb; text-decoration:none; font-weight:700; font-size:16px; }
-  .sma-news .meta { color:#7c8699; font-size:13px; margin:4px 0; }
-  .sma-news .sum { color:#aab2c0; font-size:14px; }
+  .sma-news a { color:#fff; text-decoration:none; font-weight:700; font-size:15px; }
+  .sma-news .meta { color:var(--amber); font-size:11px; margin:4px 0;
+    letter-spacing:0.05em; text-transform:uppercase; }
+  .sma-news .sum { color:var(--mut); font-size:13px; }
   .sma-row {
-    display:flex; align-items:center; gap:10px; padding:8px 6px;
-    border-bottom:1px solid #20242f;
+    display:flex; align-items:center; gap:10px; padding:7px 6px;
+    border-bottom:1px solid var(--line);
   }
-  .sma-row .nm { color:#cbd5e1; }
-  .sma-row .tk { font-weight:700; }
+  .sma-row .nm { color:var(--txt); }
+  .sma-row .tk { font-weight:700; color:#fff; }
+  hr { border-color:var(--line); }
 </style>
 """
 
 
-def setup_page(page_title: str, page_icon: str = "📈") -> None:
+def setup_page(page_title: str, page_icon: str = None) -> None:
     """Standard page config + global styling + sidebar branding."""
-    st.set_page_config(page_title=f"{page_title} · {APP_NAME}",
+    st.set_page_config(page_title=f"{page_title} - {APP_NAME}",
                        page_icon=page_icon, layout="wide")
     st.markdown(_CSS, unsafe_allow_html=True)
     with st.sidebar:
         st.markdown(f'<div class="sma-brand">{SIDEBAR_BRAND}</div>',
                     unsafe_allow_html=True)
-        st.caption("Educational & personal-research dashboard")
+        st.markdown('<div class="sma-tag">India + Global · Educational</div>',
+                    unsafe_allow_html=True)
 
 
 def disclosure() -> None:
@@ -89,6 +130,13 @@ def fmt_num(v: float | None, digits: int = 2, suffix: str = "") -> str:
         return "—"
 
 
+def cur_symbol(code: str | None) -> str:
+    """Return a currency symbol for a 3-letter code (default empty)."""
+    if not code:
+        return ""
+    return _CURRENCY_SYMBOLS.get(code.upper(), "")
+
+
 def _gauge(value: float, title: str, subtitle: str, steps: list[tuple]) -> go.Figure:
     value = max(0.0, min(100.0, float(value)))
     fig = go.Figure(go.Indicator(
@@ -112,6 +160,7 @@ def _gauge(value: float, title: str, subtitle: str, steps: list[tuple]) -> go.Fi
         template="plotly_dark", height=240,
         margin=dict(l=20, r=20, t=50, b=10),
         paper_bgcolor="rgba(0,0,0,0)",
+        font=dict(family="JetBrains Mono, Consolas, monospace", color="#cdd1d8"),
     )
     if subtitle:
         fig.add_annotation(text=subtitle, x=0.5, y=-0.05, showarrow=False,
@@ -149,5 +198,5 @@ def render_chips(chips: list[dict]) -> None:
 def color_pct_html(v: float | None, digits: int = 2) -> str:
     if v is None:
         return '<span style="color:#9ca3af;">—</span>'
-    color = "#22c55e" if v >= 0 else "#ef4444"
+    color = "#19d27c" if v >= 0 else "#ff453a"
     return f'<span style="color:{color};font-weight:700;">{v:+.{digits}f}%</span>'

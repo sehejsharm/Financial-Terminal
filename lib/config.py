@@ -6,8 +6,8 @@ from dotenv import load_dotenv
 # Load environment variables from .env at import time.
 load_dotenv()
 
-APP_NAME = "Stock Market Analyst"
-SIDEBAR_BRAND = "📈 Market Analyst"
+APP_NAME = "Market Analyst Terminal"
+SIDEBAR_BRAND = "MARKET ANALYST"
 
 # Shown on every page footer. Non-negotiable compliance text.
 DISCLOSURE = (

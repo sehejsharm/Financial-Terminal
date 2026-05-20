@@ -8,8 +8,8 @@ from lib.macro import get_dashboard
 from lib.rates import get_yield_curve
 from lib.ui import disclosure, fmt_num, setup_page
 
-setup_page("Macro", "🌍")
-st.title("🌍 Macro")
+setup_page("Macro")
+st.title("Macro")
 
 if not get_fred_key():
     st.warning(
@@ -44,10 +44,12 @@ if curve.empty:
 else:
     fig = go.Figure(go.Scatter(
         x=curve["maturity"], y=curve["yield"], mode="lines+markers",
-        line=dict(color="#60a5fa", width=2.5), marker=dict(size=8),
+        line=dict(color="#ffae00", width=2.5), marker=dict(size=8),
         text=[f"{y:.2f}%" for y in curve["yield"]],
     ))
     fig.update_layout(template="plotly_dark", height=380,
+                      paper_bgcolor="#0a0b0d", plot_bgcolor="#0a0b0d",
+                      font=dict(family="JetBrains Mono, monospace", color="#cdd1d8"),
                       margin=dict(l=10, r=10, t=10, b=10),
                       xaxis_title="Maturity", yaxis_title="Yield %")
     st.plotly_chart(fig, use_container_width=True)

@@ -1,7 +1,9 @@
-# 📈 Stock Market Analyst
+# Market Analyst Terminal
 
-A personal, **educational** stock-market dashboard. It is for personal research
-and learning only — it does **not** give buy/sell advice.
+A personal, **educational** markets terminal centered on **Indian markets**
+(NIFTY, SENSEX, Bank Nifty, NSE sectors, gold/silver/crude) with global context
+and an "add any security" watchlist. For personal research and learning only —
+it does **not** give buy/sell advice.
 
 You have two ways to use it. Pick one.
 
@@ -61,11 +63,11 @@ are never uploaded or shared.
 
 ## What's inside
 
-- **Market Pulse** — indices, sectors, top movers, headlines
+- **Market Pulse** — NIFTY/SENSEX/sector indices, commodities, NIFTY-50 movers,
+  headlines, plus an "add any security" watchlist for any world ticker
 - **Stock Analyzer** — company snapshot, quality gauges, key stats, AI analysis
 - **ETF Analyzer** — risk, holdings, sector mix, cheaper-fund finder
 - **Macro** — economic indicators and the yield curve
-- **Portfolio** — track your holdings, returns, allocation, and risk
 - **News** — market and per-company headlines
 
 ---
