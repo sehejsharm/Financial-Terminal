@@ -1,8 +1,9 @@
-streamlit==1.40.2
-yfinance==0.2.50
-plotly==5.24.1
-pandas==2.2.3
-fredapi==0.5.2
-python-dotenv==1.0.1
-anthropic==0.40.0
-requests==2.32.3
+streamlit>=1.40
+yfinance>=0.2.51
+plotly>=5.24
+pandas>=2.2.3
+numpy>=1.26
+fredapi>=0.5.2
+python-dotenv>=1.0.1
+anthropic>=0.40
+requests>=2.32

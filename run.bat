@@ -17,11 +17,11 @@ if not exist .venv (
 )
 
 echo Installing/updating components (can take a minute the first time)...
-.venv\Scripts\python -m pip install --quiet --upgrade pip
-.venv\Scripts\pip install --quiet -r requirements.txt
+.venv\Scripts\python -m pip install --quiet --upgrade pip setuptools wheel
+.venv\Scripts\python -m pip install --quiet --prefer-binary -r requirements.txt
 
 if not exist .env if exist .env.example copy .env.example .env >nul
 
 echo Starting Stock Market Analyst... your browser will open shortly.
-.venv\Scripts\streamlit run app.py
+.venv\Scripts\python -m streamlit run app.py
 pause

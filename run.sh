@@ -16,8 +16,8 @@ if [ ! -d .venv ]; then
 fi
 
 echo "Installing/updating components (can take a minute the first time)..."
-.venv/bin/pip install --quiet --upgrade pip
-.venv/bin/pip install --quiet -r requirements.txt
+.venv/bin/python -m pip install --quiet --upgrade pip setuptools wheel
+.venv/bin/python -m pip install --quiet --prefer-binary -r requirements.txt
 
 if [ ! -f .env ] && [ -f .env.example ]; then
   cp .env.example .env
@@ -25,4 +25,4 @@ if [ ! -f .env ] && [ -f .env.example ]; then
 fi
 
 echo "Starting Stock Market Analyst... your browser will open shortly."
-.venv/bin/streamlit run app.py
+.venv/bin/python -m streamlit run app.py
