@@ -114,6 +114,9 @@ def _empty_fig(message: str, height: int) -> go.Figure:
     return fig
 
 
+MA_COLORS = ["#ffb000", "#22d3ee", "#e879f9", "#a3e635", "#fb923c"]
+
+
 def render_price_chart(
     df: pd.DataFrame,
     view: str = "Performance",
@@ -121,12 +124,18 @@ def render_price_chart(
     title: str = "",
     show_volume: bool = False,
     height: int = 460,
+    mas: list[int] | None = None,
+    bollinger: bool = False,
 ) -> go.Figure:
     """Render a price chart in one of four views.
 
     baseline_price: optional reference price. For 1D intraday charts pass
     yesterday's close so the Performance/Area split and the return badge are
     measured against the prior close instead of the first intraday bar.
+
+    mas: simple moving-average windows to overlay (e.g. [20, 50, 200]).
+    bollinger: overlay 20-period Bollinger Bands (±2 standard deviations).
+    Overlays apply to Price/Candlestick/Area views (not Performance).
     """
     if df is None or df.empty or "Close" not in df.columns:
         return _empty_fig("No data available", height)
@@ -195,6 +204,27 @@ def render_price_chart(
                        connectgaps=False, name="Below", showlegend=False))
         fig.add_hline(y=0, line=dict(color=NEUTRAL, width=1, dash="dot"))
 
+    # Overlays (price-scale views only).
+    overlay_legend = False
+    if view != "Performance" and (mas or bollinger):
+        for i, w in enumerate(mas or []):
+            if len(close) >= w:
+                ma = close.rolling(w).mean()
+                add(go.Scatter(x=x, y=ma, mode="lines", name=f"SMA {w}",
+                               line=dict(color=MA_COLORS[i % len(MA_COLORS)], width=1.3),
+                               showlegend=True))
+                overlay_legend = True
+        if bollinger and len(close) >= 20:
+            mid = close.rolling(20).mean()
+            sd = close.rolling(20).std()
+            band = dict(color="rgba(150,160,175,0.6)", width=1, dash="dot")
+            add(go.Scatter(x=x, y=mid + 2 * sd, mode="lines", name="BB upper",
+                           line=band, showlegend=True))
+            add(go.Scatter(x=x, y=mid - 2 * sd, mode="lines", name="BB lower",
+                           line=band, fill="tonexty",
+                           fillcolor="rgba(150,160,175,0.06)", showlegend=False))
+            overlay_legend = True
+
     # Return badge anchored at last point.
     y_last = (
         (float(close.iloc[-1]) / base - 1.0) * 100.0
@@ -216,6 +246,11 @@ def render_price_chart(
         fig.update_yaxes(title_text="Vol", row=2, col=1, showgrid=False)
 
     _apply_terminal_layout(fig, height, title)
+    if overlay_legend:
+        fig.update_layout(showlegend=True,
+                          legend=dict(orientation="h", yanchor="bottom", y=1.0,
+                                      x=0, bgcolor="rgba(0,0,0,0)",
+                                      font=dict(size=11)))
     return fig
 
 

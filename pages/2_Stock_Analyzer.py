@@ -69,12 +69,21 @@ m3.metric("Trailing P/E", fmt_num(f.get("trailing_pe"), 1))
 m4.metric("Beta", fmt_num(f.get("beta"), 2))
 
 # ---- Big chart ----------------------------------------------------------
-view = st.segmented_control("View", ["Performance", "Price", "Candlestick", "Area"],
-                            default="Price", key="sa_view") or "Price"
+cv1, cv2, cv3 = st.columns([3, 3, 1])
+with cv1:
+    view = st.segmented_control(
+        "View", ["Performance", "Price", "Candlestick", "Area"],
+        default="Price", key="sa_view") or "Price"
+with cv2:
+    mas = st.multiselect("Moving averages", [20, 50, 100, 200],
+                         default=[50, 200], key="sa_mas",
+                         format_func=lambda w: f"SMA {w}")
+with cv3:
+    bb = st.toggle("Bollinger", value=False, key="sa_bb")
 baseline = quote.get("prev_close") if period == "1D" else None
 st.plotly_chart(
     render_price_chart(hist, view=view, baseline_price=baseline,
-                       show_volume=True, height=480),
+                       show_volume=True, height=480, mas=mas, bollinger=bb),
     use_container_width=True,
 )
 

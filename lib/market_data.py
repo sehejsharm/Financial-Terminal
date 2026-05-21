@@ -93,7 +93,7 @@ def _flatten_columns(df: pd.DataFrame) -> pd.DataFrame:
     return df
 
 
-@st.cache_data(ttl=300, show_spinner=False)
+@st.cache_data(ttl=120, show_spinner=False)
 def get_history(ticker: str, period: str) -> pd.DataFrame:
     """Return an OHLCV DataFrame for one ticker over the given period label.
 
@@ -120,7 +120,7 @@ def get_history(ticker: str, period: str) -> pd.DataFrame:
     return df.dropna(how="all")
 
 
-@st.cache_data(ttl=300, show_spinner=False)
+@st.cache_data(ttl=120, show_spinner=False)
 def get_history_bulk(tickers: tuple[str, ...], period: str) -> dict[str, pd.DataFrame]:
     """Fetch history for many tickers. Returns {ticker: DataFrame}."""
     out: dict[str, pd.DataFrame] = {}
@@ -153,7 +153,7 @@ def get_history_bulk(tickers: tuple[str, ...], period: str) -> dict[str, pd.Data
     return out
 
 
-@st.cache_data(ttl=60, show_spinner=False)
+@st.cache_data(ttl=15, show_spinner=False)
 def get_quote(ticker: str) -> dict:
     """Return a normalized quote dict for one ticker.
 
@@ -214,7 +214,7 @@ def _display_name(ticker: str, fallback: str) -> str:
         return fallback
 
 
-@st.cache_data(ttl=60, show_spinner=False)
+@st.cache_data(ttl=15, show_spinner=False)
 def get_quotes_bulk(tickers: tuple[str, ...]) -> dict[str, dict]:
     """Return {ticker: quote dict} for many tickers using a single bulk
     download for price/change, with light name resolution."""
@@ -390,7 +390,7 @@ def get_etf_details(ticker: str) -> dict:
     }
 
 
-@st.cache_data(ttl=120, show_spinner=False)
+@st.cache_data(ttl=45, show_spinner=False)
 def _universe_quotes(universe: tuple[str, ...]) -> list[dict]:
     """Bulk daily quotes for a universe, with price/change and volume."""
     rows: list[dict] = []

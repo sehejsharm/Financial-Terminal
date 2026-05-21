@@ -81,15 +81,22 @@ for start in range(0, len(grid_tickers), 4):
 
 # ---- Big primary index chart -------------------------------------------
 st.subheader("NIFTY 50")
-view = st.segmented_control(
-    "View", ["Performance", "Price", "Candlestick", "Area"],
-    default="Area", key="mp_view",
-)
+bcv1, bcv2, bcv3 = st.columns([3, 3, 1])
+with bcv1:
+    view = st.segmented_control(
+        "View", ["Performance", "Price", "Candlestick", "Area"],
+        default="Area", key="mp_view")
+with bcv2:
+    mp_mas = st.multiselect("Moving averages", [20, 50, 100, 200],
+                            default=[], key="mp_mas",
+                            format_func=lambda w: f"SMA {w}")
+with bcv3:
+    mp_bb = st.toggle("Bollinger", value=False, key="mp_bb")
 idx_hist = get_history(PRIMARY_INDEX, period)
 idx_baseline = quotes.get(PRIMARY_INDEX, {}).get("prev_close") if is_1d else None
 st.plotly_chart(
     render_price_chart(idx_hist, view=view or "Area", baseline_price=idx_baseline,
-                       height=440),
+                       height=440, mas=mp_mas, bollinger=mp_bb),
     use_container_width=True,
 )
 

@@ -1,10 +1,18 @@
 """Shared Streamlit UI helpers: page setup, formatting, gauges, chips."""
 from __future__ import annotations
 
+from datetime import datetime
+
 import plotly.graph_objects as go
 import streamlit as st
 
 from lib.config import APP_NAME, DISCLOSURE, SIDEBAR_BRAND
+
+try:
+    from streamlit_autorefresh import st_autorefresh
+    _HAS_AUTOREFRESH = True
+except Exception:  # pragma: no cover - optional dependency
+    _HAS_AUTOREFRESH = False
 
 _TONE_COLORS = {
     "positive": "#19d27c",
@@ -18,63 +26,89 @@ _CURRENCY_SYMBOLS = {
     "CAD": "C$", "SGD": "S$",
 }
 
-# Bloomberg-style terminal theme: near-black, amber accents, monospace numerals.
+# Sleek modern terminal theme: near-black, amber accents, monospace numerals,
+# subtle borders and hover glows.
 _CSS = """
 <style>
-  :root { --amber:#ffae00; --bg:#0a0b0d; --panel:#101218; --line:#1f232c;
-          --txt:#cdd1d8; --mut:#7d828c; --green:#19d27c; --red:#ff453a; }
-  html, body, [data-testid="stAppViewContainer"], [data-testid="stHeader"] {
-    background:var(--bg) !important;
+  :root { --amber:#ffb000; --bg:#070809; --bg2:#0c0e12; --panel:#0f1218;
+          --panel2:#12161d; --line:#1c2129; --line2:#262c36;
+          --txt:#dfe3ea; --mut:#767c88; --green:#1fd286; --red:#ff4d4f; }
+  html, body, [data-testid="stAppViewContainer"] {
+    background:
+      radial-gradient(1200px 600px at 80% -10%, rgba(255,176,0,0.05), transparent 60%),
+      var(--bg) !important;
   }
-  .block-container { padding-top: 1.4rem; max-width: 1500px; }
-  section.main, .stMarkdown, p, li, span, label, .stMetric {
-    font-family: "JetBrains Mono","Menlo","Consolas",monospace;
+  [data-testid="stHeader"] { background:transparent; }
+  #MainMenu, footer, [data-testid="stToolbar"] { visibility:hidden; }
+  .block-container { padding-top: 1.1rem; max-width: 1560px; }
+  section.main, .stMarkdown, p, li, span, label, .stMetric, input, button {
+    font-family: "JetBrains Mono","SF Mono","Menlo","Consolas",monospace;
   }
-  section.main, .stMarkdown, p, li { font-size: 15px; color:var(--txt); }
+  section.main, .stMarkdown, p, li { font-size: 14.5px; color:var(--txt); }
   h1, h2, h3 { font-family:"JetBrains Mono",monospace !important;
-    letter-spacing:0.06em; text-transform:uppercase; }
-  h1 { font-size: 26px !important; color:#fff; border-bottom:2px solid var(--amber);
-    padding-bottom:8px; }
-  h2, h3 { color:var(--amber) !important; font-size:16px !important; }
-  [data-testid="stSidebar"] { background:#070809; border-right:1px solid var(--line); }
-  [data-testid="stMetricValue"] { font-family:"JetBrains Mono",monospace; }
+    letter-spacing:0.07em; text-transform:uppercase; font-weight:800; }
+  h1 { font-size: 23px !important; color:#fff; margin-bottom:2px;
+    background:linear-gradient(90deg,#fff,#cdd1d8); -webkit-background-clip:text; }
+  h1::after { content:""; display:block; height:2px; margin-top:8px;
+    background:linear-gradient(90deg,var(--amber),transparent 70%); }
+  h2, h3 { color:var(--amber) !important; font-size:14px !important;
+    border-left:3px solid var(--amber); padding-left:9px; margin-top:6px; }
+  [data-testid="stSidebar"] { background:var(--bg); border-right:1px solid var(--line); }
+  [data-testid="stMetricValue"] { font-family:"JetBrains Mono",monospace;
+    font-size:21px !important; color:#fff; }
+  [data-testid="stMetricLabel"] { color:var(--mut) !important;
+    text-transform:uppercase; letter-spacing:0.06em; }
   [data-testid="stMetric"] {
-    background:var(--panel); border:1px solid var(--line); border-radius:4px;
-    padding:8px 12px;
+    background:linear-gradient(180deg,var(--panel2),var(--panel));
+    border:1px solid var(--line); border-radius:6px; padding:10px 14px;
+    transition:border-color .15s ease;
   }
-  .sma-brand { font-size: 18px; font-weight: 800; letter-spacing:0.18em;
-    color:var(--amber); padding: 6px 0 2px 0; border-bottom:1px solid var(--line); }
-  .sma-tag { color:var(--mut); font-size:11px; letter-spacing:0.15em;
-    text-transform:uppercase; margin-bottom:10px; }
+  [data-testid="stMetric"]:hover { border-color:var(--line2); }
+  .stButton button, [data-baseweb="select"] > div, [data-baseweb="input"] input {
+    border-radius:5px !important; }
+  .stButton button { background:var(--panel2); border:1px solid var(--line2);
+    color:var(--txt); }
+  .stButton button:hover { border-color:var(--amber); color:#fff; }
+  [data-testid="stSegmentedControl"] button[aria-checked="true"],
+  [data-baseweb="segmented-control"] [aria-selected="true"] {
+    color:var(--amber) !important; }
+  .sma-brand { font-size: 17px; font-weight: 800; letter-spacing:0.22em;
+    color:var(--amber); padding: 4px 0 2px 0; }
+  .sma-tag { color:var(--mut); font-size:10px; letter-spacing:0.15em;
+    text-transform:uppercase; margin-bottom:6px; }
+  .sma-status { font-size:11px; color:var(--mut); letter-spacing:0.04em; }
+  .sma-status b { color:var(--green); }
   .sma-card {
-    background:var(--panel); border:1px solid var(--line); border-radius:4px;
-    padding:10px 12px; height:100%;
+    background:linear-gradient(180deg,var(--panel2),var(--panel));
+    border:1px solid var(--line); border-radius:6px; padding:10px 12px; height:100%;
+    transition:border-color .15s ease, box-shadow .15s ease;
   }
-  .sma-card .nm { color:var(--mut); font-size:11px; letter-spacing:0.08em;
+  .sma-card:hover { border-color:var(--line2);
+    box-shadow:0 0 0 1px rgba(255,176,0,0.08), 0 6px 18px rgba(0,0,0,0.4); }
+  .sma-card .nm { color:var(--mut); font-size:10.5px; letter-spacing:0.08em;
     text-transform:uppercase; }
-  .sma-card .px { font-size:18px; font-weight:700; color:#fff; }
+  .sma-card .px { font-size:19px; font-weight:700; color:#fff; }
   .sma-chip {
     display:flex; justify-content:space-between; align-items:center;
-    padding:7px 11px; margin:5px 0; border-radius:3px;
-    background:var(--panel); border-left:3px solid var(--mut);
-    border-top:1px solid var(--line); border-right:1px solid var(--line);
-    border-bottom:1px solid var(--line);
+    padding:7px 11px; margin:5px 0; border-radius:5px;
+    background:var(--panel); border:1px solid var(--line); border-left:3px solid var(--mut);
   }
-  .sma-chip .lab { color:var(--mut); font-size:12px; letter-spacing:0.05em;
+  .sma-chip .lab { color:var(--mut); font-size:11.5px; letter-spacing:0.05em;
     text-transform:uppercase; }
-  .sma-chip .val { font-weight:700; font-size:14px; }
+  .sma-chip .val { font-weight:700; font-size:13.5px; }
   .sma-news {
-    padding:11px 13px; margin:7px 0; border-radius:3px; background:var(--panel);
+    padding:11px 13px; margin:7px 0; border-radius:6px; background:var(--panel);
     border:1px solid var(--line); border-left:3px solid var(--amber);
-  }
-  .sma-news a { color:#fff; text-decoration:none; font-weight:700; font-size:15px; }
-  .sma-news .meta { color:var(--amber); font-size:11px; margin:4px 0;
+    transition:border-color .15s ease; }
+  .sma-news:hover { border-color:var(--line2); }
+  .sma-news a { color:#fff; text-decoration:none; font-weight:700; font-size:14.5px; }
+  .sma-news .meta { color:var(--amber); font-size:10.5px; margin:4px 0;
     letter-spacing:0.05em; text-transform:uppercase; }
-  .sma-news .sum { color:var(--mut); font-size:13px; }
+  .sma-news .sum { color:var(--mut); font-size:12.5px; }
   .sma-row {
     display:flex; align-items:center; gap:10px; padding:7px 6px;
-    border-bottom:1px solid var(--line);
-  }
+    border-bottom:1px solid var(--line); }
+  .sma-row:hover { background:rgba(255,255,255,0.02); }
   .sma-row .nm { color:var(--txt); }
   .sma-row .tk { font-weight:700; color:#fff; }
   hr { border-color:var(--line); }
@@ -83,7 +117,7 @@ _CSS = """
 
 
 def setup_page(page_title: str, page_icon: str = None) -> None:
-    """Standard page config + global styling + sidebar branding."""
+    """Standard page config + global styling + sidebar branding + live refresh."""
     st.set_page_config(page_title=f"{page_title} - {APP_NAME}",
                        page_icon=page_icon, layout="wide")
     st.markdown(_CSS, unsafe_allow_html=True)
@@ -92,6 +126,29 @@ def setup_page(page_title: str, page_icon: str = None) -> None:
                     unsafe_allow_html=True)
         st.markdown('<div class="sma-tag">India + Global · Educational</div>',
                     unsafe_allow_html=True)
+    realtime_controls()
+
+
+def realtime_controls() -> None:
+    """Sidebar live auto-refresh toggle, interval, manual refresh, timestamp."""
+    with st.sidebar:
+        st.markdown('<hr>', unsafe_allow_html=True)
+        on = st.toggle("Live auto-refresh", value=True, key="rt_on")
+        interval = st.select_slider(
+            "Refresh every", options=[10, 15, 30, 60, 120], value=30,
+            format_func=lambda s: f"{s}s", key="rt_int",
+        )
+        if st.button("Refresh now", use_container_width=True, key="rt_now"):
+            st.cache_data.clear()
+            st.rerun()
+        if on and _HAS_AUTOREFRESH:
+            st_autorefresh(interval=int(interval) * 1000, key="rt_auto")
+        dot = "LIVE" if on else "PAUSED"
+        st.markdown(
+            f'<div class="sma-status">Status <b>{dot}</b> · updated '
+            f'{datetime.now().strftime("%H:%M:%S")}</div>',
+            unsafe_allow_html=True,
+        )
 
 
 def disclosure() -> None:
