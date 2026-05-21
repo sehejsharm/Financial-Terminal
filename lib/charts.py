@@ -254,6 +254,41 @@ def render_price_chart(
     return fig
 
 
+def render_backtest_chart(result: dict, height: int = 460) -> go.Figure:
+    """Price with entry/exit markers (top) and strategy vs buy&hold equity."""
+    if not result:
+        return _empty_fig("Not enough data to backtest", height)
+    close = result["close"]
+    x = list(close.index)
+    fig = make_subplots(rows=2, cols=1, shared_xaxes=True, vertical_spacing=0.05,
+                        row_heights=[0.55, 0.45],
+                        subplot_titles=("Price & signals", "Growth of 1 unit"))
+    fig.add_trace(go.Scatter(x=x, y=close, mode="lines", name="Price",
+                             line=dict(color=NEUTRAL, width=1.4)), row=1, col=1)
+    ent, exi = result.get("entries"), result.get("exits")
+    if ent is not None and len(ent):
+        fig.add_trace(go.Scatter(x=list(ent.index), y=ent.values, mode="markers",
+                                 name="Entry", marker=dict(color=GREEN, size=9,
+                                 symbol="triangle-up")), row=1, col=1)
+    if exi is not None and len(exi):
+        fig.add_trace(go.Scatter(x=list(exi.index), y=exi.values, mode="markers",
+                                 name="Exit", marker=dict(color=RED, size=9,
+                                 symbol="triangle-down")), row=1, col=1)
+    eq, bh = result["equity"], result["buy_hold"]
+    fig.add_trace(go.Scatter(x=list(eq.index), y=eq.values, mode="lines",
+                             name="Strategy", line=dict(color=AMBER, width=1.8)),
+                  row=2, col=1)
+    fig.add_trace(go.Scatter(x=list(bh.index), y=bh.values, mode="lines",
+                             name="Buy & hold",
+                             line=dict(color="#6b7280", width=1.4, dash="dot")),
+                  row=2, col=1)
+    _apply_terminal_layout(fig, height)
+    fig.update_layout(showlegend=True,
+                      legend=dict(orientation="h", y=1.08, x=0,
+                                  bgcolor="rgba(0,0,0,0)", font=dict(size=11)))
+    return fig
+
+
 def render_sparkline(df: pd.DataFrame, baseline_price: float | None = None,
                      height: int = 60) -> go.Figure:
     """Small green/red split sparkline for the Market Pulse grid cards."""

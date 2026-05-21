@@ -44,12 +44,14 @@ st.plotly_chart(
 st.subheader("Explore")
 c1, c2, c3 = st.columns(3)
 with c1:
-    st.markdown("**Market Pulse**\n\nIndices, sectors, movers, headlines.")
-    st.markdown("**Stock Analyzer**\n\nSnapshot gauges, stats, AI analysis.")
+    st.markdown("**Market Pulse**\n\nIndices, sectors, movers, watchlist.")
+    st.markdown("**Stock Analyzer**\n\nGauges, stats, indicators, backtests.")
+    st.markdown("**Fundamentals**\n\nStatements, estimates, capital structure.")
 with c2:
     st.markdown("**ETF Analyzer**\n\nRisk, holdings, cost comparison.")
-    st.markdown("**Macro**\n\nMacro indicators and the yield curve.")
+    st.markdown("**Derivatives**\n\nOption chains, Greeks, IV smile, max pain.")
 with c3:
+    st.markdown("**Macro**\n\nMacro indicators and the yield curve.")
     st.markdown("**News**\n\nMarket and by-ticker headlines.")
 
 disclosure()

@@ -65,10 +65,17 @@ are never uploaded or shared.
 
 - **Market Pulse** — NIFTY/SENSEX/sector indices, commodities, NIFTY-50 movers,
   headlines, plus an "add any security" watchlist for any world ticker
-- **Stock Analyzer** — company snapshot, quality gauges, key stats, AI analysis
+- **Stock Analyzer** — snapshot gauges, key stats, AI analysis, moving-average +
+  Bollinger overlays, and an on-chart strategy backtester
+- **Fundamentals** — income/balance/cash-flow statements, analyst estimates,
+  and capital structure
 - **ETF Analyzer** — risk, holdings, sector mix, cheaper-fund finder
+- **Derivatives** — option chains with Black-Scholes Greeks, IV smile, max pain
 - **Macro** — economic indicators and the yield curve
 - **News** — market and per-company headlines
+
+A **Live auto-refresh** control in the sidebar polls fresh data on an interval
+(prices are delayed, not tick-level — that's the limit of the free data feed).
 
 ---
 

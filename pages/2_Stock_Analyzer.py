@@ -2,7 +2,8 @@
 import streamlit as st
 
 from lib import claude_analyst
-from lib.charts import render_price_chart
+from lib.backtest import run_backtest
+from lib.charts import render_backtest_chart, render_price_chart
 from lib.logos import logo_img_html
 from lib.market_data import (
     PERIOD_LABELS,
@@ -86,6 +87,37 @@ st.plotly_chart(
                        show_volume=True, height=480, mas=mas, bollinger=bb),
     use_container_width=True,
 )
+
+# ---- Strategy backtest --------------------------------------------------
+with st.expander("Strategy backtest (educational, on past data)"):
+    bt1, bt2, bt3, bt4 = st.columns(4)
+    strat = bt1.selectbox("Strategy", ["SMA crossover", "RSI bands"],
+                          key="bt_strat")
+    if strat == "SMA crossover":
+        fast = bt2.number_input("Fast SMA", 5, 100, 50, key="bt_fast")
+        slow = bt3.number_input("Slow SMA", 20, 300, 200, key="bt_slow")
+        params, skey = {"fast": fast, "slow": slow}, "sma_cross"
+    else:
+        period_rsi = bt2.number_input("RSI period", 5, 30, 14, key="bt_rp")
+        low = bt3.number_input("Buy below", 5, 50, 30, key="bt_low")
+        high = bt4.number_input("Sell above", 50, 95, 70, key="bt_high")
+        params, skey = {"period": period_rsi, "low": low, "high": high}, "rsi"
+
+    bt_hist = get_history(ticker, "5Y")
+    result = run_backtest(bt_hist, skey, params)
+    if not result:
+        st.caption("Not enough history to backtest this ticker.")
+    else:
+        s = result["stats"]
+        sc = st.columns(5)
+        sc[0].metric("Strategy return", f"{s['total_return_pct']:+.1f}%")
+        sc[1].metric("Buy & hold", f"{s['buy_hold_pct']:+.1f}%")
+        sc[2].metric("Max drawdown", f"{s['max_drawdown_pct']:.1f}%")
+        sc[3].metric("Sharpe", f"{s['sharpe']:.2f}")
+        sc[4].metric("Trades", f"{s['trades']}")
+        st.plotly_chart(render_backtest_chart(result), use_container_width=True)
+        st.caption("Past simulation only. Not advice and not predictive of "
+                   "future results. Excludes fees, slippage, and taxes.")
 
 # ---- Snapshot -----------------------------------------------------------
 st.subheader("Snapshot")
