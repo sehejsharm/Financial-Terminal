@@ -1,7 +1,7 @@
 """Stock Analyzer - snapshot gauges, key stats, and AI analysis."""
 import streamlit as st
 
-from lib import claude_analyst
+from lib import ai_analyst
 from lib.backtest import run_backtest
 from lib.charts import render_backtest_chart, render_price_chart
 from lib.logos import logo_img_html
@@ -222,23 +222,23 @@ tech_ctx = {"technical_score": tech_score, "fundamental_score": fund_score,
             "drivers": tech_drivers}
 
 with tab_bb:
-    if not claude_analyst.is_available():
-        st.info("Add your ANTHROPIC_API_KEY to .env to enable AI analysis.")
+    if not ai_analyst.is_available():
+        st.info("Add your GEMINI_API_KEY to .env to enable AI analysis.")
     elif st.button("Generate bull / bear case", key="bb_btn"):
-        with st.spinner("Asking Claude..."):
+        with st.spinner("Asking Gemini..."):
             try:
-                st.markdown(claude_analyst.bull_bear_case(ticker, f, tech_ctx))
-            except claude_analyst.AnalystError as e:
+                st.markdown(ai_analyst.bull_bear_case(ticker, f, tech_ctx))
+            except ai_analyst.AnalystError as e:
                 st.error(f"AI analysis failed: {e}")
 
 with tab_deep:
-    if not claude_analyst.is_available():
-        st.info("Add your ANTHROPIC_API_KEY to .env to enable AI analysis.")
+    if not ai_analyst.is_available():
+        st.info("Add your GEMINI_API_KEY to .env to enable AI analysis.")
     elif st.button("Generate deep analysis", key="deep_btn"):
-        with st.spinner("Asking Claude..."):
+        with st.spinner("Asking Gemini..."):
             try:
-                st.markdown(claude_analyst.deep_analysis(ticker, f, tech_ctx))
-            except claude_analyst.AnalystError as e:
+                st.markdown(ai_analyst.deep_analysis(ticker, f, tech_ctx))
+            except ai_analyst.AnalystError as e:
                 st.error(f"AI analysis failed: {e}")
 
 with tab_news:

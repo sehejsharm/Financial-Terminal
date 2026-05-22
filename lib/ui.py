@@ -112,20 +112,44 @@ _CSS = """
   .sma-row .nm { color:var(--txt); }
   .sma-row .tk { font-weight:700; color:#fff; }
   hr { border-color:var(--line); }
+  /* Responsive / mobile */
+  @media (max-width: 820px) {
+    .block-container { padding-left:0.6rem; padding-right:0.6rem; }
+    h1 { font-size:19px !important; }
+    h2, h3 { font-size:13px !important; }
+    section.main, .stMarkdown, p, li { font-size:13.5px; }
+    .sma-card .px { font-size:16px; }
+    [data-testid="stMetricValue"] { font-size:17px !important; }
+    [data-testid="stHorizontalBlock"] { flex-wrap:wrap; }
+  }
 </style>
 """
 
 
 def setup_page(page_title: str, page_icon: str = None) -> None:
-    """Standard page config + global styling + sidebar branding + live refresh."""
+    """Page config + styling + mandatory login + branding + live refresh."""
+    from lib import auth
+
     st.set_page_config(page_title=f"{page_title} - {APP_NAME}",
                        page_icon=page_icon, layout="wide")
     st.markdown(_CSS, unsafe_allow_html=True)
+
+    # Mandatory authentication gate - halts the page if not signed in.
+    auth.login_gate()
+
+    user = auth.current_user() or {}
     with st.sidebar:
         st.markdown(f'<div class="sma-brand">{SIDEBAR_BRAND}</div>',
                     unsafe_allow_html=True)
         st.markdown('<div class="sma-tag">India + Global · Educational</div>',
                     unsafe_allow_html=True)
+        role = "Master Admin" if user.get("role") == "master_admin" else "User"
+        st.markdown(
+            f'<div class="sma-status">Signed in: <b>{user.get("username","")}</b>'
+            f' · {role}</div>', unsafe_allow_html=True)
+        if st.button("Sign out", use_container_width=True, key="logout_btn"):
+            auth.logout()
+            st.rerun()
     realtime_controls()
 
 

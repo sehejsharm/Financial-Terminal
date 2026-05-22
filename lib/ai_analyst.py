@@ -1,24 +1,25 @@
-"""Anthropic Claude API calls for educational market analysis.
+"""Google Gemini API calls for educational market analysis.
 
-Compliance: every prompt instructs the model to stay educational and to avoid
-buy/sell/hold recommendations or personalized advice. The system prompt is
-marked for prompt caching since it is reused across calls.
+Uses the REST endpoint with the key from the environment (.env), so the key
+never appears in client code. Compliance: prompts keep the model educational
+and free of buy/sell/hold recommendations.
 """
 from __future__ import annotations
 
 import json
 
+import requests
 import streamlit as st
 
-from lib.config import get_anthropic_key
+from lib.config import get_gemini_key
 
-MODEL = "claude-sonnet-4-6"
-MAX_TOKENS = 1400
+MODEL = "gemini-2.0-flash"
+_ENDPOINT = "https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
 
 SYSTEM_PROMPT = (
-    "You are an educational markets analyst for a personal-research dashboard. "
-    "Your audience is studying how to think about companies and markets. "
-    "Rules you must always follow:\n"
+    "You are an educational markets analyst for a personal-research terminal "
+    "called Motherboard. Your audience is studying how to think about companies "
+    "and markets. Rules you must always follow:\n"
     "- Do NOT give buy, sell, or hold recommendations.\n"
     "- Do NOT state price targets as advice or predict exact prices.\n"
     "- Do NOT give personalized financial advice.\n"
@@ -33,45 +34,40 @@ class AnalystError(RuntimeError):
     pass
 
 
-@st.cache_resource(show_spinner=False)
-def _client():
-    key = get_anthropic_key()
-    if not key:
-        return None
-    try:
-        import anthropic
-        return anthropic.Anthropic(api_key=key)
-    except Exception as exc:  # pragma: no cover - import/config errors
-        raise AnalystError(f"Could not initialize Anthropic client: {exc}")
-
-
 def is_available() -> bool:
-    return get_anthropic_key() is not None
+    return get_gemini_key() is not None
 
 
-def _call(user_prompt: str, max_tokens: int = MAX_TOKENS) -> str:
-    client = _client()
-    if client is None:
-        raise AnalystError("Anthropic API key is not configured.")
+def _call(user_prompt: str, max_tokens: int = 1400) -> str:
+    key = get_gemini_key()
+    if not key:
+        raise AnalystError("Gemini API key is not configured.")
+    url = _ENDPOINT.format(model=MODEL)
+    body = {
+        "systemInstruction": {"parts": [{"text": SYSTEM_PROMPT}]},
+        "contents": [{"role": "user", "parts": [{"text": user_prompt}]}],
+        "generationConfig": {"temperature": 0.4, "maxOutputTokens": max_tokens},
+    }
     try:
-        resp = client.messages.create(
-            model=MODEL,
-            max_tokens=max_tokens,
-            system=[{
-                "type": "text",
-                "text": SYSTEM_PROMPT,
-                "cache_control": {"type": "ephemeral"},
-            }],
-            messages=[{"role": "user", "content": user_prompt}],
-        )
-    except Exception as exc:
-        raise AnalystError(str(exc))
-    parts = [b.text for b in resp.content if getattr(b, "type", None) == "text"]
-    return "\n".join(parts).strip()
+        resp = requests.post(url, params={"key": key}, json=body, timeout=60)
+    except requests.RequestException as exc:
+        raise AnalystError(f"Network error contacting Gemini: {exc}")
+    if resp.status_code != 200:
+        detail = ""
+        try:
+            detail = resp.json().get("error", {}).get("message", "")
+        except Exception:
+            detail = resp.text[:200]
+        raise AnalystError(f"Gemini API error {resp.status_code}: {detail}")
+    try:
+        data = resp.json()
+        parts = data["candidates"][0]["content"]["parts"]
+        return "".join(p.get("text", "") for p in parts).strip()
+    except (KeyError, IndexError):
+        raise AnalystError("Gemini returned an empty or blocked response.")
 
 
 def _fmt(d: dict) -> str:
-    """Compact JSON of non-null fields for prompting."""
     return json.dumps({k: v for k, v in d.items() if v is not None}, default=str)
 
 

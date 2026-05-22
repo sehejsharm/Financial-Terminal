@@ -2,7 +2,7 @@
 import plotly.graph_objects as go
 import streamlit as st
 
-from lib import claude_analyst
+from lib import ai_analyst
 from lib.config import get_fred_key
 from lib.macro import get_dashboard
 from lib.rates import get_yield_curve
@@ -67,10 +67,10 @@ else:
 
 # ---- AI macro pulse-check ----------------------------------------------
 st.subheader("AI macro pulse-check")
-if not claude_analyst.is_available():
-    st.info("Add your ANTHROPIC_API_KEY to .env to enable the AI pulse-check.")
+if not ai_analyst.is_available():
+    st.info("Add your GEMINI_API_KEY to .env to enable the AI pulse-check.")
 elif st.button("Generate macro pulse-check"):
-    with st.spinner("Asking Claude..."):
+    with st.spinner("Asking Gemini..."):
         note = ""
         if not curve.empty:
             note = "; ".join(f"{m}={y:.2f}%" for m, y in
@@ -78,8 +78,8 @@ elif st.button("Generate macro pulse-check"):
         try:
             clean = [{k: v for k, v in ind.items() if k in ("name", "value", "unit", "date")}
                      for ind in indicators]
-            st.markdown(claude_analyst.macro_pulse_check(clean, note))
-        except claude_analyst.AnalystError as e:
+            st.markdown(ai_analyst.macro_pulse_check(clean, note))
+        except ai_analyst.AnalystError as e:
             st.error(f"AI analysis failed: {e}")
 
 disclosure()

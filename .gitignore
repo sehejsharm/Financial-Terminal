@@ -2,8 +2,9 @@
 .env
 .streamlit/secrets.toml
 
-# User data
+# User data (holdings, accounts/credentials)
 data/portfolio.json
+data/users.json
 
 # Python
 __pycache__/

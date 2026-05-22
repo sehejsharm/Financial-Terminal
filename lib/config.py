@@ -6,8 +6,8 @@ from dotenv import load_dotenv
 # Load environment variables from .env at import time.
 load_dotenv()
 
-APP_NAME = "Market Analyst Terminal"
-SIDEBAR_BRAND = "MARKET ANALYST"
+APP_NAME = "Motherboard"
+SIDEBAR_BRAND = "MOTHERBOARD"
 
 # Shown on every page footer. Non-negotiable compliance text.
 DISCLOSURE = (
@@ -18,9 +18,9 @@ DISCLOSURE = (
 )
 
 
-def get_anthropic_key() -> str | None:
-    """Return the Anthropic API key from the environment, or None."""
-    key = os.getenv("ANTHROPIC_API_KEY")
+def get_gemini_key() -> str | None:
+    """Return the Gemini API key from the environment, or None."""
+    key = os.getenv("GEMINI_API_KEY")
     return key.strip() if key and key.strip() else None
 
 

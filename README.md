@@ -1,9 +1,14 @@
-# Market Analyst Terminal
+# Motherboard
 
 A personal, **educational** markets terminal centered on **Indian markets**
 (NIFTY, SENSEX, Bank Nifty, NSE sectors, gold/silver/crude) with global context
 and an "add any security" watchlist. For personal research and learning only —
 it does **not** give buy/sell advice.
+
+**Sign-in required.** The app opens to a login screen. A Master Admin account is
+created on first run (default username `Sehej`); the Master Admin can add or
+revoke other users from the **Admin** page. Change the seeded password after
+first login.
 
 You have two ways to use it. Pick one.
 
@@ -23,11 +28,11 @@ No coding. About 5 minutes, one time.
    - **Main file path:** `app.py`
 4. Click **Advanced settings → Secrets** and paste this (fill in your keys):
    ```
-   ANTHROPIC_API_KEY = "paste-your-anthropic-key-here"
+   GEMINI_API_KEY = "paste-your-gemini-key-here"
    FRED_API_KEY = "paste-your-fred-key-here"
    ```
    Both are optional — the app still runs without them, you just won't get the
-   AI write-ups (Anthropic) or the macro/economy numbers (FRED).
+   AI write-ups (Gemini) or the macro/economy numbers (FRED).
 5. Click **Deploy**. After a minute you'll get a link like
    `https://your-app.streamlit.app`. **Bookmark it** — that's your dashboard,
    open it whenever you want.
@@ -53,7 +58,7 @@ No coding. About 5 minutes, one time.
 A file named **`.env`** is created automatically the first time. Open it with
 any text editor and paste your keys:
 ```
-ANTHROPIC_API_KEY=your-anthropic-key
+GEMINI_API_KEY=your-gemini-key
 FRED_API_KEY=your-fred-key
 ```
 Save the file and restart the app. Your keys stay only on your computer — they
