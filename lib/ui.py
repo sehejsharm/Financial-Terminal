@@ -39,7 +39,15 @@ _CSS = """
       var(--bg) !important;
   }
   [data-testid="stHeader"] { background:transparent; }
-  #MainMenu, footer, [data-testid="stToolbar"] { visibility:hidden; }
+  #MainMenu, footer { visibility:hidden; }
+  [data-testid="stToolbar"] { visibility:hidden; }
+  [data-testid="collapsedControl"],
+  [data-testid="stSidebarCollapsedControl"],
+  button[kind="header"],
+  [data-testid="stSidebarNav"] + div button,
+  section[data-testid="stSidebar"] ~ div button[aria-label],
+  .st-emotion-cache-1cypcdb,
+  [class*="collapsedControl"] { visibility:visible !important; }
   .block-container { padding-top: 1.1rem; max-width: 1560px; }
   section.main, .stMarkdown, p, li, span, label, .stMetric, input, button {
     font-family: "JetBrains Mono","SF Mono","Menlo","Consolas",monospace;
