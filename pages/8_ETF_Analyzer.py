@@ -16,6 +16,7 @@ from lib.ui import (
     human_number,
     risk_gauge,
     setup_page,
+    ticker_picker,
 )
 
 setup_page("ETF Analyzer")
@@ -33,7 +34,7 @@ def er_to_pct(er):
 
 c1, c2 = st.columns([2, 3])
 with c1:
-    ticker = st.text_input("ETF ticker", value="NIFTYBEES.NS").strip().upper()
+    ticker = ticker_picker("Search ETF", default="NIFTYBEES.NS", key="etf_pick")
 with c2:
     period = st.segmented_control("Period", PERIOD_LABELS, default="1Y",
                                   key="etf_period") or "1Y"

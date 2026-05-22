@@ -3,7 +3,7 @@ import streamlit as st
 
 from lib import ai_analyst
 from lib.backtest import run_backtest
-from lib.charts import render_backtest_chart, render_price_chart
+from lib.charts import render_backtest_chart, render_price_chart, render_rsi
 from lib.logos import logo_img_html
 from lib.market_data import (
     PERIOD_LABELS,
@@ -26,6 +26,7 @@ from lib.ui import (
     quality_gauge,
     render_chips,
     setup_page,
+    ticker_picker,
 )
 
 setup_page("Stock Analyzer")
@@ -33,7 +34,8 @@ st.title("Stock Analyzer")
 
 c1, c2 = st.columns([2, 3])
 with c1:
-    ticker = st.text_input("Ticker", value="RELIANCE.NS").strip().upper()
+    ticker = ticker_picker("Search security", default="RELIANCE.NS",
+                           key="sa_pick")
 with c2:
     period = st.segmented_control("Period", PERIOD_LABELS, default="1Y",
                                   key="sa_period") or "1Y"
@@ -87,6 +89,14 @@ st.plotly_chart(
                        show_volume=True, height=480, mas=mas, bollinger=bb),
     use_container_width=True,
 )
+
+ri1, ri2 = st.columns([1, 5])
+with ri1:
+    show_rsi = st.toggle("Show RSI", value=False, key="sa_rsi")
+    rsi_p = st.number_input("RSI period", 5, 30, 14, key="sa_rsi_p")
+if show_rsi:
+    st.plotly_chart(render_rsi(hist, period=int(rsi_p), divergences=True),
+                    use_container_width=True)
 
 # ---- Strategy backtest --------------------------------------------------
 with st.expander("Strategy backtest (educational, on past data)"):

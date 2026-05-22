@@ -12,14 +12,20 @@ from lib.fundamentals import (
     select_rows,
 )
 from lib.market_data import get_stock_fundamentals
-from lib.ui import cur_symbol, disclosure, human_number, setup_page
+from lib.ui import (
+    cur_symbol,
+    disclosure,
+    human_number,
+    setup_page,
+    ticker_picker,
+)
 
 setup_page("Fundamentals")
 st.title("Fundamentals")
 
 c1, c2 = st.columns([2, 2])
 with c1:
-    ticker = st.text_input("Ticker", value="RELIANCE.NS").strip().upper()
+    ticker = ticker_picker("Search security", default="RELIANCE.NS", key="fn_pick")
 with c2:
     freq = st.segmented_control("Period", ["Annual", "Quarterly"],
                                 default="Annual", key="fn_freq") or "Annual"

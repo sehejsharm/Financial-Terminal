@@ -218,6 +218,32 @@ def cur_symbol(code: str | None) -> str:
     return _CURRENCY_SYMBOLS.get(code.upper(), "")
 
 
+def ticker_picker(label: str = "Search security", default: str = "",
+                  key: str = "tp") -> str:
+    """Adaptive typeahead: type 2+ letters, pick from live matches.
+
+    Returns the selected symbol, or the raw uppercased query if there are no
+    matches (so exact tickers still work).
+    """
+    from lib.search import search_securities
+
+    q = st.text_input(label, value=default, key=f"{key}_q",
+                      placeholder="Type a name or symbol (2+ letters)").strip()
+    if len(q) < 2:
+        return q.upper()
+    results = search_securities(q)
+    if not results:
+        return q.upper()
+    labels = [
+        f"{r['symbol']} — {r['name']}"
+        + (f"  [{r['exchange']}]" if r["exchange"] else "")
+        for r in results
+    ]
+    choice = st.selectbox("Matches", labels, key=f"{key}_sel",
+                          label_visibility="collapsed")
+    return results[labels.index(choice)]["symbol"]
+
+
 def _gauge(value: float, title: str, subtitle: str, steps: list[tuple]) -> go.Figure:
     value = max(0.0, min(100.0, float(value)))
     fig = go.Figure(go.Indicator(

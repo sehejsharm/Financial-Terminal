@@ -70,17 +70,27 @@ are never uploaded or shared.
 
 - **Market Pulse** — NIFTY/SENSEX/sector indices, commodities, NIFTY-50 movers,
   headlines, plus an "add any security" watchlist for any world ticker
-- **Stock Analyzer** — snapshot gauges, key stats, AI analysis, moving-average +
-  Bollinger overlays, and an on-chart strategy backtester
-- **Fundamentals** — income/balance/cash-flow statements, analyst estimates,
-  and capital structure
+- **Workspace** — multi-chart grid (up to 8 configurable panels)
+- **Stock Analyzer** — gauges, key stats, AI analysis, MA/Bollinger + RSI
+  (with divergences), and an on-chart strategy backtester. Typeahead search.
+- **Fundamentals** — income/balance/cash-flow statements, estimates, capital
+  structure
+- **Terminal** — institutional modules: Company Snapshot, Comps Matrix, Debt
+  Profile, Deep Financials, Consensus Projections, Earnings Track, Cap Table &
+  Block Holdings, Historical Price Action, Street Ratings, Capital Cost Model
+  (WACC), Value Chain Mapper (AI), Motherboard Screener
+- **Value Investing** — Graham intrinsic value + margin of safety, and the
+  Oracle Checklist (Buffett tenets) scorecard
+- **Screeners** — PEG, Hidden Gems, Growth presets + a custom filter builder
 - **ETF Analyzer** — risk, holdings, sector mix, cheaper-fund finder
 - **Derivatives** — option chains with Black-Scholes Greeks, IV smile, max pain
+- **Big Shark Updates** — bulk / block deal activity (end-of-day)
 - **Macro** — economic indicators and the yield curve
 - **News** — market and per-company headlines
+- **Admin** — Master Admin user management (create / revoke users)
 
 A **Live auto-refresh** control in the sidebar polls fresh data on an interval
-(prices are delayed, not tick-level — that's the limit of the free data feed).
+(prices are delayed, not tick-level — the free data feed has no push stream).
 
 ---
 

@@ -10,7 +10,7 @@ from lib.options import (
     max_pain,
     years_to_expiry,
 )
-from lib.ui import cur_symbol, disclosure, fmt_num, setup_page
+from lib.ui import cur_symbol, disclosure, fmt_num, setup_page, ticker_picker
 
 setup_page("Derivatives")
 st.title("Derivatives - Options & Greeks")
@@ -20,7 +20,7 @@ st.caption("Implied vol is from the market; Greeks are computed via "
 
 c1, c2, c3 = st.columns([2, 2, 1])
 with c1:
-    ticker = st.text_input("Ticker", value="AAPL").strip().upper()
+    ticker = ticker_picker("Search security", default="AAPL", key="dv_pick")
 with c3:
     r = st.number_input("Risk-free %", 0.0, 15.0, 5.0, step=0.25) / 100.0
 

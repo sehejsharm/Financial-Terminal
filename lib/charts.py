@@ -254,6 +254,64 @@ def render_price_chart(
     return fig
 
 
+def _local_extrema(values, order: int = 5):
+    """Indices of local minima and maxima (simple window comparison)."""
+    mins, maxs = [], []
+    n = len(values)
+    for i in range(order, n - order):
+        window = values[i - order:i + order + 1]
+        if values[i] == min(window):
+            mins.append(i)
+        if values[i] == max(window):
+            maxs.append(i)
+    return mins, maxs
+
+
+def render_rsi(df: pd.DataFrame, period: int = 14, divergences: bool = True,
+               height: int = 230) -> go.Figure:
+    """RSI panel with 30/70 bands and optional divergence markers."""
+    from lib.signals import rsi as _rsi
+    if df is None or df.empty or "Close" not in df:
+        return _empty_fig("No data", height)
+    close = df["Close"].dropna().astype(float)
+    if len(close) < period + 5:
+        return _empty_fig("Not enough data for RSI", height)
+    r = _rsi(close, period)
+    x = list(close.index)
+    fig = go.Figure()
+    fig.add_trace(go.Scatter(x=x, y=r, mode="lines", name=f"RSI {period}",
+                             line=dict(color=AMBER, width=1.6)))
+    fig.add_hrect(y0=70, y1=100, fillcolor="rgba(255,69,58,0.08)", line_width=0)
+    fig.add_hrect(y0=0, y1=30, fillcolor="rgba(25,210,124,0.08)", line_width=0)
+    for lvl in (30, 50, 70):
+        fig.add_hline(y=lvl, line=dict(color=NEUTRAL, width=0.7, dash="dot"))
+
+    notes = []
+    if divergences:
+        cv = close.values
+        rv = r.values
+        cmins, cmaxs = _local_extrema(list(cv))
+        # Bullish: price lower-low, RSI higher-low.
+        recent_mins = [i for i in cmins if i > len(cv) - 120]
+        if len(recent_mins) >= 2:
+            a, b = recent_mins[-2], recent_mins[-1]
+            if cv[b] < cv[a] and rv[b] > rv[a]:
+                notes.append((x[b], rv[b], "Bullish divergence", GREEN))
+        recent_maxs = [i for i in cmaxs if i > len(cv) - 120]
+        if len(recent_maxs) >= 2:
+            a, b = recent_maxs[-2], recent_maxs[-1]
+            if cv[b] > cv[a] and rv[b] < rv[a]:
+                notes.append((x[b], rv[b], "Bearish divergence", RED))
+    for xx, yy, txt, col in notes:
+        fig.add_annotation(x=xx, y=yy, text=txt, showarrow=True, arrowhead=2,
+                           font=dict(color="#fff", size=11), bgcolor=col,
+                           arrowcolor=col)
+
+    _apply_terminal_layout(fig, height)
+    fig.update_yaxes(range=[0, 100])
+    return fig
+
+
 def render_backtest_chart(result: dict, height: int = 460) -> go.Figure:
     """Price with entry/exit markers (top) and strategy vs buy&hold equity."""
     if not result:

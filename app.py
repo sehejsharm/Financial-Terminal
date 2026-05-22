@@ -45,12 +45,17 @@ st.subheader("Explore")
 c1, c2, c3 = st.columns(3)
 with c1:
     st.markdown("**Market Pulse**\n\nIndices, sectors, movers, watchlist.")
-    st.markdown("**Stock Analyzer**\n\nGauges, stats, indicators, backtests.")
+    st.markdown("**Workspace**\n\nMulti-chart grid, up to 8 panels.")
+    st.markdown("**Stock Analyzer**\n\nGauges, indicators, RSI, backtests.")
     st.markdown("**Fundamentals**\n\nStatements, estimates, capital structure.")
 with c2:
+    st.markdown("**Terminal**\n\nSnapshot, comps, ownership, WACC, ratings.")
+    st.markdown("**Value Investing**\n\nGraham value + Buffett checklist.")
+    st.markdown("**Screeners**\n\nPEG, Hidden Gems, Growth, custom filters.")
     st.markdown("**ETF Analyzer**\n\nRisk, holdings, cost comparison.")
-    st.markdown("**Derivatives**\n\nOption chains, Greeks, IV smile, max pain.")
 with c3:
+    st.markdown("**Derivatives**\n\nOption chains, Greeks, IV smile, max pain.")
+    st.markdown("**Big Shark Updates**\n\nBulk / block deal activity (EOD).")
     st.markdown("**Macro**\n\nMacro indicators and the yield curve.")
     st.markdown("**News**\n\nMarket and by-ticker headlines.")
 
