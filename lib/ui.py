@@ -120,6 +120,34 @@ _CSS = """
   .sma-row .nm { color:var(--txt); }
   .sma-row .tk { font-weight:700; color:#fff; }
   hr { border-color:var(--line); }
+  /* Tables / dataframes */
+  [data-testid="stDataFrame"], [data-testid="stTable"], [data-testid="stDataFrameResizable"] {
+    border:1px solid var(--line); border-radius:6px; overflow:hidden; }
+  [data-testid="stDataFrame"] [role="columnheader"] {
+    text-transform:uppercase; letter-spacing:0.04em; color:var(--mut); }
+  [data-testid="stDataFrame"] * {
+    font-family:"JetBrains Mono","SF Mono","Menlo","Consolas",monospace !important; }
+  /* Tabs */
+  [data-baseweb="tab-list"] { gap:2px; border-bottom:1px solid var(--line); }
+  [data-baseweb="tab"] { font-family:"JetBrains Mono",monospace;
+    text-transform:uppercase; letter-spacing:0.05em; font-size:12px; }
+  [data-baseweb="tab"][aria-selected="true"] { color:var(--amber) !important; }
+  [data-baseweb="tab-highlight"] { background:var(--amber) !important; }
+  /* Text readability + wrapping */
+  section.main p, .stMarkdown p, .stMarkdown li { line-height:1.55;
+    overflow-wrap:anywhere; }
+  [data-testid="stCaptionContainer"], .stCaption { color:var(--mut) !important;
+    line-height:1.5; }
+  /* Keep flex rows from overflowing their container */
+  .sma-row { min-width:0; }
+  .sma-row > span { min-width:0; }
+  .sma-row .nm, .sma-row .tk { overflow:hidden; text-overflow:ellipsis;
+    white-space:nowrap; }
+  .sma-chip { min-width:0; }
+  .sma-chip .val { overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
+    max-width:55%; text-align:right; }
+  /* Alerts (info/warning/error) inherit the mono theme */
+  [data-testid="stAlert"] { border-radius:6px; font-size:13.5px; }
   /* Responsive / mobile */
   @media (max-width: 820px) {
     .block-container { padding-left:0.6rem; padding-right:0.6rem; }
