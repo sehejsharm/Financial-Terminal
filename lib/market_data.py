@@ -84,6 +84,23 @@ PERIOD_MAP: dict[str, dict] = {
 PERIOD_LABELS = list(PERIOD_MAP.keys())
 
 
+def infer_currency(ticker: str) -> str:
+    """Best-effort currency for a ticker from its suffix, without a network call.
+
+    Indian listings (.NS/.BO) and Indian indices are INR; commodity futures and
+    crypto are USD; forex pairs are left blank (the unit is ambiguous). Anything
+    else defaults to USD.
+    """
+    t = (ticker or "").upper()
+    if t.endswith(".NS") or t.endswith(".BO"):
+        return "INR"
+    if t in ("^NSEI", "^BSESN", "^NSEBANK", "^INDIAVIX") or t.startswith("^CNX"):
+        return "INR"
+    if t.endswith("=X"):
+        return ""  # forex pair - unit is ambiguous, show the raw number
+    return "USD"
+
+
 def _flatten_columns(df: pd.DataFrame) -> pd.DataFrame:
     """yfinance sometimes returns a MultiIndex column frame for a single
     ticker. Flatten to plain OHLCV columns."""
@@ -153,7 +170,7 @@ def get_history_bulk(tickers: tuple[str, ...], period: str) -> dict[str, pd.Data
     return out
 
 
-@st.cache_data(ttl=15, show_spinner=False)
+@st.cache_data(ttl=30, show_spinner=False)
 def get_quote(ticker: str) -> dict:
     """Return a normalized quote dict for one ticker.
 
@@ -162,14 +179,16 @@ def get_quote(ticker: str) -> dict:
     t = yf.Ticker(ticker)
     price = prev_close = None
     name = INDEX_TICKERS.get(ticker) or SECTORS.get(ticker) or ticker
-    currency = "USD"
+    currency = infer_currency(ticker)
     try:
         fi = t.fast_info
         price = fi.get("last_price") if hasattr(fi, "get") else fi.last_price
         prev_close = (
             fi.get("previous_close") if hasattr(fi, "get") else fi.previous_close
         )
-        currency = (fi.get("currency") if hasattr(fi, "get") else fi.currency) or "USD"
+        fi_cur = fi.get("currency") if hasattr(fi, "get") else fi.currency
+        if fi_cur:
+            currency = fi_cur
     except Exception:
         pass
 
@@ -214,7 +233,7 @@ def _display_name(ticker: str, fallback: str) -> str:
         return fallback
 
 
-@st.cache_data(ttl=15, show_spinner=False)
+@st.cache_data(ttl=30, show_spinner=False)
 def get_quotes_bulk(tickers: tuple[str, ...]) -> dict[str, dict]:
     """Return {ticker: quote dict} for many tickers using a single bulk
     download for price/change, with light name resolution."""
@@ -239,8 +258,14 @@ def get_quotes_bulk(tickers: tuple[str, ...]) -> dict[str, dict]:
                     prev_close = float(closes.iloc[-2])
         except Exception:
             pass
+        # Bulk download came back empty for this ticker (commonly Yahoo
+        # rate-limiting a shared/cloud IP) - recover via the single-quote path.
+        if price is None:
+            q = get_quote(t)
+            out[t] = q
+            continue
         change = change_pct = None
-        if price is not None and prev_close not in (None, 0):
+        if prev_close not in (None, 0):
             change = price - prev_close
             change_pct = change / prev_close * 100.0
         out[t] = {
@@ -250,7 +275,7 @@ def get_quotes_bulk(tickers: tuple[str, ...]) -> dict[str, dict]:
             "prev_close": prev_close,
             "change": change,
             "change_pct": change_pct,
-            "currency": "USD",
+            "currency": infer_currency(t),
         }
     return out
 
@@ -425,6 +450,7 @@ def _universe_quotes(universe: tuple[str, ...]) -> list[dict]:
                 "change_pct": (price - prev) / prev * 100 if prev else None,
                 "volume": volume,
                 "turnover": (volume or 0) * price,
+                "currency": infer_currency(t),
             })
         except Exception:
             continue

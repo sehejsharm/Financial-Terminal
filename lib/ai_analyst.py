@@ -52,6 +52,17 @@ def _call(user_prompt: str, max_tokens: int = 1400) -> str:
         resp = requests.post(url, params={"key": key}, json=body, timeout=60)
     except requests.RequestException as exc:
         raise AnalystError(f"Network error contacting Gemini: {exc}")
+    if resp.status_code == 429:
+        raise AnalystError(
+            "Gemini usage limit reached. The free tier caps requests per minute "
+            "and per day - wait a minute and try again, or check your key's quota "
+            "in Google AI Studio (aistudio.google.com)."
+        )
+    if resp.status_code in (401, 403):
+        raise AnalystError(
+            "Gemini rejected the API key (invalid or not enabled). Re-check "
+            "GEMINI_API_KEY in your .env or Streamlit secrets."
+        )
     if resp.status_code != 200:
         detail = ""
         try:

@@ -55,12 +55,12 @@ _CSS = """
   section.main, .stMarkdown, p, li { font-size: 14.5px; color:var(--txt); }
   h1, h2, h3 { font-family:"JetBrains Mono",monospace !important;
     letter-spacing:0.07em; text-transform:uppercase; font-weight:800; }
-  h1 { font-size: 23px !important; color:#fff; margin-bottom:2px;
-    background:linear-gradient(90deg,#fff,#cdd1d8); -webkit-background-clip:text; }
+  h1 { font-size: 23px !important; color:#fff !important; margin-bottom:4px; }
   h1::after { content:""; display:block; height:2px; margin-top:8px;
     background:linear-gradient(90deg,var(--amber),transparent 70%); }
   h2, h3 { color:var(--amber) !important; font-size:14px !important;
-    border-left:3px solid var(--amber); padding-left:9px; margin-top:6px; }
+    border-left:3px solid var(--amber); padding-left:9px;
+    margin-top:14px; margin-bottom:6px; line-height:1.4; }
   [data-testid="stSidebar"] { background:var(--bg); border-right:1px solid var(--line); }
   [data-testid="stMetricValue"] { font-family:"JetBrains Mono",monospace;
     font-size:21px !important; color:#fff; }
@@ -143,9 +143,10 @@ _CSS = """
   .sma-row > span { min-width:0; }
   .sma-row .nm, .sma-row .tk { overflow:hidden; text-overflow:ellipsis;
     white-space:nowrap; }
-  .sma-chip { min-width:0; }
-  .sma-chip .val { overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
-    max-width:55%; text-align:right; }
+  .sma-chip { min-width:0; gap:10px; }
+  .sma-chip .lab { flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis;
+    white-space:nowrap; }
+  .sma-chip .val { white-space:nowrap; text-align:right; flex:0 0 auto; }
   /* Alerts (info/warning/error) inherit the mono theme */
   [data-testid="stAlert"] { border-radius:6px; font-size:13.5px; }
   /* Responsive / mobile */
@@ -195,7 +196,7 @@ def realtime_controls() -> None:
         st.markdown('<hr>', unsafe_allow_html=True)
         on = st.toggle("Live auto-refresh", value=True, key="rt_on")
         interval = st.select_slider(
-            "Refresh every", options=[10, 15, 30, 60, 120], value=30,
+            "Refresh every", options=[30, 60, 120, 300], value=60,
             format_func=lambda s: f"{s}s", key="rt_int",
         )
         if st.button("Refresh now", use_container_width=True, key="rt_now"):

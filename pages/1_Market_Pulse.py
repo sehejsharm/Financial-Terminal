@@ -65,9 +65,10 @@ for start in range(0, len(grid_tickers), 4):
             name = INDEX_TICKERS.get(tk, tk)
             price = q.get("price")
             pct = q.get("change_pct")
+            sym = "" if tk in INDEX_TICKERS else cur_symbol(q.get("currency"))
             st.markdown(
                 f'<div class="sma-card"><div class="nm">{name}</div>'
-                f'<div class="px">{fmt_num(price, 2)}</div>'
+                f'<div class="px">{sym}{fmt_num(price, 2)}</div>'
                 f'{color_pct_html(pct)}</div>',
                 unsafe_allow_html=True,
             )
