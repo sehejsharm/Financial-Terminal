@@ -1,0 +1,243 @@
+"""Value-chain visualisation — Bloomberg SPLC style.
+
+Calls Gemini for a structured educational overview (suppliers, customers,
+competitors) and renders it as an interactive node-network chart similar to
+the Bloomberg SPLC function: company centre, suppliers left, customers right,
+competitors below, directed edges, dark terminal theme.
+
+Gemini results are cached 12 h per ticker to avoid hammering the free-tier
+quota (the main cause of "usage limit reached" errors).
+"""
+from __future__ import annotations
+
+import json
+import re
+
+import plotly.graph_objects as go
+import streamlit as st
+
+from lib import ai_analyst
+
+# ── colour palette ────────────────────────────────────────────────────────────
+_BG      = "#0c0e12"
+_PANEL   = "#0f1218"
+_AMBER   = "#ffb000"
+_GREEN   = "#1fd286"
+_BLUE    = "#60a5fa"
+_ORANGE  = "#ff9f43"
+_WHITE   = "#ffffff"
+_MUT     = "#767c88"
+_LINE    = "#1c2129"
+
+# ── Gemini prompt + cache ─────────────────────────────────────────────────────
+
+_JSON_PROMPT = """
+You are a financial-data analyst generating EDUCATIONAL value-chain data for
+a research terminal.  Return ONLY a single valid JSON object — no prose, no
+markdown fences — in exactly this schema:
+
+{{
+  "suppliers": [
+    {{"name": "Company or sector name (max 22 chars)", "note": "What they supply (max 60 chars)"}},
+    ...
+  ],
+  "customers": [
+    {{"name": "Company or segment name (max 22 chars)", "note": "Revenue dependency (max 60 chars)"}},
+    ...
+  ],
+  "competitors": [
+    {{"name": "Company name (max 22 chars)", "note": "How they compete (max 60 chars)"}},
+    ...
+  ]
+}}
+
+Rules:
+- Up to 7 suppliers, 7 customers, 6 competitors.
+- Data is general knowledge / educational — note uncertainty where appropriate.
+- Names must be short enough to fit in chart nodes.
+- The subject company is: {name} ({ticker})
+"""
+
+
+@st.cache_data(ttl=43200, show_spinner=False)   # 12-hour cache per ticker
+def get_chain_data(ticker: str, company_name: str) -> dict | None:
+    """Call Gemini for structured value-chain JSON.  Cached 12 h."""
+    prompt = _JSON_PROMPT.format(name=company_name, ticker=ticker)
+    try:
+        raw = ai_analyst._call(prompt, max_tokens=900)
+    except ai_analyst.AnalystError:
+        raise
+    # Strip any accidental markdown fences
+    raw = re.sub(r"```[a-z]*", "", raw).strip().strip("`").strip()
+    # Find the outermost { … }
+    m = re.search(r"\{.*\}", raw, re.DOTALL)
+    if not m:
+        return None
+    try:
+        data = json.loads(m.group())
+    except json.JSONDecodeError:
+        return None
+    return data
+
+
+# ── chart builder ─────────────────────────────────────────────────────────────
+
+def _trunc(s: str, n: int = 20) -> str:
+    return s if len(s) <= n else s[:n - 1] + "…"
+
+
+def build_chain_figure(ticker: str, company_name: str, data: dict) -> go.Figure:
+    """Return a Plotly figure in Bloomberg SPLC node-graph style."""
+    suppliers   = (data.get("suppliers")   or [])[:7]
+    customers   = (data.get("customers")   or [])[:7]
+    competitors = (data.get("competitors") or [])[:6]
+
+    node_x, node_y = [], []
+    node_label, node_hover = [], []
+    node_color, node_size, node_textpos = [], [], []
+
+    edge_x, edge_y = [], []
+    arrow_x, arrow_y, arrow_ex, arrow_ey, arrow_color = [], [], [], [], []
+
+    # ── centre: company ───────────────────────────────────────────────────────
+    cx, cy = 0.0, 0.0
+    node_x.append(cx);  node_y.append(cy)
+    node_label.append(_trunc(ticker, 12))
+    node_hover.append(f"<b>{company_name}</b>")
+    node_color.append(_AMBER)
+    node_size.append(38)
+    node_textpos.append("middle center")
+
+    def _add_node(x, y, label, hover, color, size, tpos):
+        node_x.append(x);  node_y.append(y)
+        node_label.append(label)
+        node_hover.append(hover)
+        node_color.append(color)
+        node_size.append(size)
+        node_textpos.append(tpos)
+
+    def _add_edge(x0, y0, x1, y1, col):
+        edge_x.extend([x0, x1, None])
+        edge_y.extend([y0, y1, None])
+        arrow_x.append(x0);   arrow_y.append(y0)
+        arrow_ex.append(x1);  arrow_ey.append(y1)
+        arrow_color.append(col)
+
+    X_SUP  = -2.6
+    X_CUST =  2.6
+    Y_COMP = -2.4
+
+    # ── suppliers (left column → centre) ─────────────────────────────────────
+    ns = len(suppliers)
+    for i, s in enumerate(suppliers):
+        y = (i - (ns - 1) / 2) * 1.05
+        lbl = _trunc(s.get("name", ""), 20)
+        hov = f"<b>{s.get('name','')}</b><br>{s.get('note','')}"
+        _add_node(X_SUP, y, lbl, hov, _GREEN, 18, "middle left")
+        _add_edge(X_SUP, y, cx, cy, _GREEN)
+
+    # ── customers (centre → right column) ────────────────────────────────────
+    nc = len(customers)
+    for i, c in enumerate(customers):
+        y = (i - (nc - 1) / 2) * 1.05
+        lbl = _trunc(c.get("name", ""), 20)
+        hov = f"<b>{c.get('name','')}</b><br>{c.get('note','')}"
+        _add_node(X_CUST, y, lbl, hov, _BLUE, 18, "middle right")
+        _add_edge(cx, cy, X_CUST, y, _BLUE)
+
+    # ── competitors (bottom row, no edge to centre per Bloomberg) ─────────────
+    ncp = len(competitors)
+    for i, cp in enumerate(competitors):
+        x = (i - (ncp - 1) / 2) * 1.35
+        lbl = _trunc(cp.get("name", ""), 20)
+        hov = f"<b>{cp.get('name','')}</b><br>{cp.get('note','')}"
+        _add_node(x, Y_COMP, lbl, hov, _ORANGE, 15, "bottom center")
+
+    # ── figure ────────────────────────────────────────────────────────────────
+    fig = go.Figure()
+
+    # Edges
+    fig.add_trace(go.Scatter(
+        x=edge_x, y=edge_y, mode="lines",
+        line=dict(color="rgba(255,255,255,0.10)", width=1.5),
+        hoverinfo="skip", showlegend=False,
+    ))
+
+    # Directed arrows (annotation arrows for each edge)
+    annotations = []
+    for ax, ay, aex, aey, acol in zip(arrow_x, arrow_y, arrow_ex, arrow_ey, arrow_color):
+        # midpoint of line for arrowhead
+        mx = (ax + aex) / 2
+        my = (ay + aey) / 2
+        annotations.append(dict(
+            x=aex, y=aey, ax=ax, ay=ay,
+            xref="x", yref="y", axref="x", ayref="y",
+            showarrow=True, arrowhead=2, arrowsize=1.2, arrowwidth=1.2,
+            arrowcolor=acol + "88",  # semi-transparent
+        ))
+
+    # Nodes
+    fig.add_trace(go.Scatter(
+        x=node_x, y=node_y,
+        mode="markers+text",
+        marker=dict(
+            color=node_color,
+            size=node_size,
+            line=dict(color="rgba(255,255,255,0.18)", width=1.5),
+            symbol="circle",
+        ),
+        text=node_label,
+        textfont=dict(family="JetBrains Mono, Consolas, monospace",
+                      size=[10 if s < 30 else 12 for s in node_size],
+                      color=["#000" if c == _AMBER else _WHITE for c in node_color]),
+        textposition=node_textpos,
+        hovertext=node_hover,
+        hoverinfo="text",
+        showlegend=False,
+    ))
+
+    # Section header annotations
+    y_sup_top  = ((ns  - 1) / 2) * 1.05 + 0.6 if ns  else 0.8
+    y_cust_top = ((nc  - 1) / 2) * 1.05 + 0.6 if nc  else 0.8
+    for ann_x, ann_y, label, col in (
+        (X_SUP,  y_sup_top,  "▶  SUPPLIERS",   _GREEN),
+        (X_CUST, y_cust_top, "CUSTOMERS  ◀",   _BLUE),
+        (0,      Y_COMP - 0.5, "COMPETITORS",  _ORANGE),
+    ):
+        annotations.append(dict(
+            x=ann_x, y=ann_y, xref="x", yref="y",
+            text=f'<b style="letter-spacing:0.06em">{label}</b>',
+            showarrow=False,
+            font=dict(color=col, size=11, family="JetBrains Mono, monospace"),
+            align="center",
+        ))
+
+    # Central company label (below node)
+    annotations.append(dict(
+        x=cx, y=cy - 0.55, xref="x", yref="y",
+        text=f'<b>{_trunc(company_name, 28)}</b>',
+        showarrow=False,
+        font=dict(color=_AMBER, size=10, family="JetBrains Mono, monospace"),
+        align="center",
+    ))
+
+    x_pad = 4.2
+    y_max = max(y_sup_top, y_cust_top) + 0.4
+    y_min = Y_COMP - 1.0
+
+    fig.update_layout(
+        annotations=annotations,
+        paper_bgcolor=_PANEL,
+        plot_bgcolor=_PANEL,
+        showlegend=False,
+        xaxis=dict(visible=False, range=[-x_pad, x_pad], zeroline=False, fixedrange=True),
+        yaxis=dict(visible=False, range=[y_min, y_max], zeroline=False,
+                   scaleanchor="x", scaleratio=1, fixedrange=True),
+        height=560,
+        margin=dict(l=0, r=0, t=20, b=10),
+        font=dict(family="JetBrains Mono, Consolas, monospace", color="#dfe3ea", size=11),
+        hoverlabel=dict(bgcolor=_BG, bordercolor=_LINE,
+                        font=dict(family="JetBrains Mono", size=12, color=_WHITE)),
+        dragmode=False,
+    )
+    return fig
