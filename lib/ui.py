@@ -54,7 +54,8 @@ _CSS = """
   }
   section.main, .stMarkdown, p, li { font-size: 14.5px; color:var(--txt); }
   h1, h2, h3 { font-family:"JetBrains Mono",monospace !important;
-    letter-spacing:0.07em; text-transform:uppercase; font-weight:800; }
+    letter-spacing:0.04em; text-transform:uppercase; font-weight:800;
+    white-space:normal; overflow-wrap:anywhere; overflow:visible; }
   h1 { font-size: 23px !important; color:#fff !important; margin-bottom:4px; }
   h1::after { content:""; display:block; height:2px; margin-top:8px;
     background:linear-gradient(90deg,var(--amber),transparent 70%); }
@@ -63,14 +64,21 @@ _CSS = """
     margin-top:14px; margin-bottom:6px; line-height:1.4; }
   [data-testid="stSidebar"] { background:var(--bg); border-right:1px solid var(--line); }
   [data-testid="stMetricValue"] { font-family:"JetBrains Mono",monospace;
-    font-size:21px !important; color:#fff; }
+    font-size:20px !important; color:#fff; }
+  [data-testid="stMetricValue"], [data-testid="stMetricValue"] * {
+    overflow:visible !important; text-overflow:clip !important;
+    white-space:nowrap; }
   [data-testid="stMetricLabel"] { color:var(--mut) !important;
-    text-transform:uppercase; letter-spacing:0.06em; }
+    text-transform:uppercase; letter-spacing:0.05em; }
+  [data-testid="stMetricLabel"], [data-testid="stMetricLabel"] * {
+    overflow:visible !important; text-overflow:clip !important;
+    white-space:normal !important; }
   [data-testid="stMetric"] {
     background:linear-gradient(180deg,var(--panel2),var(--panel));
     border:1px solid var(--line); border-radius:6px; padding:10px 14px;
-    transition:border-color .15s ease;
+    transition:border-color .15s ease; min-width:0; overflow:visible;
   }
+  [data-testid="stMetricDelta"] { white-space:nowrap; }
   [data-testid="stMetric"]:hover { border-color:var(--line2); }
   .stButton button, [data-baseweb="select"] > div, [data-baseweb="input"] input {
     border-radius:5px !important; }
@@ -80,8 +88,8 @@ _CSS = """
   [data-testid="stSegmentedControl"] button[aria-checked="true"],
   [data-baseweb="segmented-control"] [aria-selected="true"] {
     color:var(--amber) !important; }
-  .sma-brand { font-size: 17px; font-weight: 800; letter-spacing:0.22em;
-    color:var(--amber); padding: 4px 0 2px 0; }
+  .sma-brand { font-size: 16px; font-weight: 800; letter-spacing:0.12em;
+    color:var(--amber); padding: 4px 0 2px 0; overflow-wrap:anywhere; }
   .sma-tag { color:var(--mut); font-size:10px; letter-spacing:0.15em;
     text-transform:uppercase; margin-bottom:6px; }
   .sma-status { font-size:11px; color:var(--mut); letter-spacing:0.04em; }
@@ -138,6 +146,9 @@ _CSS = """
     overflow-wrap:anywhere; }
   [data-testid="stCaptionContainer"], .stCaption { color:var(--mut) !important;
     line-height:1.5; }
+  /* Let flex children shrink/wrap instead of clipping their content */
+  [data-testid="stHorizontalBlock"], [data-testid="column"],
+  [data-testid="stVerticalBlock"] { min-width:0; }
   /* Keep flex rows from overflowing their container */
   .sma-row { min-width:0; }
   .sma-row > span { min-width:0; }
@@ -152,12 +163,14 @@ _CSS = """
   /* Responsive / mobile */
   @media (max-width: 820px) {
     .block-container { padding-left:0.6rem; padding-right:0.6rem; }
-    h1 { font-size:19px !important; }
-    h2, h3 { font-size:13px !important; }
+    h1 { font-size:19px !important; letter-spacing:0.02em; }
+    h2, h3 { font-size:13px !important; letter-spacing:0.02em; }
     section.main, .stMarkdown, p, li { font-size:13.5px; }
     .sma-card .px { font-size:16px; }
-    [data-testid="stMetricValue"] { font-size:17px !important; }
+    [data-testid="stMetricValue"] { font-size:16px !important; }
+    [data-testid="stMetricLabel"] { letter-spacing:0.02em; }
     [data-testid="stHorizontalBlock"] { flex-wrap:wrap; }
+    [data-testid="column"] { flex:1 1 100% !important; min-width:100% !important; }
   }
 </style>
 """
