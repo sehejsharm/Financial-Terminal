@@ -8,15 +8,14 @@ from __future__ import annotations
 
 import pandas as pd
 import streamlit as st
-import yfinance as yf
 
-from lib.market_data import get_stock_fundamentals
+from lib.market_data import get_stock_fundamentals, make_ticker
 
 
 @st.cache_data(ttl=3600, show_spinner=False)
 def get_officers(ticker: str) -> list[dict]:
     try:
-        officers = yf.Ticker(ticker).info.get("companyOfficers") or []
+        officers = make_ticker(ticker).info.get("companyOfficers") or []
     except Exception:
         return []
     out = []
@@ -32,7 +31,7 @@ def get_officers(ticker: str) -> list[dict]:
 
 @st.cache_data(ttl=3600, show_spinner=False)
 def get_ownership(ticker: str) -> dict:
-    t = yf.Ticker(ticker)
+    t = make_ticker(ticker)
     out = {}
     for attr in ("major_holders", "institutional_holders", "mutualfund_holders"):
         try:
@@ -45,7 +44,7 @@ def get_ownership(ticker: str) -> dict:
 
 @st.cache_data(ttl=3600, show_spinner=False)
 def get_ratings(ticker: str) -> dict:
-    t = yf.Ticker(ticker)
+    t = make_ticker(ticker)
     out = {}
     try:
         out["recommendations"] = t.recommendations
@@ -60,7 +59,7 @@ def get_ratings(ticker: str) -> dict:
 
 @st.cache_data(ttl=3600, show_spinner=False)
 def get_earnings_history(ticker: str) -> pd.DataFrame:
-    t = yf.Ticker(ticker)
+    t = make_ticker(ticker)
     for attr in ("earnings_history", "earnings_dates"):
         try:
             df = getattr(t, attr)

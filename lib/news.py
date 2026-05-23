@@ -6,7 +6,8 @@ from datetime import datetime, timezone
 
 import requests
 import streamlit as st
-import yfinance as yf
+
+from lib.market_data import make_ticker
 
 _HEADERS = {"User-Agent": "Mozilla/5.0 (compatible; StockMarketAnalyst/1.0)"}
 
@@ -105,7 +106,7 @@ def ticker_news(ticker: str, limit: int = 10) -> list[dict]:
     """Headlines for a single ticker."""
     out: list[dict] = []
     try:
-        raw = yf.Ticker(ticker).news or []
+        raw = make_ticker(ticker).news or []
         for it in raw:
             norm = _normalize_yf_item(it)
             if norm:
@@ -130,7 +131,7 @@ def market_news(limit: int = 10) -> list[dict]:
     seen: set[str] = set()
     for proxy in ("^NSEI", "RELIANCE.NS", "^GSPC"):
         try:
-            raw = yf.Ticker(proxy).news or []
+            raw = make_ticker(proxy).news or []
         except Exception:
             raw = []
         for it in raw:

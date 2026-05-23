@@ -12,7 +12,8 @@ from datetime import datetime, timezone
 import numpy as np
 import pandas as pd
 import streamlit as st
-import yfinance as yf
+
+from lib.market_data import make_ticker
 
 _SQRT2 = math.sqrt(2.0)
 _SQRT2PI = math.sqrt(2.0 * math.pi)
@@ -71,7 +72,7 @@ def black_scholes_greeks(S, K, T, r, sigma, kind="call", q=0.0) -> dict:
 @st.cache_data(ttl=120, show_spinner=False)
 def get_expiries(ticker: str) -> list[str]:
     try:
-        return list(yf.Ticker(ticker).options or [])
+        return list(make_ticker(ticker).options or [])
     except Exception:
         return []
 
@@ -80,7 +81,7 @@ def get_expiries(ticker: str) -> list[str]:
 def get_option_chain(ticker: str, expiry: str) -> dict:
     """Return {'calls': df, 'puts': df} for one expiry, or empty frames."""
     try:
-        oc = yf.Ticker(ticker).option_chain(expiry)
+        oc = make_ticker(ticker).option_chain(expiry)
         return {"calls": oc.calls.copy(), "puts": oc.puts.copy()}
     except Exception:
         return {"calls": pd.DataFrame(), "puts": pd.DataFrame()}

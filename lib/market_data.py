@@ -84,6 +84,47 @@ PERIOD_MAP: dict[str, dict] = {
 PERIOD_LABELS = list(PERIOD_MAP.keys())
 
 
+@st.cache_resource(show_spinner=False)
+def _yf_session():
+    """A curl_cffi session impersonating Chrome.
+
+    Yahoo blocks plain-requests traffic from datacenter/shared IPs (e.g.
+    Streamlit Cloud), which shows up as empty data everywhere. Impersonating a
+    real browser gets past most of that bot-detection. Returns None if
+    curl_cffi is unavailable, in which case yfinance uses its default session.
+    """
+    try:
+        from curl_cffi import requests as _cffi
+        return _cffi.Session(impersonate="chrome")
+    except Exception:
+        return None
+
+
+def make_ticker(symbol: str):
+    """A yf.Ticker bound to the browser-impersonating session (see _yf_session).
+
+    Shared so every module fetches through the same anti-blocking session.
+    """
+    session = _yf_session()
+    try:
+        return yf.Ticker(symbol, session=session) if session else yf.Ticker(symbol)
+    except TypeError:
+        return yf.Ticker(symbol)
+
+
+_ticker = make_ticker
+
+
+def _download(tickers, **kwargs):
+    session = _yf_session()
+    if session is not None:
+        try:
+            return yf.download(tickers, session=session, **kwargs)
+        except TypeError:
+            pass
+    return yf.download(tickers, **kwargs)
+
+
 def infer_currency(ticker: str) -> str:
     """Best-effort currency for a ticker from its suffix, without a network call.
 
@@ -121,12 +162,12 @@ def get_history(ticker: str, period: str) -> pd.DataFrame:
     interval = cfg["interval"]
     try:
         if "period" in cfg:
-            df = yf.Ticker(ticker).history(
+            df = _ticker(ticker).history(
                 period=cfg["period"], interval=interval, auto_adjust=False
             )
         else:
             start = datetime.now() - timedelta(days=cfg["days"])
-            df = yf.Ticker(ticker).history(
+            df = _ticker(ticker).history(
                 start=start.strftime("%Y-%m-%d"), interval=interval, auto_adjust=False
             )
     except Exception:
@@ -151,7 +192,7 @@ def get_history_bulk(tickers: tuple[str, ...], period: str) -> dict[str, pd.Data
         else:
             start = datetime.now() - timedelta(days=cfg["days"])
             kwargs["start"] = start.strftime("%Y-%m-%d")
-        data = yf.download(list(tickers), **kwargs)
+        data = _download(list(tickers), **kwargs)
     except Exception:
         return {t: get_history(t, period) for t in tickers}
 
@@ -176,7 +217,7 @@ def get_quote(ticker: str) -> dict:
 
     Keys: symbol, name, price, prev_close, change, change_pct, currency.
     """
-    t = yf.Ticker(ticker)
+    t = _ticker(ticker)
     price = prev_close = None
     name = INDEX_TICKERS.get(ticker) or SECTORS.get(ticker) or ticker
     currency = infer_currency(ticker)
@@ -227,7 +268,7 @@ def _display_name(ticker: str, fallback: str) -> str:
     if ticker in SECTORS:
         return SECTORS[ticker]
     try:
-        info = yf.Ticker(ticker).info
+        info = _ticker(ticker).info
         return info.get("shortName") or info.get("longName") or fallback
     except Exception:
         return fallback
@@ -239,7 +280,7 @@ def get_quotes_bulk(tickers: tuple[str, ...]) -> dict[str, dict]:
     download for price/change, with light name resolution."""
     out: dict[str, dict] = {}
     try:
-        data = yf.download(
+        data = _download(
             list(tickers), period="5d", interval="1d", group_by="ticker",
             auto_adjust=False, threads=True, progress=False,
         )
@@ -286,7 +327,7 @@ def is_etf(ticker: str) -> bool:
     if ticker in SECTORS:
         return True
     try:
-        info = yf.Ticker(ticker).info
+        info = _ticker(ticker).info
         qt = (info.get("quoteType") or "").upper()
         return qt in ("ETF", "MUTUALFUND")
     except Exception:
@@ -300,7 +341,7 @@ def get_stock_fundamentals(ticker: str) -> dict:
     Missing values come back as None rather than raising.
     """
     try:
-        info = yf.Ticker(ticker).info
+        info = _ticker(ticker).info
     except Exception:
         info = {}
 
@@ -365,7 +406,7 @@ def get_stock_fundamentals(ticker: str) -> dict:
 @st.cache_data(ttl=600, show_spinner=False)
 def get_etf_details(ticker: str) -> dict:
     """Return ETF metadata: expense ratio, holdings, sector weights, returns."""
-    t = yf.Ticker(ticker)
+    t = _ticker(ticker)
     try:
         info = t.info
     except Exception:
@@ -423,7 +464,7 @@ def _universe_quotes(universe: tuple[str, ...]) -> list[dict]:
     """Bulk daily quotes for a universe, with price/change and volume."""
     rows: list[dict] = []
     try:
-        data = yf.download(
+        data = _download(
             list(universe), period="5d", interval="1d", group_by="ticker",
             auto_adjust=False, threads=True, progress=False,
         )

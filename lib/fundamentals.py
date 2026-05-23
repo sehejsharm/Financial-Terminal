@@ -3,7 +3,8 @@ from __future__ import annotations
 
 import pandas as pd
 import streamlit as st
-import yfinance as yf
+
+from lib.market_data import make_ticker
 
 # Key line items to surface per statement (shown if present).
 INCOME_ROWS = [
@@ -27,7 +28,7 @@ CASHFLOW_ROWS = [
 @st.cache_data(ttl=3600, show_spinner=False)
 def get_statement(ticker: str, kind: str, quarterly: bool = False) -> pd.DataFrame:
     """Return a financial statement frame (rows=line items, cols=periods)."""
-    t = yf.Ticker(ticker)
+    t = make_ticker(ticker)
     try:
         if kind == "income":
             df = t.quarterly_income_stmt if quarterly else t.income_stmt
@@ -55,7 +56,7 @@ def select_rows(df: pd.DataFrame, wanted: list[str]) -> pd.DataFrame:
 @st.cache_data(ttl=3600, show_spinner=False)
 def get_estimates(ticker: str) -> dict:
     """Return analyst estimates/targets where yfinance exposes them."""
-    t = yf.Ticker(ticker)
+    t = make_ticker(ticker)
     out: dict = {}
     try:
         pt = t.analyst_price_targets
@@ -79,7 +80,7 @@ def get_estimates(ticker: str) -> dict:
 def capital_structure(ticker: str) -> dict:
     """Return total debt, cash, equity and market cap for the capital stack."""
     try:
-        info = yf.Ticker(ticker).info
+        info = make_ticker(ticker).info
     except Exception:
         info = {}
     return {
