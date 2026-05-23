@@ -86,6 +86,13 @@ def _trunc(s: str, n: int = 20) -> str:
     return s if len(s) <= n else s[:n - 1] + "…"
 
 
+def _rgba(hex_color: str, alpha: float) -> str:
+    """Convert '#rrggbb' to an 'rgba(r,g,b,a)' string Plotly accepts."""
+    h = hex_color.lstrip("#")
+    r, g, b = int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16)
+    return f"rgba({r},{g},{b},{alpha})"
+
+
 def build_chain_figure(ticker: str, company_name: str, data: dict) -> go.Figure:
     """Return a Plotly figure in Bloomberg SPLC node-graph style."""
     suppliers   = (data.get("suppliers")   or [])[:7]
@@ -173,7 +180,7 @@ def build_chain_figure(ticker: str, company_name: str, data: dict) -> go.Figure:
             x=aex, y=aey, ax=ax, ay=ay,
             xref="x", yref="y", axref="x", ayref="y",
             showarrow=True, arrowhead=2, arrowsize=1.2, arrowwidth=1.2,
-            arrowcolor=acol + "88",  # semi-transparent
+            arrowcolor=_rgba(acol, 0.53),  # semi-transparent
         ))
 
     # Nodes
