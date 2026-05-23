@@ -68,7 +68,7 @@ else:
 # ---- AI macro pulse-check ----------------------------------------------
 st.subheader("AI macro pulse-check")
 if not ai_analyst.is_available():
-    st.info("Add your GEMINI_API_KEY to .env to enable the AI pulse-check.")
+    st.info("Add GROQ_API_KEY (free at console.groq.com) or GEMINI_API_KEY to your .env to enable the AI pulse-check.")
 elif st.button("Generate macro pulse-check"):
     with st.spinner("Asking Gemini..."):
         note = ""

@@ -24,6 +24,16 @@ def get_gemini_key() -> str | None:
     return key.strip() if key and key.strip() else None
 
 
+def get_groq_key() -> str | None:
+    """Return the Groq API key from the environment, or None.
+
+    Free key at console.groq.com — 14 400 req/day, 30 req/min.
+    Much more generous than Gemini's free tier.
+    """
+    key = os.getenv("GROQ_API_KEY")
+    return key.strip() if key and key.strip() else None
+
+
 def get_fred_key() -> str | None:
     """Return the FRED API key from the environment, or None."""
     key = os.getenv("FRED_API_KEY")

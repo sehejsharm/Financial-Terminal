@@ -233,7 +233,7 @@ tech_ctx = {"technical_score": tech_score, "fundamental_score": fund_score,
 
 with tab_bb:
     if not ai_analyst.is_available():
-        st.info("Add your GEMINI_API_KEY to .env to enable AI analysis.")
+        st.info("Add GROQ_API_KEY (free at console.groq.com) or GEMINI_API_KEY to your .env to enable AI analysis.")
     elif st.button("Generate bull / bear case", key="bb_btn"):
         with st.spinner("Asking Gemini..."):
             try:
@@ -243,7 +243,7 @@ with tab_bb:
 
 with tab_deep:
     if not ai_analyst.is_available():
-        st.info("Add your GEMINI_API_KEY to .env to enable AI analysis.")
+        st.info("Add GROQ_API_KEY (free at console.groq.com) or GEMINI_API_KEY to your .env to enable AI analysis.")
     elif st.button("Generate deep analysis", key="deep_btn"):
         with st.spinner("Asking Gemini..."):
             try:

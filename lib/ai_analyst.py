@@ -1,8 +1,11 @@
-"""Google Gemini API calls for educational market analysis.
+"""AI calls for educational market analysis.
 
-Uses the REST endpoint with the key from the environment (.env), so the key
-never appears in client code. Compliance: prompts keep the model educational
-and free of buy/sell/hold recommendations.
+Provider priority: Groq (free, 14 400 req/day) → Gemini fallback.
+Set GROQ_API_KEY in .env for the primary provider (free at console.groq.com).
+Set GEMINI_API_KEY as a fallback if you already have one.
+
+Both keys are read from the environment so they never appear in client code.
+Compliance: prompts keep the model educational and free of buy/sell/hold recs.
 """
 from __future__ import annotations
 
@@ -11,10 +14,19 @@ import json
 import requests
 import streamlit as st
 
-from lib.config import get_gemini_key
+from lib.config import get_gemini_key, get_groq_key
 
-MODEL = "gemini-2.0-flash"
-_ENDPOINT = "https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
+# ── Groq (primary) ────────────────────────────────────────────────────────────
+_GROQ_URL   = "https://api.groq.com/openai/v1/chat/completions"
+# llama-3.3-70b-versatile: excellent quality; free tier 14 400 req/day 30 req/min
+_GROQ_MODEL = "llama-3.3-70b-versatile"
+
+# ── Gemini (fallback) ─────────────────────────────────────────────────────────
+_GEMINI_MODEL    = "gemini-2.0-flash"
+_GEMINI_ENDPOINT = (
+    "https://generativelanguage.googleapis.com/v1beta/models/"
+    "{model}:generateContent"
+)
 
 SYSTEM_PROMPT = (
     "You are an educational markets analyst for a personal-research terminal "
@@ -35,14 +47,73 @@ class AnalystError(RuntimeError):
 
 
 def is_available() -> bool:
-    return get_gemini_key() is not None
+    """True if at least one AI provider key is configured."""
+    return get_groq_key() is not None or get_gemini_key() is not None
 
 
-def _call(user_prompt: str, max_tokens: int = 1400) -> str:
+def active_provider() -> str:
+    """Return a human-readable name of whichever provider will be used."""
+    if get_groq_key():
+        return "Groq (Llama 3.3)"
+    if get_gemini_key():
+        return "Gemini 2.0 Flash"
+    return "none"
+
+
+# ── private provider calls ────────────────────────────────────────────────────
+
+def _call_groq(user_prompt: str, max_tokens: int) -> str:
+    key = get_groq_key()
+    if not key:
+        raise AnalystError("No Groq key configured.")
+    try:
+        resp = requests.post(
+            _GROQ_URL,
+            headers={"Authorization": f"Bearer {key}",
+                     "Content-Type": "application/json"},
+            json={
+                "model": _GROQ_MODEL,
+                "messages": [
+                    {"role": "system", "content": SYSTEM_PROMPT},
+                    {"role": "user",   "content": user_prompt},
+                ],
+                "max_tokens": max_tokens,
+                "temperature": 0.4,
+            },
+            timeout=60,
+        )
+    except requests.RequestException as exc:
+        raise AnalystError(f"Network error contacting Groq: {exc}")
+
+    if resp.status_code == 429:
+        raise AnalystError(
+            "Groq rate limit hit. The free tier allows 30 req/min and "
+            "14 400 req/day — wait a moment and try again."
+        )
+    if resp.status_code in (401, 403):
+        raise AnalystError(
+            "Groq rejected the API key. Re-check GROQ_API_KEY in your "
+            ".env or Streamlit secrets."
+        )
+    if resp.status_code != 200:
+        detail = ""
+        try:
+            detail = resp.json().get("error", {}).get("message", "")
+        except Exception:
+            detail = resp.text[:200]
+        raise AnalystError(f"Groq API error {resp.status_code}: {detail}")
+
+    try:
+        return resp.json()["choices"][0]["message"]["content"].strip()
+    except (KeyError, IndexError):
+        raise AnalystError("Groq returned an empty response.")
+
+
+def _call_gemini(user_prompt: str, max_tokens: int) -> str:
     key = get_gemini_key()
     if not key:
-        raise AnalystError("Gemini API key is not configured.")
-    url = _ENDPOINT.format(model=MODEL)
+        raise AnalystError("No Gemini key configured.")
+    url = _GEMINI_ENDPOINT.format(model=_GEMINI_MODEL)
     body = {
         "systemInstruction": {"parts": [{"text": SYSTEM_PROMPT}]},
         "contents": [{"role": "user", "parts": [{"text": user_prompt}]}],
@@ -55,13 +126,13 @@ def _call(user_prompt: str, max_tokens: int = 1400) -> str:
     if resp.status_code == 429:
         raise AnalystError(
             "Gemini usage limit reached. The free tier caps requests per minute "
-            "and per day - wait a minute and try again, or check your key's quota "
-            "in Google AI Studio (aistudio.google.com)."
+            "and per day — wait a minute and try again, or check your key's quota "
+            "at aistudio.google.com."
         )
     if resp.status_code in (401, 403):
         raise AnalystError(
-            "Gemini rejected the API key (invalid or not enabled). Re-check "
-            "GEMINI_API_KEY in your .env or Streamlit secrets."
+            "Gemini rejected the API key. Re-check GEMINI_API_KEY in your "
+            ".env or Streamlit secrets."
         )
     if resp.status_code != 200:
         detail = ""
@@ -77,6 +148,20 @@ def _call(user_prompt: str, max_tokens: int = 1400) -> str:
     except (KeyError, IndexError):
         raise AnalystError("Gemini returned an empty or blocked response.")
 
+
+def _call(user_prompt: str, max_tokens: int = 1400) -> str:
+    """Call the best available provider; raises AnalystError on failure."""
+    if get_groq_key():
+        return _call_groq(user_prompt, max_tokens)
+    if get_gemini_key():
+        return _call_gemini(user_prompt, max_tokens)
+    raise AnalystError(
+        "No AI key configured. Add GROQ_API_KEY (free at console.groq.com) "
+        "or GEMINI_API_KEY to your .env / Streamlit secrets."
+    )
+
+
+# ── public helpers ────────────────────────────────────────────────────────────
 
 def _fmt(d: dict) -> str:
     return json.dumps({k: v for k, v in d.items() if v is not None}, default=str)
