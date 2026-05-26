@@ -46,5 +46,9 @@ for i in range(n_charts):
                 title=ticker,
             )
             st.plotly_chart(fig, use_container_width=True, key=f"ws_ch_{i}")
+            if st.button(f"Open {ticker} in Terminal →",
+                         key=f"ws_open_{i}", use_container_width=True):
+                st.session_state["nav_ticker"] = ticker
+                st.switch_page("pages/3_Terminal.py")
 
 disclosure()

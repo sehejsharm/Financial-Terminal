@@ -135,12 +135,21 @@ _CSS = """
     text-transform:uppercase; letter-spacing:0.04em; color:var(--mut); }
   [data-testid="stDataFrame"] * {
     font-family:"JetBrains Mono","SF Mono","Menlo","Consolas",monospace !important; }
-  /* Tabs */
-  [data-baseweb="tab-list"] { gap:2px; border-bottom:1px solid var(--line); }
+  /* Tabs — make them visibly clickable, not just text */
+  [data-baseweb="tab-list"] { gap:4px; border-bottom:1px solid var(--line);
+    margin-bottom:8px; }
   [data-baseweb="tab"] { font-family:"JetBrains Mono",monospace;
-    text-transform:uppercase; letter-spacing:0.05em; font-size:12px; }
-  [data-baseweb="tab"][aria-selected="true"] { color:var(--amber) !important; }
-  [data-baseweb="tab-highlight"] { background:var(--amber) !important; }
+    text-transform:uppercase; letter-spacing:0.05em; font-size:12px;
+    padding:8px 14px !important; background:var(--panel) !important;
+    border:1px solid var(--line) !important; border-bottom:none !important;
+    border-radius:5px 5px 0 0 !important; color:var(--mut) !important;
+    transition:color .15s ease, border-color .15s ease, background .15s ease; }
+  [data-baseweb="tab"]:hover { color:#fff !important;
+    border-color:var(--line2) !important; background:var(--panel2) !important; }
+  [data-baseweb="tab"][aria-selected="true"] { color:var(--amber) !important;
+    border-color:var(--amber) !important; background:var(--panel2) !important; }
+  [data-baseweb="tab-highlight"] { background:var(--amber) !important;
+    height:2px !important; }
   /* Text readability + wrapping */
   section.main p, .stMarkdown p, .stMarkdown li { line-height:1.55;
     overflow-wrap:anywhere; }

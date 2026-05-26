@@ -22,6 +22,16 @@ from lib.ui import color_pct_html, cur_symbol, disclosure, fmt_num, setup_page
 setup_page("Market Pulse")
 st.title("Market Pulse")
 
+# Quick jump: send any ticker straight to Terminal for full analysis.
+jc1, jc2 = st.columns([4, 1])
+_jump_tk = jc1.text_input(
+    "Open in Terminal", value="", placeholder="Type a ticker (e.g. RELIANCE.NS, AAPL)",
+    label_visibility="collapsed", key="mp_jump_tk",
+).strip().upper()
+if jc2.button("Open →", use_container_width=True, key="mp_jump_btn") and _jump_tk:
+    st.session_state["nav_ticker"] = _jump_tk
+    st.switch_page("pages/3_Terminal.py")
+
 # ---- Controls -----------------------------------------------------------
 period = st.segmented_control("Period", PERIOD_LABELS, default="1D", key="mp_period")
 period = period or "1D"

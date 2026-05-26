@@ -148,3 +148,135 @@ def apply_filters(rows: list[dict], filters: list[dict]) -> list[dict]:
         if ok:
             out.append(m)
     return out
+
+
+# ── Value-investing screens (merged in from the old Value Investing page) ────
+
+@st.cache_data(ttl=3600, show_spinner=False)
+def buffett_screen(min_score: int = 70) -> list[dict]:
+    """Rank the screen universe by Buffett-checklist score.
+
+    Returns rows with: ticker, name, mcap_cr, score, passes, warns, fails,
+    roe, pe, peg, de.  Only names with score >= min_score are returned.
+    """
+    from lib.value_investing import buffett_checklist
+
+    out = []
+    for t in SCREEN_UNIVERSE:
+        f = get_stock_fundamentals(t)
+        if not f or f.get("market_cap") is None:
+            continue
+        items, summary = buffett_checklist(f)
+        if summary["score"] < min_score:
+            continue
+        out.append({
+            "ticker": t.replace(".NS", ""),
+            "name": f.get("name", t),
+            "mcap_cr": round(f["market_cap"] / 1e7, 0),
+            "score": summary["score"],
+            "passes": summary["pass"],
+            "warns": summary["warn"],
+            "fails": summary["fail"],
+            "roe": round((f.get("roe") or 0) * 100, 1) if f.get("roe") is not None else None,
+            "pe": f.get("trailing_pe"),
+            "peg": f.get("peg"),
+            "de": f.get("debt_to_equity"),
+        })
+    out.sort(key=lambda r: r["score"], reverse=True)
+    return out
+
+
+@st.cache_data(ttl=3600, show_spinner=False)
+def graham_screen(growth_default: float = 8.0, bond_yield: float = 7.0,
+                  min_mos: float = 20.0) -> list[dict]:
+    """Rank the screen universe by Graham margin-of-safety.
+
+    Uses trailing-EPS growth if available, else `growth_default`.  Bond yield
+    is the high-grade reference yield (India 10Y G-sec proxy by default).
+    Returns names with margin_of_safety >= min_mos, sorted descending.
+    """
+    from lib.value_investing import graham_intrinsic_value, margin_of_safety
+
+    out = []
+    for t in SCREEN_UNIVERSE:
+        f = get_stock_fundamentals(t)
+        if not f:
+            continue
+        eps = f.get("eps_trailing")
+        price = f.get("price")
+        if not eps or not price or eps <= 0:
+            continue
+        g_raw = f.get("earnings_growth") or f.get("revenue_growth")
+        growth = (g_raw * 100) if g_raw is not None else growth_default
+        iv = graham_intrinsic_value(eps, growth, bond_yield)
+        mos = margin_of_safety(iv, price)
+        if mos is None or mos < min_mos:
+            continue
+        out.append({
+            "ticker": t.replace(".NS", ""),
+            "name": f.get("name", t),
+            "price": round(price, 2),
+            "intrinsic": round(iv, 2),
+            "margin_of_safety": round(mos, 1),
+            "eps": round(eps, 2),
+            "growth_used": round(growth, 1),
+            "pe": f.get("trailing_pe"),
+        })
+    out.sort(key=lambda r: r["margin_of_safety"], reverse=True)
+    return out
+
+
+# ── ETF screen ───────────────────────────────────────────────────────────────
+
+ETF_UNIVERSE = [
+    # India
+    "NIFTYBEES.NS", "JUNIORBEES.NS", "BANKBEES.NS", "GOLDBEES.NS",
+    "ITBEES.NS", "PSUBNKBEES.NS", "LIQUIDBEES.NS", "CPSEETF.NS",
+    "ICICINIFTY.NS", "HDFCNIFTY.NS", "MAHKTECH.NS",
+    # US (broad / sector)
+    "SPY", "VOO", "QQQ", "VTI", "IWM", "EFA", "EEM", "XLK", "XLF",
+    "XLE", "XLV", "XLY", "XLP", "XLI", "VNQ", "GLD", "SLV", "TLT",
+]
+
+
+@st.cache_data(ttl=3600, show_spinner=False)
+def etf_screen(sort_by: str = "ytd_return", sector: str | None = None) -> list[dict]:
+    """Scan the ETF universe; sort by `sort_by` desc.
+
+    sort_by ∈ {"ytd_return", "three_year_return", "five_year_return",
+              "expense_ratio_asc", "total_assets"}
+    sector: substring match against the ETF category, optional.
+    """
+    from lib.market_data import get_etf_details, get_quote
+
+    rows = []
+    for t in ETF_UNIVERSE:
+        d = get_etf_details(t)
+        if not d:
+            continue
+        q = get_quote(t)
+        er = d.get("expense_ratio")
+        if er is not None and er < 1:
+            er *= 100  # fraction -> percent
+        rows.append({
+            "ticker": t,
+            "name": d.get("name", t),
+            "category": d.get("category") or "—",
+            "price": q.get("price"),
+            "ytd_return": (d.get("ytd_return") or 0) * 100 if d.get("ytd_return") is not None else None,
+            "three_year_return": (d.get("three_year_return") or 0) * 100 if d.get("three_year_return") is not None else None,
+            "five_year_return": (d.get("five_year_return") or 0) * 100 if d.get("five_year_return") is not None else None,
+            "expense_ratio": round(er, 2) if er is not None else None,
+            "total_assets": d.get("total_assets"),
+            "beta_3y": d.get("beta_3y"),
+        })
+
+    if sector:
+        rows = [r for r in rows if sector.lower() in (r["category"] or "").lower()]
+
+    if sort_by == "expense_ratio_asc":
+        rows.sort(key=lambda r: (r["expense_ratio"] is None, r["expense_ratio"] or 0))
+    else:
+        rows.sort(key=lambda r: (r.get(sort_by) is None, -(r.get(sort_by) or 0)))
+
+    return rows
