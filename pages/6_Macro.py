@@ -38,21 +38,37 @@ for i, ind in enumerate(indicators):
 
 # ---- Yield curve --------------------------------------------------------
 st.subheader("Treasury yield curve")
-curve = get_yield_curve()
-if curve.empty:
-    st.caption("Yield curve data unavailable.")
+try:
+    curve = get_yield_curve()
+except Exception:
+    curve = None
+
+if curve is None or curve.empty:
+    st.warning(
+        "Treasury yield-curve data could not be loaded right now. This is "
+        "usually a transient FRED hiccup or a rate limit — try again in a "
+        "moment."
+    )
+    if st.button("Retry yield curve", key="macro_curve_retry"):
+        get_yield_curve.clear()
+        st.rerun()
 else:
-    fig = go.Figure(go.Scatter(
-        x=curve["maturity"], y=curve["yield"], mode="lines+markers",
-        line=dict(color="#ffae00", width=2.5), marker=dict(size=8),
-        text=[f"{y:.2f}%" for y in curve["yield"]],
-    ))
-    fig.update_layout(template="plotly_dark", height=380,
-                      paper_bgcolor="#0a0b0d", plot_bgcolor="#0a0b0d",
-                      font=dict(family="JetBrains Mono, monospace", color="#cdd1d8"),
-                      margin=dict(l=10, r=10, t=10, b=10),
-                      xaxis_title="Maturity", yaxis_title="Yield %")
-    st.plotly_chart(fig, use_container_width=True)
+    try:
+        fig = go.Figure(go.Scatter(
+            x=curve["maturity"], y=curve["yield"], mode="lines+markers",
+            line=dict(color="#ffae00", width=2.5), marker=dict(size=8),
+            text=[f"{y:.2f}%" for y in curve["yield"]],
+        ))
+        fig.update_layout(template="plotly_dark", height=380,
+                          paper_bgcolor="#0a0b0d", plot_bgcolor="#0a0b0d",
+                          font=dict(family="JetBrains Mono, monospace",
+                                    color="#cdd1d8"),
+                          margin=dict(l=10, r=10, t=10, b=10),
+                          xaxis_title="Maturity", yaxis_title="Yield %")
+        st.plotly_chart(fig, use_container_width=True)
+    except Exception:
+        st.warning("Could not render the yield-curve chart from the returned "
+                   "data.")
 
     spread = None
     try:

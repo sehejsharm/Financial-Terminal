@@ -34,15 +34,23 @@ def _fred():
 
 @st.cache_data(ttl=3600, show_spinner=False)
 def get_series(series_id: str, observations: int = 400) -> pd.Series:
-    """Return a FRED series (most recent observations), or empty on failure."""
+    """Return a FRED series (most recent observations), or empty on failure.
+
+    Retries transient FRED failures with a short backoff before giving up.
+    """
+    import time
+
     fred = _fred()
     if fred is None:
         return pd.Series(dtype=float)
-    try:
-        s = fred.get_series(series_id)
-        return s.dropna().tail(observations)
-    except Exception:
-        return pd.Series(dtype=float)
+    for attempt in range(3):
+        try:
+            s = fred.get_series(series_id)
+            return s.dropna().tail(observations)
+        except Exception:
+            if attempt < 2:
+                time.sleep(0.5 * (attempt + 1))
+    return pd.Series(dtype=float)
 
 
 @st.cache_data(ttl=3600, show_spinner=False)

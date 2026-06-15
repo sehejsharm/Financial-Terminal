@@ -59,6 +59,7 @@ from lib.ui import (
     color_pct_html,
     cur_symbol,
     disclosure,
+    download_csv_button,
     fmt_num,
     fmt_pct,
     human_number,
@@ -389,6 +390,9 @@ elif fn == "Financials":
                 disp[c] = disp[c].apply(
                     lambda v: human_number(v, cur) if v is not None else "—")
             st.dataframe(disp, use_container_width=True)
+            download_csv_button(
+                df, f"{ticker}_{kind}_{'q' if quarterly else 'a'}.csv",
+                key=f"dl_fin_{kind}", index=True)
 
 elif fn == "Estimates & targets":
     est = get_estimates(ticker)
@@ -503,7 +507,9 @@ elif fn == "Comparables":
     )
     peers = [p.strip().upper() for p in peers_raw.split(",") if p.strip()]
     if peers:
-        st.dataframe(comps_matrix(peers), use_container_width=True, hide_index=True)
+        comps = comps_matrix(peers)
+        st.dataframe(comps, use_container_width=True, hide_index=True)
+        download_csv_button(comps, f"{ticker}_comps.csv", key="dl_comps")
 
 elif fn == "Debt profile":
     st.caption("Free data exposes debt levels and ratios, not a "

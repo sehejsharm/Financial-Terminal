@@ -1,0 +1,13 @@
+[tool.pytest.ini_options]
+pythonpath = ["."]
+testpaths = ["tests"]
+addopts = "-q"
+
+[tool.ruff]
+target-version = "py311"
+exclude = [".venv", "venv", "data"]
+
+[tool.ruff.lint]
+# Phase 0 posture: catch real bugs (syntax errors, undefined names,
+# f-string / assert mistakes), not style. Tighten later (see migration plan).
+select = ["E9", "F63", "F7", "F82"]

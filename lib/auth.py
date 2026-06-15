@@ -11,6 +11,8 @@ import hashlib
 import json
 import os
 import secrets
+import sys
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -18,10 +20,17 @@ import streamlit as st
 
 DATA_DIR = Path(__file__).resolve().parent.parent / "data"
 USERS_PATH = DATA_DIR / "users.json"
+INITIAL_PW_PATH = DATA_DIR / "INITIAL_ADMIN_PASSWORD.txt"
 
 ROLE_MASTER = "master_admin"
 ROLE_USER = "user"
 _ITERATIONS = 200_000
+
+# Brute-force throttle (in-process; resets on restart). A full solution uses a
+# shared store like Redis — see docs/enterprise-migration-plan.md (Phase 4).
+_MAX_ATTEMPTS = 5
+_LOCKOUT_SECONDS = 300
+_failures: dict[str, dict] = {}  # key -> {"count": int, "until": float}
 
 
 def _hash(password: str, salt: str) -> str:
@@ -34,11 +43,43 @@ def _now() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="seconds")
 
 
+def _surface_generated_password(user: str, pw: str) -> None:
+    """Make an auto-generated admin password retrievable by the operator.
+
+    Logged to stderr (visible in Streamlit Cloud → Manage app → logs) and
+    written to a gitignored file. Never shown in the public UI.
+    """
+    msg = (
+        f"[Motherboard] No MOTHERBOARD_ADMIN_PASSWORD set — generated a "
+        f"temporary admin password for user '{user}': {pw}\n"
+        f"[Motherboard] Set MOTHERBOARD_ADMIN_PASSWORD in your environment / "
+        f"Streamlit secrets to a fixed value (this random one changes on every "
+        f"restart)."
+    )
+    print(msg, file=sys.stderr)
+    try:
+        DATA_DIR.mkdir(parents=True, exist_ok=True)
+        with open(INITIAL_PW_PATH, "w", encoding="utf-8") as fh:
+            fh.write(pw + "\n")
+    except Exception:
+        pass
+
+
 def _seed() -> dict:
-    user = os.getenv("MOTHERBOARD_ADMIN_USER", "Sehej").strip()
-    pw = os.getenv("MOTHERBOARD_ADMIN_PASSWORD", "2104698455")
+    """Seed the first master-admin account.
+
+    Credentials come from the environment. If no password is configured we
+    generate a strong random one rather than ever falling back to a known
+    default — see docs/enterprise-migration-plan.md (Phase 0).
+    """
+    user = os.getenv("MOTHERBOARD_ADMIN_USER", "admin").strip() or "admin"
+    pw = os.getenv("MOTHERBOARD_ADMIN_PASSWORD", "").strip()
+    auto_generated = False
+    if not pw:
+        pw = secrets.token_urlsafe(12)
+        auto_generated = True
     salt = secrets.token_hex(16)
-    return {
+    data = {
         "users": {
             user.lower(): {
                 "display": user,
@@ -50,6 +91,9 @@ def _seed() -> dict:
             }
         }
     }
+    if auto_generated:
+        _surface_generated_password(user, pw)
+    return data
 
 
 def _load() -> dict:
@@ -71,6 +115,27 @@ def _save(data: dict) -> None:
     DATA_DIR.mkdir(parents=True, exist_ok=True)
     with open(USERS_PATH, "w", encoding="utf-8") as fh:
         json.dump(data, fh, indent=2)
+
+
+def _lock_remaining(key: str) -> int:
+    """Seconds remaining on a lockout for `key`, or 0 if not locked."""
+    rec = _failures.get(key)
+    if not rec:
+        return 0
+    remaining = rec.get("until", 0) - time.time()
+    return int(remaining) if remaining > 0 else 0
+
+
+def _note_failure(key: str) -> None:
+    rec = _failures.setdefault(key, {"count": 0, "until": 0.0})
+    rec["count"] += 1
+    if rec["count"] >= _MAX_ATTEMPTS:
+        rec["until"] = time.time() + _LOCKOUT_SECONDS
+        rec["count"] = 0  # reset the counter; the lockout clock now governs
+
+
+def _reset_failures(key: str) -> None:
+    _failures.pop(key, None)
 
 
 def verify_credentials(username: str, password: str) -> dict | None:
@@ -172,12 +237,28 @@ def _render_login() -> None:
             password = st.text_input("Password", type="password")
             submitted = st.form_submit_button("Sign in", use_container_width=True)
         if submitted:
-            user = verify_credentials(username, password)
-            if user:
-                st.session_state.auth_user = user
-                st.rerun()
+            key = (username or "").strip().lower() or "__blank__"
+            locked = _lock_remaining(key)
+            if locked:
+                mins = (locked + 59) // 60
+                st.error(
+                    f"Too many failed attempts. Try again in ~{mins} "
+                    f"minute(s)."
+                )
             else:
-                st.error("Invalid credentials or inactive account.")
+                user = verify_credentials(username, password)
+                if user:
+                    _reset_failures(key)
+                    st.session_state.auth_user = user
+                    st.rerun()
+                else:
+                    _note_failure(key)
+                    remaining = _lock_remaining(key)
+                    if remaining:
+                        st.error("Too many failed attempts — account locked "
+                                 "for 5 minutes.")
+                    else:
+                        st.error("Invalid credentials or inactive account.")
 
 
 def login_gate() -> None:

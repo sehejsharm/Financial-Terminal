@@ -5,6 +5,7 @@
 # User data (holdings, accounts/credentials)
 data/portfolio.json
 data/users.json
+data/INITIAL_ADMIN_PASSWORD.txt
 
 # Python
 __pycache__/

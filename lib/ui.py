@@ -240,6 +240,19 @@ def disclosure() -> None:
     st.caption(DISCLOSURE)
 
 
+def download_csv_button(df, filename: str, label: str = "⬇ Download CSV",
+                        key: str | None = None, index: bool = False) -> None:
+    """Render a CSV download button for a DataFrame (no-op if empty/None)."""
+    if df is None or getattr(df, "empty", True):
+        return
+    try:
+        csv = df.to_csv(index=index).encode("utf-8")
+    except Exception:
+        return
+    st.download_button(label, data=csv, file_name=filename, mime="text/csv",
+                       key=key, use_container_width=False)
+
+
 def human_number(n: float | int | None, prefix: str = "") -> str:
     if n is None:
         return "—"

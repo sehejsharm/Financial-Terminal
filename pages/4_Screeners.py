@@ -19,7 +19,7 @@ from lib.screens import (
     run_preset,
     scan_universe,
 )
-from lib.ui import disclosure, setup_page
+from lib.ui import disclosure, download_csv_button, setup_page
 
 setup_page("Screeners")
 st.title("Screeners")
@@ -53,6 +53,8 @@ def _results_block(rows: list[dict], display_cols: dict, suffix: str,
     df_disp = df[keep].rename(columns=display_cols)
     st.success(f"{len(rows)} matches.")
     st.dataframe(df_disp, use_container_width=True, hide_index=True)
+    download_csv_button(df_disp, f"screen_{suffix}.csv",
+                        key=f"dl_{suffix}")
 
     # Quick-jump: pick any of the matching tickers and open it in Terminal.
     tickers = [row[ticker_field] for row in rows if row.get(ticker_field)]
