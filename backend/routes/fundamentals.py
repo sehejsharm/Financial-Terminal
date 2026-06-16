@@ -21,6 +21,7 @@ from lib.fundamentals import (
     get_statement,
     select_rows,
 )
+from lib import nse
 from lib.institutional import (
     comps_matrix,
     get_earnings_history,
@@ -103,21 +104,44 @@ def comps(tickers: str = Query(..., description="Comma-separated peer tickers"),
         return []
 
 
+def _nse_shareholding_as_major_holders(rows):
+    """Convert NSE's shareholding-pattern rows into the major_holders frame
+    shape the frontend already renders. Columns vary by ticker; we surface
+    whatever NSE returns."""
+    if not rows:
+        return {"columns": [], "rows": []}
+    cols = list(rows[0].keys())
+    return {"columns": cols, "rows": rows}
+
+
 @router.get("/{ticker}/ownership")
 @cached(ttl=3600)
 def ownership(ticker: str, _user: dict = Depends(auth.current_user)):
     empty_frame = {"columns": [], "rows": []}
     try:
+        # yfinance path (US-centric coverage)
         own = get_ownership(ticker) or {}
+        major = frame_payload(own.get("major_holders"))
+        inst = frame_payload(own.get("institutional_holders"))
+        mfs = frame_payload(own.get("mutualfund_holders"))
+        officers = [
+            {"name": o.get("name"), "title": o.get("title"),
+             "pay": o.get("pay"), "age": o.get("age")}
+            for o in (get_officers(ticker) or [])
+        ]
+
+        # NSE overlay: shareholding pattern (promoter/public/FII/DII) for .NS
+        if nse.is_indian(ticker) and not major["rows"]:
+            corp = nse.corporate_info(ticker) or {}
+            sp = corp.get("shareholding_pattern") or []
+            if sp:
+                major = _nse_shareholding_as_major_holders(sp)
+
         return {
-            "major_holders": frame_payload(own.get("major_holders")),
-            "institutional_holders": frame_payload(own.get("institutional_holders")),
-            "mutualfund_holders": frame_payload(own.get("mutualfund_holders")),
-            "officers": [
-                {"name": o.get("name"), "title": o.get("title"),
-                 "pay": o.get("pay"), "age": o.get("age")}
-                for o in (get_officers(ticker) or [])
-            ],
+            "major_holders": major,
+            "institutional_holders": inst,
+            "mutualfund_holders": mfs,
+            "officers": officers,
         }
     except Exception:
         return {"major_holders": empty_frame, "institutional_holders": empty_frame,

@@ -1,0 +1,59 @@
+# Fly.io config for the Motherboard FastAPI backend.
+# Uses backend/Dockerfile as the image — no other changes needed.
+#
+# Why Fly instead of Render free: Fly's free shared-cpu-1x runs always-on
+# (no idle sleep, no 50s cold starts), and the global anycast routing lands
+# closer to most users than Render's single us-east region.
+#
+# Deploy:
+#   curl -L https://fly.io/install.sh | sh        # one-time
+#   fly auth login
+#   fly launch --copy-config --no-deploy           # creates the app, asks for region
+#   fly secrets set MOTHERBOARD_ADMIN_USER=... \
+#                   MOTHERBOARD_ADMIN_PASSWORD=... \
+#                   BACKEND_JWT_SECRET=$(openssl rand -hex 32) \
+#                   GROQ_API_KEY=... \
+#                   FRED_API_KEY=... \
+#                   TWELVE_DATA_API_KEY=... \
+#                   BACKEND_CORS_ORIGINS=https://financial-terminal-peach.vercel.app
+#   fly deploy
+#
+# Then point the frontend at the new URL:
+#   Vercel → Project → Settings → Environment Variables →
+#   NEXT_PUBLIC_API_URL = https://motherboard-api.fly.dev
+#   (redeploy the frontend so it picks up the change)
+
+app = "motherboard-api"
+primary_region = "bom"          # Bombay — closest to NSE; switch if your users aren't in India
+
+[build]
+  dockerfile = "backend/Dockerfile"
+
+[http_service]
+  internal_port = 8000
+  force_https = true
+  # Keep at least one machine running. Free tier allows 3 shared-cpu-1x VMs,
+  # so this is fine. Set to 0 to let Fly stop them when idle (saves quota,
+  # adds ~5s cold start).
+  auto_stop_machines = "off"
+  auto_start_machines = true
+  min_machines_running = 1
+
+  [http_service.concurrency]
+    type = "requests"
+    soft_limit = 50
+    hard_limit = 100
+
+[[vm]]
+  size = "shared-cpu-1x"
+  memory = "512mb"              # 256mb works for healthz only; lib/ deps need 512
+  cpu_kind = "shared"
+  cpus = 1
+
+[checks.healthz]
+  type = "http"
+  port = 8000
+  path = "/healthz"
+  interval = "30s"
+  timeout = "5s"
+  grace_period = "10s"

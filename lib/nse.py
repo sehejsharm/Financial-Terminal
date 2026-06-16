@@ -140,11 +140,11 @@ def _safe_float(v):
 
 
 def snapshot(ticker: str) -> dict | None:
-    """Fundamentals snapshot built from /api/quote-equity + /api/quote-equity?section=trade_info.
+    """Fundamentals snapshot built from /api/quote-equity (base + trade_info).
 
     Pulls: name, sector, industry, price/prev/change, 52-w range, P/E, market
-    cap (issuedSize × lastPrice), face value, ISIN, listing date.
-    Promoter holding requires a second call to /api/quote-equity?section=corp_info.
+    cap (issuedSize × lastPrice), face value, ISIN, listing date, VWAP,
+    intraday range, delivery %, volume, value traded, securities lending.
     """
     sym = _clean_symbol(ticker)
     if not sym:
@@ -153,12 +153,19 @@ def snapshot(ticker: str) -> dict | None:
     if not data:
         return None
 
+    # Second call: trade_info section has volume, value, deliveryQuantity etc.
+    trade = _get("/api/quote-equity", {"symbol": sym, "section": "trade_info"}) or {}
+
     info = data.get("info") or {}
     pi = data.get("priceInfo") or {}
     industry_info = data.get("industryInfo") or {}
     security_info = data.get("securityInfo") or {}
     metadata = data.get("metadata") or {}
     wadj = pi.get("weekHighLow") or {}
+    intraday = pi.get("intraDayHighLow") or {}
+    market_dept = trade.get("marketDeptOrderBook") or {}
+    sec_wise = trade.get("securityWiseDP") or {}
+    trade_meta = trade.get("tradeInfo") or {}
 
     last = _safe_float(pi.get("lastPrice"))
     issued = _safe_float(security_info.get("issuedSize"))
@@ -183,10 +190,41 @@ def snapshot(ticker: str) -> dict | None:
         "listing_date": metadata.get("listingDate"),
         "listing_status": metadata.get("status"),
         "open": _safe_float(pi.get("open")),
-        "day_high": _safe_float((pi.get("intraDayHighLow") or {}).get("max")),
-        "day_low": _safe_float((pi.get("intraDayHighLow") or {}).get("min")),
+        "day_high": _safe_float(intraday.get("max")),
+        "day_low": _safe_float(intraday.get("min")),
         "vwap": _safe_float(pi.get("vwap")),
+        # Volumes / liquidity from trade_info section
+        "volume": _safe_float(sec_wise.get("quantityTraded")),
+        "value_traded": _safe_float(sec_wise.get("totalTradedValue")),
+        "delivery_pct": _safe_float(sec_wise.get("deliveryToTradedQuantity")),
+        "bid_qty": _safe_float((market_dept.get("totalBuyQuantity") or 0)),
+        "ask_qty": _safe_float((market_dept.get("totalSellQuantity") or 0)),
+        "bid": _safe_float((market_dept.get("bid") or [{}])[0].get("price") if market_dept.get("bid") else None),
+        "ask": _safe_float((market_dept.get("ask") or [{}])[0].get("price") if market_dept.get("ask") else None),
+        "lower_circuit": _safe_float(pi.get("lowerCP")),
+        "upper_circuit": _safe_float(pi.get("upperCP")),
     }
+
+
+def corporate_info(ticker: str) -> dict | None:
+    """Promoter / public holding from /api/quote-equity?section=corp_info."""
+    sym = _clean_symbol(ticker)
+    if not sym:
+        return None
+    data = _get("/api/quote-equity", {"symbol": sym, "section": "corp_info"})
+    if not data:
+        return None
+    # Shape: { corporate: { latest_announcements, board_meetings, ... },
+    #          shareholdings_patterns: {data: [...], cols: [...]} }
+    sp = (data.get("corporate") or {}).get("shareholdings_patterns") or {}
+    out: dict = {"shareholding_pattern": []}
+    rows = sp.get("data") or []
+    for r in rows[:8]:  # last few quarters
+        out["shareholding_pattern"].append({
+            k: _safe_float(v) if isinstance(v, (int, float, str)) and str(v).replace(".", "").replace("-", "").isdigit() else v
+            for k, v in r.items()
+        })
+    return out
 
 
 # ── history ──────────────────────────────────────────────────────────────
