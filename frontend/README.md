@@ -61,12 +61,28 @@ vercel --prod
   not a page-level Streamlit call. Adding a new function to the Terminal
   page is ~30 lines, not a new file.
 
-## What's not built yet
+## Terminal functions (all wired to live endpoints)
 
-This is a scaffold proving the pattern; full feature parity with the
-Streamlit Terminal is incremental work. Easy wins next:
-- Financials view → call `/api/v1/fundamentals/{ticker}/statement/{kind}`
-- Options chain table → `/api/v1/options/{ticker}/chain`
-- Value-chain map → `/api/v1/value-chain/{ticker}` + a node-graph lib
-- Watchlist editor (create/delete UI; API endpoints exist)
-- AI deep-dive panel → `/api/v1/ai/bull-bear`
+The Terminal page's function dropdown covers, each against its backend route:
+- **Snapshot** — quote + key metrics + 1-year chart
+- **Technicals & charts** — period-switchable price chart (1M/6M/1Y/5Y)
+- **Financials** — income / balance / cash-flow, annual or quarterly
+  (`/fundamentals/{ticker}/statement/{kind}`)
+- **Estimates & targets** — price targets + earnings/revenue/growth estimates
+- **Capital structure** — debt/cash/equity stack + enterprise value bar
+- **Value-chain map** — Bloomberg SPLC-style SVG node graph
+  (suppliers → company → customers, competitors below)
+- **Options & Greeks** — expiry selector, calls/puts with Black-Scholes
+  Greeks + max-pain
+- **AI deep-dive** — bull-vs-bear and deep-analysis (on-demand to respect quota)
+
+Screeners covers PEG / Hidden Gems / Growth / Buffett Quality / Graham Value /
+Top ETFs. The Dashboard has a full watchlist create/delete editor and a
+gainers/losers movers panel.
+
+## Not yet ported from Streamlit
+
+A few single-purpose Streamlit views don't have backend endpoints yet
+(Comparables, Debt profile, Ownership/insiders, Earnings history, Street
+ratings, WACC model, Recent news). Add the route first, then a ~30-line
+component — same pattern as the views above.

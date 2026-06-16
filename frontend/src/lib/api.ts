@@ -82,6 +82,35 @@ export type Snapshot = Record<string, unknown> & {
 };
 export type Watchlist = { id: string; name: string; tickers: string[] };
 
+export type Statement = {
+  ticker: string; kind: string; quarterly?: boolean;
+  columns: string[];
+  rows: Array<Record<string, number | string | null> & { line: string }>;
+};
+export type Estimates = {
+  price_targets?: Record<string, number | null>;
+  earnings_estimate?: Record<string, Record<string, number | null>>;
+  revenue_estimate?: Record<string, Record<string, number | null>>;
+  growth_estimates?: Record<string, Record<string, number | null>>;
+  [k: string]: unknown;
+};
+export type CapStructure = {
+  total_debt: number | null; cash: number | null; market_cap: number | null;
+  shares: number | null; currency: string;
+};
+export type ChainNode = { name: string; note?: string };
+export type ValueChain = {
+  ticker: string; name: string;
+  suppliers?: ChainNode[]; customers?: ChainNode[]; competitors?: ChainNode[];
+};
+export type OptionRow = Record<string, number | string | boolean | null>;
+export type OptionChain = {
+  ticker: string; expiry: string; spot: number; years_to_expiry: number;
+  calls: OptionRow[]; puts: OptionRow[]; max_pain: number | null;
+};
+export type AIResp = { ticker: string; markdown: string };
+export type Mover = Record<string, number | string | null>;
+
 export const api = {
   // auth
   login: (username: string, password: string) =>
@@ -108,6 +137,42 @@ export const api = {
     ),
   snapshot: (ticker: string) =>
     apiFetch<Snapshot>(`/api/v1/market/snapshot/${encodeURIComponent(ticker)}`),
+  movers: (kind: "gainers" | "losers" = "gainers", count = 8) =>
+    apiFetch<Mover[]>(`/api/v1/market/movers?kind=${kind}&count=${count}`),
+
+  // fundamentals
+  statement: (ticker: string, kind: "income" | "balance" | "cashflow", quarterly = false) =>
+    apiFetch<Statement>(
+      `/api/v1/fundamentals/${encodeURIComponent(ticker)}/statement/${kind}?quarterly=${quarterly}`,
+    ),
+  estimates: (ticker: string) =>
+    apiFetch<Estimates>(`/api/v1/fundamentals/${encodeURIComponent(ticker)}/estimates`),
+  capitalStructure: (ticker: string) =>
+    apiFetch<CapStructure>(`/api/v1/fundamentals/${encodeURIComponent(ticker)}/capital-structure`),
+
+  // options
+  optionExpiries: (ticker: string) =>
+    apiFetch<string[]>(`/api/v1/options/${encodeURIComponent(ticker)}/expiries`),
+  optionChain: (ticker: string, expiry: string) =>
+    apiFetch<OptionChain>(
+      `/api/v1/options/${encodeURIComponent(ticker)}/chain?expiry=${encodeURIComponent(expiry)}`,
+    ),
+
+  // value chain
+  valueChain: (ticker: string) =>
+    apiFetch<ValueChain>(`/api/v1/value-chain/${encodeURIComponent(ticker)}`),
+
+  // ai
+  aiProvider: () =>
+    apiFetch<{ available: boolean; provider: string | null }>("/api/v1/ai/provider"),
+  bullBear: (ticker: string) =>
+    apiFetch<AIResp>("/api/v1/ai/bull-bear", {
+      method: "POST", body: JSON.stringify({ ticker }),
+    }),
+  deepAnalysis: (ticker: string) =>
+    apiFetch<AIResp>("/api/v1/ai/deep-analysis", {
+      method: "POST", body: JSON.stringify({ ticker }),
+    }),
 
   // watchlists
   listWatchlists: () => apiFetch<Watchlist[]>("/api/v1/watchlists"),
@@ -115,10 +180,26 @@ export const api = {
     apiFetch<Watchlist>("/api/v1/watchlists", {
       method: "POST", body: JSON.stringify({ name, tickers }),
     }),
+  updateWatchlist: (id: string, name: string, tickers: string[]) =>
+    apiFetch<Watchlist>(`/api/v1/watchlists/${id}`, {
+      method: "PUT", body: JSON.stringify({ name, tickers }),
+    }),
   deleteWatchlist: (id: string) =>
     apiFetch<void>(`/api/v1/watchlists/${id}`, { method: "DELETE" }),
 
   // screens
   preset: (name: string) =>
     apiFetch<any[]>(`/api/v1/screens/preset/${encodeURIComponent(name)}`),
+  screenBuffett: (min_score = 70) =>
+    apiFetch<any[]>("/api/v1/screens/buffett", {
+      method: "POST", body: JSON.stringify({ min_score }),
+    }),
+  screenGraham: (growth_default = 8, bond_yield = 7, min_mos = 20) =>
+    apiFetch<any[]>("/api/v1/screens/graham", {
+      method: "POST", body: JSON.stringify({ growth_default, bond_yield, min_mos }),
+    }),
+  screenEtfs: (sort_by = "ytd_return", sector: string | null = null) =>
+    apiFetch<any[]>("/api/v1/screens/etfs", {
+      method: "POST", body: JSON.stringify({ sort_by, sector }),
+    }),
 };

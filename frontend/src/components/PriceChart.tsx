@@ -3,7 +3,17 @@
 import { ColorType, createChart, IChartApi, ISeriesApi, UTCTimestamp } from "lightweight-charts";
 import { useEffect, useRef } from "react";
 
-type Candle = { time: string | number; close: number; open?: number; high?: number; low?: number };
+// yfinance serialises columns capitalised (Date/Close/Open…); Twelve Data uses
+// lowercase. Accept both so the chart never silently renders empty.
+type Candle = Record<string, string | number | null | undefined>;
+
+function pick(c: Candle, keys: string[]): number | string | null {
+  for (const k of keys) {
+    const v = c[k];
+    if (v !== null && v !== undefined && v !== "") return v as number | string;
+  }
+  return null;
+}
 
 /**
  * TradingView Lightweight Charts area chart. Reuses the terminal palette so
@@ -44,12 +54,15 @@ export function PriceChart({ data, height = 360 }: { data: Candle[]; height?: nu
     if (!seriesRef.current || !data?.length) return;
     const points = data
       .map((c) => {
-        const t = typeof c.time === "string"
-          ? Math.floor(new Date(c.time).getTime() / 1000)
-          : Number(c.time);
-        return { time: t as UTCTimestamp, value: Number(c.close ?? c.open ?? 0) };
+        const rawTime = pick(c, ["time", "Date", "Datetime", "date", "datetime", "index"]);
+        const t = typeof rawTime === "string"
+          ? Math.floor(new Date(rawTime).getTime() / 1000)
+          : Number(rawTime);
+        const close = pick(c, ["close", "Close", "open", "Open"]);
+        return { time: t as UTCTimestamp, value: Number(close ?? 0) };
       })
-      .filter((p) => Number.isFinite(p.value) && p.value > 0);
+      .filter((p) => Number.isFinite(p.value) && p.value > 0 && Number.isFinite(p.time))
+      .sort((a, b) => (a.time as number) - (b.time as number));
     seriesRef.current.setData(points);
     chartRef.current?.timeScale().fitContent();
   }, [data]);

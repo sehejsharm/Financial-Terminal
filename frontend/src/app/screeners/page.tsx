@@ -6,19 +6,50 @@ import { useState } from "react";
 import { Shell } from "@/components/Shell";
 import { api } from "@/lib/api";
 
-const PRESETS = ["PEG Screen", "Hidden Gems", "Growth"];
+type ScreenDef = {
+  label: string;
+  desc: string;
+  run: () => Promise<any[]>;
+};
+
+const SCREENS: ScreenDef[] = [
+  { label: "PEG Screen", desc: "EPS growth > 20, Sales growth > 15, PEG < 1, low debt.", run: () => api.preset("PEG Screen") },
+  { label: "Hidden Gems", desc: "Small-cap (₹500–5000 cr) high-growth names.", run: () => api.preset("Hidden Gems") },
+  { label: "Growth", desc: "Large-cap (> ₹5000 cr) consistent growers.", run: () => api.preset("Growth") },
+  { label: "Buffett Quality", desc: "Wide-moat quality scored 0–100 (≥ 70).", run: () => api.screenBuffett(70) },
+  { label: "Graham Value", desc: "Graham intrinsic value with margin of safety.", run: () => api.screenGraham() },
+  { label: "Top ETFs", desc: "ETF universe ranked by trailing return.", run: () => api.screenEtfs() },
+];
+
+const PCT_KEYS = new Set(["roe", "roce", "eps_growth", "sales_growth", "promoter", "ytd_return", "return_1y", "margin_of_safety", "mos"]);
+
+function fmtCell(key: string, v: unknown): string {
+  if (v === null || v === undefined || v === "") return "—";
+  if (typeof v === "number") {
+    const out = v.toLocaleString(undefined, { maximumFractionDigits: 2 });
+    return PCT_KEYS.has(key) ? `${out}%` : out;
+  }
+  return String(v);
+}
+
+function tickerOf(r: any): string {
+  const t = String(r.ticker ?? r.symbol ?? "").toUpperCase();
+  if (!t) return "";
+  // NSE names from the Indian universe need the .NS suffix to resolve.
+  return t.includes(".") || t.startsWith("^") ? t : `${t}.NS`;
+}
 
 export default function ScreenersPage() {
-  const [active, setActive] = useState(PRESETS[0]);
+  const [active, setActive] = useState(0);
   const [rows, setRows] = useState<any[] | null>(null);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
-  async function run() {
+  async function run(i = active) {
+    setActive(i);
     setBusy(true); setErr(null); setRows(null);
     try {
-      const data = await api.preset(active);
-      setRows(data);
+      setRows(await SCREENS[i].run());
     } catch (e: any) {
       setErr(e?.detail || "Screen failed.");
     } finally {
@@ -27,34 +58,34 @@ export default function ScreenersPage() {
   }
 
   const cols = rows && rows.length
-    ? Array.from(new Set(rows.flatMap((r) => Object.keys(r))))
+    ? Array.from(new Set(rows.flatMap((r) => Object.keys(r)))).filter((c) => c !== "symbol")
     : [];
 
   return (
     <Shell>
       <h1 className="heading mb-3">SCREENERS</h1>
 
-      <div className="flex flex-wrap gap-2 mb-4">
-        {PRESETS.map((p) => (
+      <div className="flex flex-wrap gap-2 mb-3">
+        {SCREENS.map((s, i) => (
           <button
-            key={p}
-            onClick={() => setActive(p)}
-            className={`btn ${active === p ? "btn-primary" : "btn-ghost"}`}
+            key={s.label}
+            onClick={() => setActive(i)}
+            className={`btn ${active === i ? "btn-primary" : "btn-ghost"}`}
           >
-            {p}
+            {s.label}
           </button>
         ))}
-        <div className="flex-1" />
-        <button onClick={run} disabled={busy} className="btn-primary">
+      </div>
+
+      <div className="flex items-center gap-3 mb-4">
+        <div className="text-mut text-xs flex-1">{SCREENS[active].desc}</div>
+        <button onClick={() => run()} disabled={busy} className="btn-primary">
           {busy ? "Scanning…" : "Run screen"}
         </button>
       </div>
 
       {err && <div className="text-red text-sm mb-3">{err}</div>}
-
-      {rows && rows.length === 0 && (
-        <div className="panel-2 p-4 text-mut">No matches.</div>
-      )}
+      {rows && rows.length === 0 && <div className="panel-2 p-4 text-mut">No matches.</div>}
 
       {rows && rows.length > 0 && (
         <div className="panel overflow-auto">
@@ -62,7 +93,7 @@ export default function ScreenersPage() {
             <thead className="text-mut uppercase tracking-wider">
               <tr className="border-b border-line">
                 {cols.map((c) => (
-                  <th key={c} className="text-left px-3 py-2 font-medium">{c}</th>
+                  <th key={c} className="text-left px-3 py-2 font-medium whitespace-nowrap">{c.replace(/_/g, " ")}</th>
                 ))}
                 <th className="px-3 py-2"></th>
               </tr>
@@ -71,17 +102,14 @@ export default function ScreenersPage() {
               {rows.map((r, i) => (
                 <tr key={i} className="border-b border-line/60 hover:bg-panel">
                   {cols.map((c) => (
-                    <td key={c} className="px-3 py-2 num">
-                      {r[c] === null || r[c] === undefined ? "—" : String(r[c])}
-                    </td>
+                    <td key={c} className="px-3 py-2 num whitespace-nowrap">{fmtCell(c, r[c])}</td>
                   ))}
                   <td className="px-3 py-2">
-                    <Link
-                      href={`/terminal?t=${encodeURIComponent((r.ticker || "").endsWith(".NS") ? r.ticker : r.ticker + ".NS")}`}
-                      className="text-amber hover:underline"
-                    >
-                      Open →
-                    </Link>
+                    {tickerOf(r) && (
+                      <Link href={`/terminal?t=${encodeURIComponent(tickerOf(r))}`} className="text-amber hover:underline">
+                        Open →
+                      </Link>
+                    )}
                   </td>
                 </tr>
               ))}

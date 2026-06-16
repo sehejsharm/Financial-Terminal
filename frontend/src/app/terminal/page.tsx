@@ -1,16 +1,33 @@
 "use client";
 
 import { useRouter, useSearchParams } from "next/navigation";
-import { Suspense, useEffect, useMemo, useState } from "react";
+import { Suspense, useEffect, useState } from "react";
 
+import { AIPanel } from "@/components/AIPanel";
+import { CapitalStructureView } from "@/components/CapitalStructure";
+import { EstimatesView } from "@/components/Estimates";
+import { Financials } from "@/components/Financials";
 import { MetricCard } from "@/components/MetricCard";
+import { OptionsChain } from "@/components/OptionsChain";
 import { PriceChart } from "@/components/PriceChart";
 import { Shell } from "@/components/Shell";
+import { ValueChainMap } from "@/components/ValueChainMap";
 import { api, type Quote, type Snapshot } from "@/lib/api";
-import { cn, curSymbol, fmtNum, fmtPct, humanNumber } from "@/lib/utils";
+import { curSymbol, fmtNum, fmtPct, humanNumber } from "@/lib/utils";
 
-const FUNCTIONS = ["Snapshot", "Technicals & charts", "Financials"] as const;
+const FUNCTIONS = [
+  "Snapshot",
+  "Technicals & charts",
+  "Financials",
+  "Estimates & targets",
+  "Capital structure",
+  "Value-chain map",
+  "Options & Greeks",
+  "AI deep-dive",
+] as const;
 type Fn = typeof FUNCTIONS[number];
+
+const PERIODS = ["1M", "6M", "1Y", "5Y"] as const;
 
 function TerminalInner() {
   const router = useRouter();
@@ -19,25 +36,30 @@ function TerminalInner() {
 
   const [ticker, setTicker] = useState(initialTicker);
   const [fn, setFn] = useState<Fn>("Snapshot");
+  const [period, setPeriod] = useState<(typeof PERIODS)[number]>("1Y");
   const [snap, setSnap] = useState<Snapshot | null>(null);
   const [quote, setQuote] = useState<Quote | null>(null);
   const [candles, setCandles] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
-  // Fetch on ticker change.
+  // Header data (snapshot + quote) on ticker change.
   useEffect(() => {
     setLoading(true); setErr(null);
     Promise.all([
       api.snapshot(ticker).catch(() => null),
       api.quote(ticker).catch(() => null),
-      api.history(ticker, "1Y").catch(() => ({ candles: [] as any[] })),
-    ]).then(([s, q, h]) => {
-      setSnap(s); setQuote(q); setCandles(h?.candles ?? []);
+    ]).then(([s, q]) => {
+      setSnap(s); setQuote(q);
       setLoading(false);
       if (!s && !q) setErr(`Could not load data for ${ticker}.`);
     });
   }, [ticker]);
+
+  // History reloads on ticker OR period change.
+  useEffect(() => {
+    api.history(ticker, period).then((h) => setCandles(h?.candles ?? [])).catch(() => setCandles([]));
+  }, [ticker, period]);
 
   const cur = curSymbol(snap?.currency || quote?.currency || undefined);
   const price = (snap?.price ?? quote?.price) ?? null;
@@ -57,16 +79,13 @@ function TerminalInner() {
       <div className="grid grid-cols-[1fr_280px] gap-3 mb-5">
         <input
           defaultValue={ticker}
+          key={ticker}
           onBlur={(e) => commitTicker(e.target.value)}
           onKeyDown={(e) => { if (e.key === "Enter") commitTicker((e.target as HTMLInputElement).value); }}
           placeholder="Ticker (RELIANCE.NS, AAPL, ^NSEI)…"
           className="input-bare"
         />
-        <select
-          value={fn}
-          onChange={(e) => setFn(e.target.value as Fn)}
-          className="input-bare cursor-pointer"
-        >
+        <select value={fn} onChange={(e) => setFn(e.target.value as Fn)} className="input-bare cursor-pointer">
           {FUNCTIONS.map((f) => <option key={f}>{f}</option>)}
         </select>
       </div>
@@ -94,7 +113,7 @@ function TerminalInner() {
 
       {!loading && !err && fn === "Snapshot" && (
         <>
-          <div className="grid grid-cols-4 gap-3 mb-5">
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-5">
             <MetricCard label="Market cap"   value={humanNumber(snap?.market_cap as number, cur)} />
             <MetricCard label="Trailing P/E" value={fmtNum(snap?.trailing_pe as number, 1)} />
             <MetricCard label="Beta"         value={fmtNum(snap?.beta as number, 2)} />
@@ -103,6 +122,12 @@ function TerminalInner() {
               value={`${fmtNum(snap?.fifty_two_low as number, 2)} – ${fmtNum(snap?.fifty_two_high as number, 2)}`}
             />
           </div>
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-6">
+            <MetricCard label="Dividend yield" value={snap?.dividend_yield != null ? fmtPct((snap.dividend_yield as number) * 100) : "—"} />
+            <MetricCard label="ROE" value={snap?.roe != null ? fmtPct((snap.roe as number) * 100) : "—"} />
+            <MetricCard label="Profit margin" value={snap?.profit_margin != null ? fmtPct((snap.profit_margin as number) * 100) : "—"} />
+            <MetricCard label="Debt / Equity" value={fmtNum(snap?.debt_to_equity as number, 1)} />
+          </div>
           <div className="mb-2 heading">1-Year Chart</div>
           <PriceChart data={candles} height={380} />
         </>
@@ -110,22 +135,22 @@ function TerminalInner() {
 
       {!loading && !err && fn === "Technicals & charts" && (
         <>
-          <div className="mb-2 heading">Price action</div>
-          <PriceChart data={candles} height={460} />
-          <div className="text-mut text-xs mt-3">
-            Indicators, RSI, and backtesting are wired in the Streamlit app today;
-            the React version exposes the chart and a clean handoff point — extend
-            in <code className="text-amber">src/app/terminal/page.tsx</code>.
+          <div className="flex items-center gap-2 mb-3">
+            <div className="heading flex-1">Price action</div>
+            {PERIODS.map((p) => (
+              <button key={p} onClick={() => setPeriod(p)} className={`btn ${period === p ? "btn-primary" : "btn-ghost"}`}>{p}</button>
+            ))}
           </div>
+          <PriceChart data={candles} height={460} />
         </>
       )}
 
-      {!loading && !err && fn === "Financials" && (
-        <div className="panel-2 p-5 text-sm text-mut">
-          Hook this view into <code className="text-amber">GET /api/v1/fundamentals/{`{ticker}`}/statement/{`{kind}`}</code>.
-          Endpoint is live — render with a TanStack Table for full polish.
-        </div>
-      )}
+      {!loading && !err && fn === "Financials" && <Financials ticker={ticker} currency={(snap?.currency as string) || "USD"} />}
+      {!loading && !err && fn === "Estimates & targets" && <EstimatesView ticker={ticker} currency={(snap?.currency as string) || "USD"} />}
+      {!loading && !err && fn === "Capital structure" && <CapitalStructureView ticker={ticker} />}
+      {!loading && !err && fn === "Value-chain map" && <ValueChainMap ticker={ticker} />}
+      {!loading && !err && fn === "Options & Greeks" && <OptionsChain ticker={ticker} />}
+      {!loading && !err && fn === "AI deep-dive" && <AIPanel ticker={ticker} />}
     </Shell>
   );
 }

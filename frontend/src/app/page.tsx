@@ -5,8 +5,9 @@ import { useEffect, useState } from "react";
 
 import { MetricCard } from "@/components/MetricCard";
 import { Shell } from "@/components/Shell";
-import { api, type Quote, type Watchlist } from "@/lib/api";
-import { curSymbol, fmtNum, fmtPct, humanNumber } from "@/lib/utils";
+import { WatchlistEditor } from "@/components/WatchlistEditor";
+import { api, type Mover, type Quote } from "@/lib/api";
+import { curSymbol, fmtNum, fmtPct } from "@/lib/utils";
 
 const SNAPSHOT_TICKERS = [
   "^NSEI", "^BSESN", "^NSEBANK", "^INDIAVIX",
@@ -18,16 +19,46 @@ const NAMES: Record<string, string> = {
   "SI=F": "SILVER", "CL=F": "WTI CRUDE",
 };
 
-export default function DashboardPage() {
-  const [quotes, setQuotes] = useState<Record<string, Quote | null>>({});
-  const [watchlists, setWatchlists] = useState<Watchlist[]>([]);
+function MoversPanel() {
+  const [kind, setKind] = useState<"gainers" | "losers">("gainers");
+  const [rows, setRows] = useState<Mover[]>([]);
+  const [busy, setBusy] = useState(false);
 
   useEffect(() => {
-    // Single round-trip — backend fetches all 8 in parallel server-side.
-    api.quoteBulk(SNAPSHOT_TICKERS)
-      .then((map) => setQuotes(map))
-      .catch(() => setQuotes({}));
-    api.listWatchlists().then(setWatchlists).catch(() => setWatchlists([]));
+    setBusy(true);
+    api.movers(kind, 8).then((r) => setRows(Array.isArray(r) ? r : [])).catch(() => setRows([])).finally(() => setBusy(false));
+  }, [kind]);
+
+  return (
+    <div className="panel-2 p-4">
+      <div className="flex items-center gap-2 mb-3">
+        <button onClick={() => setKind("gainers")} className={`btn ${kind === "gainers" ? "btn-primary" : "btn-ghost"}`}>Gainers</button>
+        <button onClick={() => setKind("losers")} className={`btn ${kind === "losers" ? "btn-primary" : "btn-ghost"}`}>Losers</button>
+      </div>
+      {busy && <div className="text-mut text-xs">Loading…</div>}
+      {!busy && rows.length === 0 && <div className="text-mut text-xs">No data.</div>}
+      <div className="flex flex-col gap-1">
+        {rows.map((m, i) => {
+          const sym = String(m.symbol ?? m.ticker ?? "");
+          const cp = Number(m.change_pct ?? m.percent_change ?? 0);
+          return (
+            <Link key={i} href={`/terminal?t=${encodeURIComponent(sym)}`}
+                  className="flex items-center justify-between px-2 py-1.5 rounded hover:bg-panel border border-transparent hover:border-line">
+              <span className="text-sm truncate">{String(m.name ?? sym)}</span>
+              <span className={`num text-sm ${cp >= 0 ? "text-green" : "text-red"}`}>{fmtPct(cp)}</span>
+            </Link>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+export default function DashboardPage() {
+  const [quotes, setQuotes] = useState<Record<string, Quote | null>>({});
+
+  useEffect(() => {
+    api.quoteBulk(SNAPSHOT_TICKERS).then(setQuotes).catch(() => setQuotes({}));
   }, []);
 
   return (
@@ -53,35 +84,16 @@ export default function DashboardPage() {
         })}
       </div>
 
-      <h1 className="heading mb-3">WATCHLISTS</h1>
-      {watchlists.length === 0 ? (
-        <div className="panel-2 p-6 text-mut text-sm">
-          No watchlists yet. Create one from the Terminal page, or via the API
-          (<code className="text-amber">POST /api/v1/watchlists</code>).
+      <div className="grid grid-cols-1 lg:grid-cols-[2fr_1fr] gap-6 mb-8">
+        <div>
+          <h1 className="heading mb-3">WATCHLISTS</h1>
+          <WatchlistEditor />
         </div>
-      ) : (
-        <div className="grid gap-3" style={{ gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))" }}>
-          {watchlists.map((w) => (
-            <div key={w.id} className="panel-2 p-4">
-              <div className="flex items-center justify-between mb-3">
-                <div className="text-amber font-bold uppercase tracking-wider text-sm">{w.name}</div>
-                <span className="chip">{w.tickers.length} names</span>
-              </div>
-              <div className="flex flex-wrap gap-1.5">
-                {w.tickers.map((t) => (
-                  <Link
-                    key={t}
-                    href={`/terminal?t=${encodeURIComponent(t)}`}
-                    className="px-2 py-1 text-[11px] border border-line rounded hover:border-amber hover:text-amber transition-colors"
-                  >
-                    {t}
-                  </Link>
-                ))}
-              </div>
-            </div>
-          ))}
+        <div>
+          <h1 className="heading mb-3">MOVERS</h1>
+          <MoversPanel />
         </div>
-      )}
+      </div>
     </Shell>
   );
 }
