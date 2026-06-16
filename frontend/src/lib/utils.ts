@@ -33,5 +33,36 @@ export const CUR_SYMBOLS: Record<string, string> = {
   INR: "₹", USD: "$", EUR: "€", GBP: "£", JPY: "¥",
   CNY: "¥", HKD: "HK$", AUD: "A$", CAD: "C$", SGD: "S$",
 };
+
+/** Infer currency from a ticker suffix when the provider doesn't tell us. */
+const SUFFIX_CCY: Record<string, string> = {
+  NS: "INR", BO: "INR", BSE: "INR", NSE: "INR",
+  L: "GBP", LON: "GBP",
+  PA: "EUR", DE: "EUR", AS: "EUR", MI: "EUR", MC: "EUR", BR: "EUR", LS: "EUR", VI: "EUR",
+  SW: "CHF", TO: "CAD", V: "CAD",
+  HK: "HKD", T: "JPY", JT: "JPY",
+  SS: "CNY", SZ: "CNY", SI: "SGD", AX: "AUD",
+};
+
+export function inferCurrency(ticker: string | undefined, fallback?: string | null): string {
+  if (fallback && fallback !== "USD") return fallback;
+  if (!ticker) return fallback || "USD";
+  const t = ticker.toUpperCase();
+  // Index/futures specials.
+  if (t === "^NSEI" || t === "^BSESN" || t === "^NSEBANK" || t === "^INDIAVIX") return "INR";
+  if (t === "INR=X") return "INR";
+  if (t.startsWith("GC=") || t.startsWith("SI=") || t.startsWith("CL=")) return "USD";
+  const i = t.lastIndexOf(".");
+  if (i > 0) {
+    const suf = t.slice(i + 1);
+    if (SUFFIX_CCY[suf]) return SUFFIX_CCY[suf];
+  }
+  return fallback || "USD";
+}
+
 export const curSymbol = (code?: string | null) =>
-  code ? CUR_SYMBOLS[code.toUpperCase()] ?? "" : "";
+  code ? CUR_SYMBOLS[code.toUpperCase()] ?? code : "";
+
+/** One-step helper: ticker → symbol. Use this everywhere user-facing. */
+export const curForTicker = (ticker: string | undefined, providerCcy?: string | null) =>
+  curSymbol(inferCurrency(ticker, providerCcy));

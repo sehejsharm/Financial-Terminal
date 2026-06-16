@@ -19,6 +19,54 @@ INDICATORS: dict[str, dict] = {
     "Industrial production (YoY)": {"id": "INDPRO", "unit": "%", "kind": "yoy"},
 }
 
+# FRED tracks many international series too. These cover the biggies users
+# ask about — IMF/World Bank could plug in for the rest later.
+COUNTRY_INDICATORS: dict[str, dict[str, dict]] = {
+    "US": INDICATORS,
+    "IN": {
+        "Real GDP growth": {"id": "NGDPRSAXDCINQ", "unit": "%", "kind": "yoy"},
+        "CPI (YoY)": {"id": "INDCPALTT01IXOBQ", "unit": "%", "kind": "yoy"},
+        "Industrial production (YoY)": {"id": "INDPROINMISMEI", "unit": "%", "kind": "yoy"},
+        "Policy repo rate": {"id": "INTDSRINM193N", "unit": "%", "kind": "level"},
+        "10Y govt yield": {"id": "IRLTLT01INM156N", "unit": "%", "kind": "level"},
+        "USD / INR": {"id": "DEXINUS", "unit": "INR", "kind": "level"},
+        "Unemployment rate": {"id": "LRUNTTTTINQ156S", "unit": "%", "kind": "level"},
+    },
+    "EU": {
+        "Real GDP growth": {"id": "CLVMNACSCAB1GQEA19", "unit": "%", "kind": "yoy"},
+        "HICP (YoY)": {"id": "CP0000EZ19M086NEST", "unit": "%", "kind": "yoy"},
+        "ECB deposit rate": {"id": "ECBDFR", "unit": "%", "kind": "level"},
+        "Unemployment rate": {"id": "LRHUTTTTEZM156S", "unit": "%", "kind": "level"},
+        "10Y bund yield": {"id": "IRLTLT01DEM156N", "unit": "%", "kind": "level"},
+        "Industrial production (YoY)": {"id": "EU28PRINTO01GYSAM", "unit": "%", "kind": "yoy"},
+        "EUR / USD": {"id": "DEXUSEU", "unit": "USD", "kind": "level"},
+    },
+    "UK": {
+        "Real GDP growth": {"id": "NGDPRSAXDCGBQ", "unit": "%", "kind": "yoy"},
+        "CPI (YoY)": {"id": "GBRCPIALLMINMEI", "unit": "%", "kind": "yoy"},
+        "BoE bank rate": {"id": "IUDSOIA", "unit": "%", "kind": "level"},
+        "Unemployment rate": {"id": "LRUN64TTGBM156S", "unit": "%", "kind": "level"},
+        "10Y gilt yield": {"id": "IRLTLT01GBM156N", "unit": "%", "kind": "level"},
+        "GBP / USD": {"id": "DEXUSUK", "unit": "USD", "kind": "level"},
+    },
+    "JP": {
+        "Real GDP growth": {"id": "JPNRGDPEXP", "unit": "%", "kind": "yoy"},
+        "CPI (YoY)": {"id": "JPNCPIALLMINMEI", "unit": "%", "kind": "yoy"},
+        "BoJ policy rate": {"id": "IRSTCI01JPM156N", "unit": "%", "kind": "level"},
+        "Unemployment rate": {"id": "LRUNTTTTJPM156S", "unit": "%", "kind": "level"},
+        "10Y JGB yield": {"id": "IRLTLT01JPM156N", "unit": "%", "kind": "level"},
+        "USD / JPY": {"id": "DEXJPUS", "unit": "JPY", "kind": "level"},
+    },
+    "CN": {
+        "Real GDP growth": {"id": "MKTGDPCNA646NWDB", "unit": "%", "kind": "yoy"},
+        "CPI (YoY)": {"id": "CHNCPIALLMINMEI", "unit": "%", "kind": "yoy"},
+        "Industrial production (YoY)": {"id": "CHNPROINDMISMEI", "unit": "%", "kind": "yoy"},
+        "USD / CNY": {"id": "DEXCHUS", "unit": "CNY", "kind": "level"},
+    },
+}
+
+COUNTRIES = list(COUNTRY_INDICATORS.keys())
+
 
 @st.cache_resource(show_spinner=False)
 def _fred():
@@ -54,9 +102,9 @@ def get_series(series_id: str, observations: int = 400) -> pd.Series:
 
 
 @st.cache_data(ttl=3600, show_spinner=False)
-def get_indicator(name: str) -> dict:
+def get_indicator(name: str, country: str = "US") -> dict:
     """Return {name, value, prior, change, date, unit} for one indicator."""
-    cfg = INDICATORS.get(name)
+    cfg = COUNTRY_INDICATORS.get(country, INDICATORS).get(name)
     if not cfg:
         return {}
     s = get_series(cfg["id"])
@@ -85,6 +133,15 @@ def get_indicator(name: str) -> dict:
     }
 
 
-def get_dashboard() -> list[dict]:
-    """Return all configured indicators as a list of dicts."""
-    return [get_indicator(name) for name in INDICATORS]
+def get_dashboard(country: str = "US") -> list[dict]:
+    """Return all configured indicators for the given country as a list of dicts.
+
+    Parallelised — FRED is the slowest dep here; pulling 7 series serially
+    means a multi-second page load.
+    """
+    from concurrent.futures import ThreadPoolExecutor
+    inds = COUNTRY_INDICATORS.get(country, INDICATORS)
+    names = list(inds.keys())
+    with ThreadPoolExecutor(max_workers=min(8, len(names) or 1)) as pool:
+        results = list(pool.map(lambda n: get_indicator(n, country), names))
+    return results

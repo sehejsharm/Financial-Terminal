@@ -11,10 +11,10 @@ import { api, type ChainNode, type ValueChain } from "@/lib/api";
  *               competitors
  * No chart library needed — pure SVG so it stays crisp and themeable.
  */
-const W = 1000;
-const H = 560;
+const W = 1200;
+const H = 780;
 const CX = W / 2;
-const CY = 250;
+const CY = 340;
 
 const COL = {
   company: "#ffb000",
@@ -66,10 +66,21 @@ export function ValueChainMap({ ticker }: { ticker: string }) {
   if (err) return <div className="text-red text-sm">{err}</div>;
   if (!data) return null;
 
-  const suppliers = nodeRow((data.suppliers ?? []).slice(0, 6), 160, 80, 70);
-  const customers = nodeRow((data.customers ?? []).slice(0, 6), W - 160, 80, 70);
-  const competitors = nodeRow((data.competitors ?? []).slice(0, 5), CX, H - 70, 0)
-    .map((c, i, arr) => ({ ...c, x: CX + (i - (arr.length - 1) / 2) * 175, y: H - 60 }));
+  // Dynamic spacing based on how many items the AI returned.
+  const supList = (data.suppliers ?? []).slice(0, 10);
+  const cusList = (data.customers ?? []).slice(0, 12);
+  const cmpList = (data.competitors ?? []).slice(0, 8);
+
+  const sGap = Math.min(70, (H - 140) / Math.max(supList.length, 1));
+  const cGap = Math.min(60, (H - 140) / Math.max(cusList.length, 1));
+
+  const suppliers = supList.map((it, i) => ({ ...it, x: 170, y: 70 + i * sGap }));
+  const customers = cusList.map((it, i) => ({ ...it, x: W - 170, y: 70 + i * cGap }));
+  const competitors = cmpList.map((it, i, arr) => ({
+    ...it,
+    x: CX + (i - (arr.length - 1) / 2) * Math.min(180, (W - 200) / Math.max(arr.length, 1)),
+    y: H - 60,
+  }));
 
   return (
     <div>

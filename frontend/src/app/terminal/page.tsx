@@ -20,7 +20,7 @@ import { StreetRatings } from "@/components/StreetRatings";
 import { ValueChainMap } from "@/components/ValueChainMap";
 import { Wacc } from "@/components/Wacc";
 import { api, type Quote, type Snapshot } from "@/lib/api";
-import { curSymbol, fmtNum, fmtPct, humanNumber } from "@/lib/utils";
+import { curForTicker, fmtNum, fmtPct, humanNumber, inferCurrency } from "@/lib/utils";
 
 const FUNCTIONS = [
   "Snapshot",
@@ -58,16 +58,17 @@ function TerminalInner() {
   const [err, setErr] = useState<string | null>(null);
 
   // Header data (snapshot + quote) on ticker change.
+  // Stream each result independently so the page paints with whichever
+  // returns first — no waiting on the slowest call.
   useEffect(() => {
-    setLoading(true); setErr(null);
-    Promise.all([
-      api.snapshot(ticker).catch(() => null),
-      api.quote(ticker).catch(() => null),
-    ]).then(([s, q]) => {
-      setSnap(s); setQuote(q);
-      setLoading(false);
-      if (!s && !q) setErr(`Could not load data for ${ticker}.`);
-    });
+    setLoading(true); setErr(null); setSnap(null); setQuote(null);
+    let gotQuote = false, gotSnap = false;
+    api.quote(ticker)
+      .then((q) => { setQuote(q); gotQuote = true; setLoading(false); })
+      .catch(() => { gotQuote = false; if (gotSnap === false && gotQuote === false) setErr(`Could not load data for ${ticker}.`); });
+    api.snapshot(ticker)
+      .then((s) => { setSnap(s); gotSnap = true; setLoading(false); })
+      .catch(() => { /* snapshot can fail; quote alone is enough for the header */ });
   }, [ticker]);
 
   // History reloads on ticker OR period change.
@@ -75,7 +76,7 @@ function TerminalInner() {
     api.history(ticker, period).then((h) => setCandles(h?.candles ?? [])).catch(() => setCandles([]));
   }, [ticker, period]);
 
-  const cur = curSymbol(snap?.currency || quote?.currency || undefined);
+  const cur = curForTicker(ticker, (snap?.currency as string) || quote?.currency);
   const price = (snap?.price ?? quote?.price) ?? null;
   const cp = quote?.change_pct ?? null;
   const name = (snap?.name as string) || ticker;
@@ -159,14 +160,14 @@ function TerminalInner() {
         </>
       )}
 
-      {!loading && !err && fn === "Financials" && <Financials ticker={ticker} currency={(snap?.currency as string) || "USD"} />}
-      {!loading && !err && fn === "Estimates & targets" && <EstimatesView ticker={ticker} currency={(snap?.currency as string) || "USD"} />}
+      {!loading && !err && fn === "Financials" && <Financials ticker={ticker} currency={inferCurrency(ticker, snap?.currency as string)} />}
+      {!loading && !err && fn === "Estimates & targets" && <EstimatesView ticker={ticker} currency={inferCurrency(ticker, snap?.currency as string)} />}
       {!loading && !err && fn === "Capital structure" && <CapitalStructureView ticker={ticker} />}
       {!loading && !err && fn === "Comparables" && <Comparables ticker={ticker} />}
       {!loading && !err && fn === "Debt profile" && <DebtProfile ticker={ticker} snap={snap} />}
       {!loading && !err && fn === "Ownership / insiders" && <Ownership ticker={ticker} />}
       {!loading && !err && fn === "Earnings history" && <EarningsHistory ticker={ticker} />}
-      {!loading && !err && fn === "Street ratings" && <StreetRatings ticker={ticker} currency={(snap?.currency as string) || "USD"} />}
+      {!loading && !err && fn === "Street ratings" && <StreetRatings ticker={ticker} currency={inferCurrency(ticker, snap?.currency as string)} />}
       {!loading && !err && fn === "WACC model" && <Wacc ticker={ticker} snap={snap} />}
       {!loading && !err && fn === "Value-chain map" && <ValueChainMap ticker={ticker} />}
       {!loading && !err && fn === "Options & Greeks" && <OptionsChain ticker={ticker} />}

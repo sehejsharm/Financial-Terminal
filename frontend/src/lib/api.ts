@@ -167,7 +167,9 @@ export const api = {
     apiFetch<NewsItem[]>(`/api/v1/market/news?limit=${limit}`),
 
   // macro
-  macroIndicators: () => apiFetch<Indicator[]>("/api/v1/macro/indicators"),
+  macroCountries: () => apiFetch<string[]>("/api/v1/macro/countries"),
+  macroIndicators: (country = "US") =>
+    apiFetch<Indicator[]>(`/api/v1/macro/indicators?country=${encodeURIComponent(country)}`),
   yieldCurve: () => apiFetch<YieldPoint[]>("/api/v1/macro/yield-curve"),
 
   // deals

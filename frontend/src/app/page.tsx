@@ -7,7 +7,7 @@ import { MetricCard } from "@/components/MetricCard";
 import { Shell } from "@/components/Shell";
 import { WatchlistEditor } from "@/components/WatchlistEditor";
 import { api, type Mover, type Quote } from "@/lib/api";
-import { curSymbol, fmtNum, fmtPct } from "@/lib/utils";
+import { curForTicker, fmtNum, fmtPct } from "@/lib/utils";
 
 const SNAPSHOT_TICKERS = [
   "^NSEI", "^BSESN", "^NSEBANK", "^INDIAVIX",
@@ -67,7 +67,7 @@ export default function DashboardPage() {
       <div className="grid gap-3 mb-8" style={{ gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))" }}>
         {SNAPSHOT_TICKERS.map((t) => {
           const q = quotes[t];
-          const cur = curSymbol(q?.currency);
+          const cur = curForTicker(t, q?.currency);
           const cp = q?.change_pct ?? null;
           const tone = cp == null ? "neutral" : cp >= 0 ? "positive" : "negative";
           return (

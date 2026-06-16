@@ -54,9 +54,10 @@ object — no prose, no markdown fences — in exactly this schema:
 Hard rules (the model that ignores these will be rejected):
 - **NAME REAL COMPANIES**, not categories. Use "Lufthansa", "IndiGo", "Boeing 737 MAX engines" — NEVER "jet companies", "airlines", "OEMs", "various retailers".
 - If a customer is a segment rather than a single company (e.g. "US gas stations"), name 1–2 marquee examples in the note ("incl. 7-Eleven, Costco").
-- If the company has reporting segments (e.g. for Reliance: Oil-to-Chemicals, Jio, Retail), bias suppliers/customers toward those segment buckets and tag them in the note.
+- If the company has reporting segments (e.g. for Reliance: Oil-to-Chemicals, Jio, Retail), MAP EACH SEGMENT separately — Jio's customers, Retail's customers, O2C's customers. Tag the segment in the note.
 - Notes should include hard specifics where you know them: feedstock type, contract value bands, % of revenue, geography.
-- Up to 7 suppliers, 7 customers, 6 competitors.
+- **EXHAUSTIVE COVERAGE — aim for 10 suppliers, 12 customers, 8 competitors.** Do not stop at 3-5. If the company has many marquee customers, list them all up to the cap.
+- Spread across geographies and business lines — don't list 8 customers all from one segment.
 - Mark uncertainty inline ("est.", "pre-2023", "publicly disclosed") rather than padding with vague entries.
 - Names must fit in chart nodes (≤22 chars). If a real name is too long, abbreviate (e.g. "Saudi Aramco").
 - The subject company is: {name} ({ticker})
@@ -68,7 +69,7 @@ def get_chain_data(ticker: str, company_name: str) -> dict | None:
     """Call Gemini for structured value-chain JSON.  Cached 12 h."""
     prompt = _JSON_PROMPT.format(name=company_name, ticker=ticker)
     try:
-        raw = ai_analyst._call(prompt, max_tokens=900)
+        raw = ai_analyst._call(prompt, max_tokens=2200)
     except ai_analyst.AnalystError:
         raise
     # Strip any accidental markdown fences
