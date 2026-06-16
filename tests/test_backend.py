@@ -163,6 +163,32 @@ def test_admin_create_user_then_login(client, auth_h):
     assert r.status_code == 403
 
 
+# ── market: bulk quote (provider stubbed) ───────────────────────────────────
+def test_quote_bulk_uses_provider(client, auth_h, monkeypatch):
+    """Stub the provider so we don't hit the network; verify shape + parallel
+    call semantics (every input symbol gets an entry)."""
+    from backend import providers
+
+    def fake_quotes_bulk(tickers, max_workers=8):
+        return {t: {"symbol": t, "price": 100.0 + i, "prev_close": 99.0,
+                    "change_pct": 1.0, "currency": "USD"}
+                for i, t in enumerate(tickers)}
+
+    monkeypatch.setattr(providers, "quotes_bulk", fake_quotes_bulk)
+
+    r = client.get("/api/v1/market/quote-bulk?symbols=AAPL,MSFT,GOOG",
+                   headers=auth_h)
+    assert r.status_code == 200
+    body = r.json()
+    assert set(body.keys()) == {"AAPL", "MSFT", "GOOG"}
+    assert body["AAPL"]["price"] == 100.0
+
+
+def test_quote_bulk_rejects_empty(client, auth_h):
+    r = client.get("/api/v1/market/quote-bulk?symbols=", headers=auth_h)
+    assert r.status_code == 400
+
+
 def test_audit_records_requests(client, auth_h):
     # Make a recognisable request, then read the tail.
     client.get("/api/v1/auth/me", headers=auth_h)

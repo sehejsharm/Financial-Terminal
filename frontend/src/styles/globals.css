@@ -1,0 +1,48 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  html, body { @apply bg-bg text-txt font-mono antialiased; }
+  body {
+    background:
+      radial-gradient(1200px 600px at 80% -10%, rgba(255,176,0,0.05), transparent 60%),
+      theme(colors.bg);
+    min-height: 100vh;
+  }
+  /* Numerals look the same width regardless of digit — important for tables. */
+  table, tbody, thead, td, th { font-variant-numeric: tabular-nums; }
+  /* Subtle focus ring that fits the terminal aesthetic. */
+  *:focus-visible { outline: 1px solid theme(colors.amber); outline-offset: 2px; }
+  /* Custom scrollbar so it isn't a default-blue eyesore. */
+  ::-webkit-scrollbar { width: 10px; height: 10px; }
+  ::-webkit-scrollbar-track { background: theme(colors.bg); }
+  ::-webkit-scrollbar-thumb { background: theme(colors.line2); border-radius: 5px; }
+  ::-webkit-scrollbar-thumb:hover { background: theme(colors.mut); }
+}
+
+@layer components {
+  .panel { @apply bg-panel border border-line rounded-md; }
+  .panel-2 {
+    @apply bg-gradient-to-b from-panel2 to-panel border border-line rounded-md;
+  }
+  .chip {
+    @apply inline-flex items-center gap-1.5 px-2 py-1 text-xs uppercase tracking-wider
+           text-mut border border-line rounded;
+  }
+  .label-xs { @apply text-[10.5px] uppercase tracking-[0.08em] text-mut; }
+  .num { @apply font-mono tabular-nums; }
+  .heading { @apply text-amber uppercase tracking-[0.04em] text-sm font-bold
+                    border-l-2 border-amber pl-2.5; }
+  .input-bare {
+    @apply bg-panel border border-line rounded px-3 py-2 text-sm font-mono
+           text-txt placeholder:text-mut/70
+           focus:border-amber focus:outline-none focus:ring-0;
+  }
+  .btn {
+    @apply inline-flex items-center justify-center gap-2 px-3 py-2 rounded text-xs
+           uppercase tracking-wider font-bold transition-colors;
+  }
+  .btn-primary { @apply btn bg-amber text-black hover:bg-amber/90; }
+  .btn-ghost   { @apply btn bg-panel2 text-txt border border-line2 hover:border-amber; }
+}

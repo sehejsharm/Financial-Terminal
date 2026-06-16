@@ -1,0 +1,31 @@
+# One-click backend deploy on Render. Connect this repo at render.com → New
+# Blueprint → it reads this file. Set the secrets noted below in the dashboard.
+services:
+  - type: web
+    name: motherboard-api
+    runtime: docker
+    repo: https://github.com/sehejsharm/Financial-Terminal
+    dockerfilePath: ./backend/Dockerfile
+    dockerContext: .
+    plan: free
+    healthCheckPath: /healthz
+    envVars:
+      - key: MOTHERBOARD_ADMIN_USER
+        sync: false        # set in Render dashboard
+      - key: MOTHERBOARD_ADMIN_PASSWORD
+        sync: false
+      - key: BACKEND_JWT_SECRET
+        generateValue: true
+      - key: GROQ_API_KEY
+        sync: false
+      - key: FRED_API_KEY
+        sync: false
+      - key: BACKEND_CORS_ORIGINS
+        sync: false        # e.g. https://your-frontend.vercel.app
+      - key: REDIS_URL
+        fromService: { type: redis, name: motherboard-redis, property: connectionString }
+
+  - type: redis
+    name: motherboard-redis
+    plan: free
+    ipAllowList: []        # internal only

@@ -4,6 +4,7 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends, HTTPException, Query
 
 from backend import auth
+from backend import providers
 from backend.cache import cached
 from lib import market_data as md
 from lib import search as sx
@@ -20,10 +21,25 @@ def search(q: str = Query(..., min_length=2),
 @router.get("/quote/{ticker}")
 @cached(ttl=15)
 def quote(ticker: str, _user: dict = Depends(auth.current_user)):
-    q = md.get_quote(ticker)
+    q = providers.quote(ticker)
     if not q or q.get("price") is None:
         raise HTTPException(404, f"No quote for '{ticker}'")
     return q
+
+
+@router.get("/quote-bulk")
+@cached(ttl=15)
+def quote_bulk(symbols: str = Query(..., description="Comma-separated tickers"),
+               _user: dict = Depends(auth.current_user)):
+    """Parallel batch quote — single round-trip from the client's view.
+
+    Empty entries are returned as None so the client knows which symbols
+    failed without losing positional correspondence.
+    """
+    syms = [s.strip().upper() for s in symbols.split(",") if s.strip()][:30]
+    if not syms:
+        raise HTTPException(400, "No symbols provided")
+    return providers.quotes_bulk(syms)
 
 
 @router.get("/history/{ticker}")
