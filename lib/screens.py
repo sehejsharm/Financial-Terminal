@@ -13,6 +13,7 @@ from __future__ import annotations
 import streamlit as st
 
 from lib.market_data import get_stock_fundamentals
+from lib import nse
 
 # Broader universe (large + some mid caps) so smaller-cap screens can match.
 SCREEN_UNIVERSE = [
@@ -48,8 +49,19 @@ FILTER_METRICS = [
 
 @st.cache_data(ttl=3600, show_spinner=False)
 def get_metrics(ticker: str) -> dict | None:
-    """Best-effort metric set for one ticker (see module caveats)."""
-    f = get_stock_fundamentals(ticker)
+    """Best-effort metric set for one ticker (see module caveats).
+
+    For .NS symbols we overlay NSE's direct data (name, sector, P/E, mcap)
+    on top of whatever yfinance returns — many fields blank-out on cloud IPs
+    where Yahoo bot-detects us, so without NSE the screener returns nothing.
+    """
+    f = get_stock_fundamentals(ticker) or {}
+    if nse.is_indian(ticker):
+        n = nse.snapshot(ticker) or {}
+        # Prefer NSE where yfinance is missing the value (cloud-block case).
+        for k, v in n.items():
+            if v is not None and f.get(k) in (None, "", 0):
+                f[k] = v
     if not f or f.get("market_cap") is None:
         return None
     mcap_cr = f["market_cap"] / 1e7  # INR -> crore

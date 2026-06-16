@@ -17,6 +17,7 @@ from concurrent.futures import ThreadPoolExecutor
 import requests
 
 from lib import market_data as yf_md
+from lib import nse
 
 _TD_KEY = (os.getenv("TWELVE_DATA_API_KEY") or "").strip() or None
 _TD_BASE = "https://api.twelvedata.com"
@@ -153,7 +154,13 @@ def _td_time_series(symbol: str, period: str = "1Y") -> list[dict] | None:
 
 
 def quote(ticker: str) -> dict | None:
-    """Fast path: Twelve Data → yfinance fallback."""
+    """Fast path: NSE direct (for .NS / .BO / Indian indices) → Twelve Data → yfinance."""
+    # Indian equities: hit NSE directly. They publish the data; Yahoo blocks
+    # our cloud IP. NSE doesn't.
+    if nse.is_indian(ticker):
+        q = nse.index_quote(ticker) if ticker.startswith("^") else nse.quote(ticker)
+        if q and q.get("price") is not None:
+            return q
     if has_twelvedata():
         q = _td_quote(ticker)
         if q and q.get("price") is not None:
@@ -169,36 +176,49 @@ def quotes_bulk(tickers: list[str], max_workers: int = 8) -> dict[str, dict | No
 
 
 def snapshot(ticker: str) -> dict | None:
-    """Fundamentals snapshot: Twelve Data stats merged over yfinance fallback.
+    """Fundamentals snapshot. Provider preference (Indian first):
 
-    Resilient by design — Yahoo Finance often blocks Render/Vercel cloud IPs,
-    so `yf_md.get_stock_fundamentals` may return a dict full of None values.
-    We still surface that, overlaying any fields the Twelve Data quote +
-    statistics endpoints can give us. Only returns None if we truly have
-    nothing identifying — otherwise the UI fills as much as we can.
+        1. NSE direct  — for .NS / .BO; gives name, sector, P/E, mcap, 52-w.
+        2. yfinance    — for everything else, and overlay for non-NSE fields.
+        3. Twelve Data — overlay for cloud-IP-resilient stats + live price.
+
+    We layer rather than choose: each provider fills the fields it has, so
+    we get the union. Returns None only if we have literally nothing.
     """
-    base = yf_md.get_stock_fundamentals(ticker) or {}
+    base: dict = {}
+
+    if nse.is_indian(ticker) and not ticker.startswith("^"):
+        nse_data = nse.snapshot(ticker)
+        if nse_data:
+            for k, v in nse_data.items():
+                if v is not None:
+                    base[k] = v
+
+    yf_data = yf_md.get_stock_fundamentals(ticker) or {}
+    for k, v in yf_data.items():
+        if v is not None and base.get(k) in (None, "", 0):
+            base[k] = v
 
     td_q = None
     if has_twelvedata():
         td_stats = _td_statistics(ticker)
         if td_stats:
             for k, v in td_stats.items():
-                if v is not None:
+                if v is not None and base.get(k) in (None, "", 0):
                     base[k] = v
-
         td_q = _td_quote(ticker)
         if td_q and td_q.get("price") is not None:
-            base["price"] = td_q["price"]
-            base["prev_close"] = td_q.get("prev_close")
-            base["change_pct"] = td_q.get("change_pct")
-            if td_q.get("currency"):
-                base["currency"] = td_q["currency"]
+            # Don't override an NSE price for an Indian stock — INR vs USD.
+            if not nse.is_indian(ticker):
+                base["price"] = td_q["price"]
+                base["prev_close"] = td_q.get("prev_close")
+                base["change_pct"] = td_q.get("change_pct")
+                if td_q.get("currency"):
+                    base["currency"] = td_q["currency"]
 
-    # Last-ditch: if yfinance gave us nothing at all but we have a quote,
-    # synthesise a minimal snapshot so the UI doesn't 404 to a blank screen.
+    # Last-ditch: synthesise from any quote we can get.
     if not base or not any(base.values()):
-        fallback_q = td_q or yf_md.get_quote(ticker)
+        fallback_q = quote(ticker)
         if fallback_q and fallback_q.get("price") is not None:
             base = {
                 "symbol": ticker,
@@ -213,12 +233,17 @@ def snapshot(ticker: str) -> dict | None:
 
     base.setdefault("symbol", ticker)
     base.setdefault("name", ticker)
-    base.setdefault("currency", "USD")
+    base.setdefault("currency", "INR" if nse.is_indian(ticker) else "USD")
     return base
 
 
 def history(ticker: str, period: str = "1Y") -> list[dict]:
-    """Price history: Twelve Data → yfinance fallback. Returns candle dicts."""
+    """Price history: NSE direct (Indian) → Twelve Data → yfinance."""
+    if nse.is_indian(ticker) and not ticker.startswith("^"):
+        candles = nse.history(ticker, period)
+        if candles:
+            return candles
+
     if has_twelvedata():
         candles = _td_time_series(ticker, period)
         if candles:

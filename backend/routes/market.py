@@ -8,6 +8,7 @@ from backend import providers
 from backend.cache import cached
 from lib import market_data as md
 from lib import news as news_mod
+from lib import nse
 from lib import search as sx
 
 router = APIRouter(prefix="/market", tags=["market"])
@@ -60,6 +61,10 @@ def snapshot(ticker: str, _user: dict = Depends(auth.current_user)):
 @cached(ttl=300)
 def movers(kind: str = "gainers", count: int = 8,
            _user: dict = Depends(auth.current_user)):
+    """NIFTY 50 movers — NSE direct (works on cloud IPs) → yfinance fallback."""
+    nse_rows = nse.movers(kind=kind, count=count)
+    if nse_rows:
+        return nse_rows
     return md.get_movers(kind=kind, count=count)
 
 
