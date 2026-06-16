@@ -256,11 +256,24 @@ def movers(kind: str = "gainers", count: int = 10) -> list[dict] | None:
 
 
 # ── index snapshot (NIFTY etc.) ──────────────────────────────────────────
+# Map the Yahoo-style symbols Streamlit uses to NSE's "index" display names
+# returned by /api/allIndices. Expanded so the Dashboard can fill more tiles
+# without touching slow Yahoo-only US futures.
 _INDEX_NAMES = {
     "^NSEI": "NIFTY 50",
     "^BSESN": "S&P BSE SENSEX",
     "^NSEBANK": "NIFTY BANK",
     "^INDIAVIX": "INDIA VIX",
+    "^CNXIT": "NIFTY IT",
+    "^CNXFMCG": "NIFTY FMCG",
+    "^CNXAUTO": "NIFTY AUTO",
+    "^CNXPHARMA": "NIFTY PHARMA",
+    "^CNXMETAL": "NIFTY METAL",
+    "^CNXREALTY": "NIFTY REALTY",
+    "^CNXENERGY": "NIFTY ENERGY",
+    "^CNXMIDCAP": "NIFTY MIDCAP 100",
+    "^CNXSMALLCAP": "NIFTY SMALLCAP 100",
+    "^CNX500": "NIFTY 500",
 }
 
 

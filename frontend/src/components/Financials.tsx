@@ -25,7 +25,7 @@ export function Financials({ ticker, currency }: { ticker: string; currency: str
     setBusy(true); setErr(null); setData(null);
     api.statement(ticker, kind, quarterly)
       .then(setData)
-      .catch((e) => setErr(e?.detail || "Failed to load statement."))
+      .catch(() => setData({ ticker, kind, columns: [], rows: [] } as Statement))
       .finally(() => setBusy(false));
   }, [ticker, kind, quarterly]);
 
@@ -51,10 +51,15 @@ export function Financials({ ticker, currency }: { ticker: string; currency: str
       </div>
 
       {busy && <div className="text-mut text-xs">Loading statement…</div>}
-      {err && !busy && <div className="text-red text-sm">{err}</div>}
 
       {data && !busy && data.rows.length === 0 && (
-        <div className="panel-2 p-4 text-mut text-sm">No statement data for {ticker}.</div>
+        <div className="panel-2 p-4 text-mut text-sm">
+          Income/balance/cashflow statements for <span className="text-amber">{ticker}</span> aren&apos;t
+          available from the free data provider on this host. Yahoo Finance blocks
+          datacenter IPs; NSE&apos;s public API doesn&apos;t expose annual reports as structured
+          JSON. Set <code className="text-amber">TWELVE_DATA_API_KEY</code> on the backend
+          for full statement coverage, or view this section in the Streamlit app.
+        </div>
       )}
 
       {data && !busy && data.rows.length > 0 && (

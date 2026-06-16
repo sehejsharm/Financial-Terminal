@@ -9,14 +9,20 @@ import { WatchlistEditor } from "@/components/WatchlistEditor";
 import { api, type Mover, type Quote } from "@/lib/api";
 import { curForTicker, fmtNum, fmtPct } from "@/lib/utils";
 
+// All NSE-resolvable so the dashboard fills via the direct NSE provider
+// (fast, never blocked). The old INR=X / GC=F / SI=F / CL=F set went through
+// Yahoo and timed out on Render free.
 const SNAPSHOT_TICKERS = [
   "^NSEI", "^BSESN", "^NSEBANK", "^INDIAVIX",
-  "INR=X", "GC=F", "SI=F", "CL=F",
+  "^CNXIT", "^CNXFMCG", "^CNXAUTO", "^CNXPHARMA",
+  "^CNXMETAL", "^CNXENERGY", "^CNXMIDCAP", "^CNX500",
 ];
 const NAMES: Record<string, string> = {
   "^NSEI": "NIFTY 50", "^BSESN": "SENSEX", "^NSEBANK": "BANK NIFTY",
-  "^INDIAVIX": "INDIA VIX", "INR=X": "USD / INR", "GC=F": "GOLD",
-  "SI=F": "SILVER", "CL=F": "WTI CRUDE",
+  "^INDIAVIX": "INDIA VIX", "^CNXIT": "NIFTY IT", "^CNXFMCG": "NIFTY FMCG",
+  "^CNXAUTO": "NIFTY AUTO", "^CNXPHARMA": "NIFTY PHARMA",
+  "^CNXMETAL": "NIFTY METAL", "^CNXENERGY": "NIFTY ENERGY",
+  "^CNXMIDCAP": "NIFTY MIDCAP 100", "^CNX500": "NIFTY 500",
 };
 
 function MoversPanel() {
@@ -56,9 +62,12 @@ function MoversPanel() {
 
 export default function DashboardPage() {
   const [quotes, setQuotes] = useState<Record<string, Quote | null>>({});
+  const [loaded, setLoaded] = useState(false);
 
   useEffect(() => {
-    api.quoteBulk(SNAPSHOT_TICKERS).then(setQuotes).catch(() => setQuotes({}));
+    api.quoteBulk(SNAPSHOT_TICKERS)
+      .then((m) => { setQuotes(m); setLoaded(true); })
+      .catch(() => { setQuotes({}); setLoaded(true); });
   }, []);
 
   return (
@@ -70,14 +79,15 @@ export default function DashboardPage() {
           const cur = curForTicker(t, q?.currency);
           const cp = q?.change_pct ?? null;
           const tone = cp == null ? "neutral" : cp >= 0 ? "positive" : "negative";
+          const pending = !loaded && !q;
           return (
             <Link key={t} href={`/terminal?t=${encodeURIComponent(t)}`}>
               <MetricCard
                 label={NAMES[t] ?? t}
-                value={q?.price != null ? `${cur}${fmtNum(q.price, 2)}` : "—"}
+                value={q?.price != null ? `${cur}${fmtNum(q.price, 2)}` : (pending ? "···" : "—")}
                 delta={cp != null ? fmtPct(cp) : null}
                 tone={tone}
-                className="cursor-pointer"
+                className={`cursor-pointer ${pending ? "animate-pulse" : ""}`}
               />
             </Link>
           );
