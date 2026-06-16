@@ -121,6 +121,17 @@ export type NewsItem = {
   title: string; publisher: string; link: string;
   summary: string; published: string | null;
 };
+export type Indicator = {
+  name: string; value: number | null; prior: number | null;
+  change: number | null; date: string | null; unit: string;
+};
+export type YieldPoint = { maturity: string; years: number; yield: number };
+export type DealRow = Record<string, number | string | null>;
+export type AdminUser = { username: string; role: string; active?: boolean; created_at?: string };
+export type AuditEvent = {
+  ts: string; user: string | null; ip?: string | null;
+  method: string; path: string; status: number; latency_ms: number;
+};
 
 export const api = {
   // auth
@@ -152,6 +163,27 @@ export const api = {
     apiFetch<Mover[]>(`/api/v1/market/movers?kind=${kind}&count=${count}`),
   news: (ticker: string, limit = 15) =>
     apiFetch<NewsItem[]>(`/api/v1/market/news/${encodeURIComponent(ticker)}?limit=${limit}`),
+  marketNews: (limit = 30) =>
+    apiFetch<NewsItem[]>(`/api/v1/market/news?limit=${limit}`),
+
+  // macro
+  macroIndicators: () => apiFetch<Indicator[]>("/api/v1/macro/indicators"),
+  yieldCurve: () => apiFetch<YieldPoint[]>("/api/v1/macro/yield-curve"),
+
+  // deals
+  bulkDeals: () => apiFetch<DealRow[]>("/api/v1/deals/bulk"),
+  blockDeals: () => apiFetch<DealRow[]>("/api/v1/deals/block"),
+
+  // admin
+  adminUsers: () => apiFetch<AdminUser[]>("/api/v1/admin/users"),
+  adminCreateUser: (username: string, password: string, role: "user" | "master_admin") =>
+    apiFetch<{ ok: boolean; message: string }>("/api/v1/admin/users", {
+      method: "POST", body: JSON.stringify({ username, password, role }),
+    }),
+  adminDeactivateUser: (username: string) =>
+    apiFetch<void>(`/api/v1/admin/users/${encodeURIComponent(username)}`, { method: "DELETE" }),
+  adminAudit: (limit = 200) =>
+    apiFetch<AuditEvent[]>(`/api/v1/admin/audit?limit=${limit}`),
 
   // fundamentals
   statement: (ticker: string, kind: "income" | "balance" | "cashflow", quarterly = false) =>

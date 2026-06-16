@@ -169,9 +169,17 @@ def quotes_bulk(tickers: list[str], max_workers: int = 8) -> dict[str, dict | No
 
 
 def snapshot(ticker: str) -> dict | None:
-    """Fundamentals snapshot: Twelve Data stats merged over yfinance fallback."""
+    """Fundamentals snapshot: Twelve Data stats merged over yfinance fallback.
+
+    Resilient by design — Yahoo Finance often blocks Render/Vercel cloud IPs,
+    so `yf_md.get_stock_fundamentals` may return a dict full of None values.
+    We still surface that, overlaying any fields the Twelve Data quote +
+    statistics endpoints can give us. Only returns None if we truly have
+    nothing identifying — otherwise the UI fills as much as we can.
+    """
     base = yf_md.get_stock_fundamentals(ticker) or {}
 
+    td_q = None
     if has_twelvedata():
         td_stats = _td_statistics(ticker)
         if td_stats:
@@ -179,7 +187,6 @@ def snapshot(ticker: str) -> dict | None:
                 if v is not None:
                     base[k] = v
 
-        # Also overlay a live price from the Twelve Data quote.
         td_q = _td_quote(ticker)
         if td_q and td_q.get("price") is not None:
             base["price"] = td_q["price"]
@@ -188,9 +195,25 @@ def snapshot(ticker: str) -> dict | None:
             if td_q.get("currency"):
                 base["currency"] = td_q["currency"]
 
-    if not base:
-        return None
+    # Last-ditch: if yfinance gave us nothing at all but we have a quote,
+    # synthesise a minimal snapshot so the UI doesn't 404 to a blank screen.
+    if not base or not any(base.values()):
+        fallback_q = td_q or yf_md.get_quote(ticker)
+        if fallback_q and fallback_q.get("price") is not None:
+            base = {
+                "symbol": ticker,
+                "name": ticker,
+                "price": fallback_q.get("price"),
+                "prev_close": fallback_q.get("prev_close"),
+                "change_pct": fallback_q.get("change_pct"),
+                "currency": fallback_q.get("currency") or "USD",
+            }
+        else:
+            return None
+
     base.setdefault("symbol", ticker)
+    base.setdefault("name", ticker)
+    base.setdefault("currency", "USD")
     return base
 
 

@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
-import { Activity, BarChart3, Filter, Home, LogOut, Search, Terminal } from "lucide-react";
+import { Activity, BarChart3, Filter, Globe, Home, LogOut, Newspaper, Search, Shield, Terminal, Waves } from "lucide-react";
 
 import { api, token } from "@/lib/api";
 import { cn } from "@/lib/utils";
@@ -11,9 +11,13 @@ import { cn } from "@/lib/utils";
 import { CommandPalette } from "./CommandPalette";
 
 const NAV = [
-  { href: "/",         label: "Dashboard",   icon: Home },
-  { href: "/terminal", label: "Terminal",    icon: Terminal },
-  { href: "/screeners",label: "Screeners",   icon: Filter },
+  { href: "/",          label: "Dashboard",  icon: Home },
+  { href: "/terminal",  label: "Terminal",   icon: Terminal },
+  { href: "/screeners", label: "Screeners",  icon: Filter },
+  { href: "/macro",     label: "Macro",      icon: Globe },
+  { href: "/news",      label: "News",       icon: Newspaper },
+  { href: "/sharks",    label: "Big Sharks", icon: Waves },
+  { href: "/admin",     label: "Admin",      icon: Shield, adminOnly: true },
 ];
 
 /**
@@ -57,7 +61,7 @@ export function Shell({ children }: { children: React.ReactNode }) {
           <div className="label-xs mt-1">Terminal · v0.1</div>
         </div>
         <nav className="p-2 flex-1 flex flex-col gap-1">
-          {NAV.map(({ href, label, icon: Icon }) => {
+          {NAV.filter((n) => !n.adminOnly || me?.role === "master_admin").map(({ href, label, icon: Icon }) => {
             const active = pathname === href || (href !== "/" && pathname.startsWith(href));
             return (
               <Link

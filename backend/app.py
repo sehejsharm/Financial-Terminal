@@ -20,8 +20,10 @@ from backend.routes import (
     admin,
     ai,
     auth,
+    deals,
     fundamentals,
     health,
+    macro,
     market,
     options,
     screens,
@@ -57,5 +59,5 @@ app.include_router(health.router)
 _V1 = "/api/v1"
 for r in (auth.router, market.router, fundamentals.router, screens.router,
           options.router, value_chain.router, ai.router, watchlists.router,
-          admin.router):
+          macro.router, deals.router, admin.router):
     app.include_router(r, prefix=_V1)

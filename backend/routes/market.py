@@ -63,11 +63,7 @@ def movers(kind: str = "gainers", count: int = 8,
     return md.get_movers(kind=kind, count=count)
 
 
-@router.get("/news/{ticker}")
-@cached(ttl=300)
-def news(ticker: str, limit: int = 15,
-         _user: dict = Depends(auth.current_user)):
-    items = news_mod.ticker_news(ticker, limit=limit)
+def _news_payload(items):
     return [
         {
             "title": it.get("title"),
@@ -79,3 +75,17 @@ def news(ticker: str, limit: int = 15,
         }
         for it in items
     ]
+
+
+@router.get("/news/{ticker}")
+@cached(ttl=300)
+def news(ticker: str, limit: int = 15,
+         _user: dict = Depends(auth.current_user)):
+    return _news_payload(news_mod.ticker_news(ticker, limit=limit))
+
+
+@router.get("/news")
+@cached(ttl=300)
+def market_news(limit: int = 30, _user: dict = Depends(auth.current_user)):
+    """Aggregated market headlines (across indices + a few large caps)."""
+    return _news_payload(news_mod.market_news(limit=limit))

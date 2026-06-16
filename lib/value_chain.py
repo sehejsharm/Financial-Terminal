@@ -32,29 +32,33 @@ _LINE    = "#1c2129"
 # ── Gemini prompt + cache ─────────────────────────────────────────────────────
 
 _JSON_PROMPT = """
-You are a financial-data analyst generating EDUCATIONAL value-chain data for
-a research terminal.  Return ONLY a single valid JSON object — no prose, no
-markdown fences — in exactly this schema:
+You are a financial-data analyst generating an EDUCATIONAL value-chain map
+for a Bloomberg-style research terminal.  Return ONLY a single valid JSON
+object — no prose, no markdown fences — in exactly this schema:
 
 {{
   "suppliers": [
-    {{"name": "Company or sector name (max 22 chars)", "note": "What they supply (max 60 chars)"}},
+    {{"name": "Specific named company or product (max 22 chars)", "note": "Concrete input supplied + scale if known (max 60 chars)"}},
     ...
   ],
   "customers": [
-    {{"name": "Company or segment name (max 22 chars)", "note": "Revenue dependency (max 60 chars)"}},
+    {{"name": "Specific named customer or segment (max 22 chars)", "note": "What they buy + approx revenue share if known (max 60 chars)"}},
     ...
   ],
   "competitors": [
-    {{"name": "Company name (max 22 chars)", "note": "How they compete (max 60 chars)"}},
+    {{"name": "Named competitor company (max 22 chars)", "note": "Which segment they compete in + relative position (max 60 chars)"}},
     ...
   ]
 }}
 
-Rules:
+Hard rules (the model that ignores these will be rejected):
+- **NAME REAL COMPANIES**, not categories. Use "Lufthansa", "IndiGo", "Boeing 737 MAX engines" — NEVER "jet companies", "airlines", "OEMs", "various retailers".
+- If a customer is a segment rather than a single company (e.g. "US gas stations"), name 1–2 marquee examples in the note ("incl. 7-Eleven, Costco").
+- If the company has reporting segments (e.g. for Reliance: Oil-to-Chemicals, Jio, Retail), bias suppliers/customers toward those segment buckets and tag them in the note.
+- Notes should include hard specifics where you know them: feedstock type, contract value bands, % of revenue, geography.
 - Up to 7 suppliers, 7 customers, 6 competitors.
-- Data is general knowledge / educational — note uncertainty where appropriate.
-- Names must be short enough to fit in chart nodes.
+- Mark uncertainty inline ("est.", "pre-2023", "publicly disclosed") rather than padding with vague entries.
+- Names must fit in chart nodes (≤22 chars). If a real name is too long, abbreviate (e.g. "Saudi Aramco").
 - The subject company is: {name} ({ticker})
 """
 
