@@ -5,13 +5,20 @@ import { Suspense, useEffect, useState } from "react";
 
 import { AIPanel } from "@/components/AIPanel";
 import { CapitalStructureView } from "@/components/CapitalStructure";
+import { Comparables } from "@/components/Comparables";
+import { DebtProfile } from "@/components/DebtProfile";
+import { EarningsHistory } from "@/components/EarningsHistory";
 import { EstimatesView } from "@/components/Estimates";
 import { Financials } from "@/components/Financials";
 import { MetricCard } from "@/components/MetricCard";
+import { News } from "@/components/News";
 import { OptionsChain } from "@/components/OptionsChain";
+import { Ownership } from "@/components/Ownership";
 import { PriceChart } from "@/components/PriceChart";
 import { Shell } from "@/components/Shell";
+import { StreetRatings } from "@/components/StreetRatings";
 import { ValueChainMap } from "@/components/ValueChainMap";
+import { Wacc } from "@/components/Wacc";
 import { api, type Quote, type Snapshot } from "@/lib/api";
 import { curSymbol, fmtNum, fmtPct, humanNumber } from "@/lib/utils";
 
@@ -21,9 +28,16 @@ const FUNCTIONS = [
   "Financials",
   "Estimates & targets",
   "Capital structure",
+  "Comparables",
+  "Debt profile",
+  "Ownership / insiders",
+  "Earnings history",
+  "Street ratings",
+  "WACC model",
   "Value-chain map",
   "Options & Greeks",
   "AI deep-dive",
+  "Recent news",
 ] as const;
 type Fn = typeof FUNCTIONS[number];
 
@@ -148,9 +162,16 @@ function TerminalInner() {
       {!loading && !err && fn === "Financials" && <Financials ticker={ticker} currency={(snap?.currency as string) || "USD"} />}
       {!loading && !err && fn === "Estimates & targets" && <EstimatesView ticker={ticker} currency={(snap?.currency as string) || "USD"} />}
       {!loading && !err && fn === "Capital structure" && <CapitalStructureView ticker={ticker} />}
+      {!loading && !err && fn === "Comparables" && <Comparables ticker={ticker} />}
+      {!loading && !err && fn === "Debt profile" && <DebtProfile ticker={ticker} snap={snap} />}
+      {!loading && !err && fn === "Ownership / insiders" && <Ownership ticker={ticker} />}
+      {!loading && !err && fn === "Earnings history" && <EarningsHistory ticker={ticker} />}
+      {!loading && !err && fn === "Street ratings" && <StreetRatings ticker={ticker} currency={(snap?.currency as string) || "USD"} />}
+      {!loading && !err && fn === "WACC model" && <Wacc ticker={ticker} snap={snap} />}
       {!loading && !err && fn === "Value-chain map" && <ValueChainMap ticker={ticker} />}
       {!loading && !err && fn === "Options & Greeks" && <OptionsChain ticker={ticker} />}
       {!loading && !err && fn === "AI deep-dive" && <AIPanel ticker={ticker} />}
+      {!loading && !err && fn === "Recent news" && <News ticker={ticker} />}
     </Shell>
   );
 }

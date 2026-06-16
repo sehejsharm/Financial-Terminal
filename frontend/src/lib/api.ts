@@ -110,6 +110,17 @@ export type OptionChain = {
 };
 export type AIResp = { ticker: string; markdown: string };
 export type Mover = Record<string, number | string | null>;
+export type Frame = { columns: string[]; rows: Array<Record<string, number | string | null>> };
+export type CompRow = Record<string, number | string | null>;
+export type Ownership = {
+  major_holders: Frame; institutional_holders: Frame; mutualfund_holders: Frame;
+  officers: Array<{ name?: string; title?: string; pay?: number | null; age?: number | null }>;
+};
+export type Ratings = { targets: Record<string, number | string | null>; recommendations: Frame };
+export type NewsItem = {
+  title: string; publisher: string; link: string;
+  summary: string; published: string | null;
+};
 
 export const api = {
   // auth
@@ -139,6 +150,8 @@ export const api = {
     apiFetch<Snapshot>(`/api/v1/market/snapshot/${encodeURIComponent(ticker)}`),
   movers: (kind: "gainers" | "losers" = "gainers", count = 8) =>
     apiFetch<Mover[]>(`/api/v1/market/movers?kind=${kind}&count=${count}`),
+  news: (ticker: string, limit = 15) =>
+    apiFetch<NewsItem[]>(`/api/v1/market/news/${encodeURIComponent(ticker)}?limit=${limit}`),
 
   // fundamentals
   statement: (ticker: string, kind: "income" | "balance" | "cashflow", quarterly = false) =>
@@ -149,6 +162,14 @@ export const api = {
     apiFetch<Estimates>(`/api/v1/fundamentals/${encodeURIComponent(ticker)}/estimates`),
   capitalStructure: (ticker: string) =>
     apiFetch<CapStructure>(`/api/v1/fundamentals/${encodeURIComponent(ticker)}/capital-structure`),
+  comps: (tickers: string[]) =>
+    apiFetch<CompRow[]>(`/api/v1/fundamentals/comps?tickers=${encodeURIComponent(tickers.join(","))}`),
+  ownership: (ticker: string) =>
+    apiFetch<Ownership>(`/api/v1/fundamentals/${encodeURIComponent(ticker)}/ownership`),
+  earningsHistory: (ticker: string) =>
+    apiFetch<Frame>(`/api/v1/fundamentals/${encodeURIComponent(ticker)}/earnings-history`),
+  ratings: (ticker: string) =>
+    apiFetch<Ratings>(`/api/v1/fundamentals/${encodeURIComponent(ticker)}/ratings`),
 
   // options
   optionExpiries: (ticker: string) =>

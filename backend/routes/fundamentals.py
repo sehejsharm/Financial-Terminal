@@ -1,10 +1,11 @@
-"""Financial statements, estimates, capital structure."""
+"""Financial statements, estimates, capital structure, comps, ownership, ratings."""
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 
 from backend import auth
 from backend.cache import cached
+from backend.serialize import clean_dict, frame_payload, records
 from lib.fundamentals import (
     BALANCE_ROWS,
     CASHFLOW_ROWS,
@@ -13,6 +14,13 @@ from lib.fundamentals import (
     get_estimates,
     get_statement,
     select_rows,
+)
+from lib.institutional import (
+    comps_matrix,
+    get_earnings_history,
+    get_officers,
+    get_ownership,
+    get_ratings,
 )
 
 router = APIRouter(prefix="/fundamentals", tags=["fundamentals"])
@@ -48,3 +56,45 @@ def estimates(ticker: str, _user: dict = Depends(auth.current_user)):
 @cached(ttl=3600)
 def cap_structure(ticker: str, _user: dict = Depends(auth.current_user)):
     return capital_structure(ticker)
+
+
+@router.get("/comps")
+@cached(ttl=900)
+def comps(tickers: str = Query(..., description="Comma-separated peer tickers"),
+          _user: dict = Depends(auth.current_user)):
+    ts = [t.strip().upper() for t in tickers.split(",") if t.strip()][:10]
+    if not ts:
+        raise HTTPException(400, "No tickers provided")
+    return records(comps_matrix(ts))
+
+
+@router.get("/{ticker}/ownership")
+@cached(ttl=3600)
+def ownership(ticker: str, _user: dict = Depends(auth.current_user)):
+    own = get_ownership(ticker)
+    return {
+        "major_holders": frame_payload(own.get("major_holders")),
+        "institutional_holders": frame_payload(own.get("institutional_holders")),
+        "mutualfund_holders": frame_payload(own.get("mutualfund_holders")),
+        "officers": [
+            {"name": o.get("name"), "title": o.get("title"),
+             "pay": o.get("pay"), "age": o.get("age")}
+            for o in get_officers(ticker)
+        ],
+    }
+
+
+@router.get("/{ticker}/earnings-history")
+@cached(ttl=3600)
+def earnings_history(ticker: str, _user: dict = Depends(auth.current_user)):
+    return frame_payload(get_earnings_history(ticker))
+
+
+@router.get("/{ticker}/ratings")
+@cached(ttl=3600)
+def ratings(ticker: str, _user: dict = Depends(auth.current_user)):
+    r = get_ratings(ticker)
+    return {
+        "targets": clean_dict(r.get("targets") if isinstance(r.get("targets"), dict) else {}),
+        "recommendations": frame_payload(r.get("recommendations")),
+    }

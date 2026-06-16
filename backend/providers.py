@@ -24,198 +24,191 @@ _TD_SESSION = requests.Session()
 
 
 def has_twelvedata() -> bool:
-        return _TD_KEY is not None
+    return _TD_KEY is not None
 
 
 def _td_quote(symbol: str) -> dict | None:
-        """Twelve Data quote — fast REST call. Returns None on failure."""
-        if not _TD_KEY:
-                    return None
-                try:
-                            r = _TD_SESSION.get(
-                                            f"{_TD_BASE}/quote",
-                                            params={"symbol": symbol, "apikey": _TD_KEY},
-                                            timeout=6,
-                            )
-                            if r.status_code != 200:
-                                            return None
-                                        body = r.json()
+    """Twelve Data quote — fast REST call. Returns None on failure."""
+    if not _TD_KEY:
+        return None
+    try:
+        r = _TD_SESSION.get(
+            f"{_TD_BASE}/quote",
+            params={"symbol": symbol, "apikey": _TD_KEY},
+            timeout=6,
+        )
+        if r.status_code != 200:
+            return None
+        body = r.json()
         if "code" in body and body.get("status") == "error":
-                        return None
+            return None
         return {
-                        "symbol": symbol,
-                        "price": float(body["close"]) if body.get("close") else None,
-                        "prev_close": float(body["previous_close"])
-                        if body.get("previous_close") else None,
-                        "change_pct": float(body["percent_change"])
-                        if body.get("percent_change") else None,
-                        "currency": body.get("currency"),
+            "symbol": symbol,
+            "price": float(body["close"]) if body.get("close") else None,
+            "prev_close": float(body["previous_close"])
+                          if body.get("previous_close") else None,
+            "change_pct": float(body["percent_change"])
+                          if body.get("percent_change") else None,
+            "currency": body.get("currency"),
         }
-except Exception:
+    except Exception:
         return None
 
 
 def _td_statistics(symbol: str) -> dict | None:
-        """Twelve Data statistics endpoint for fundamentals. Returns None on failure."""
+    """Twelve Data statistics endpoint for fundamentals. None on failure."""
     if not _TD_KEY:
-                return None
+        return None
     try:
-                r = _TD_SESSION.get(
-                                f"{_TD_BASE}/statistics",
-                                params={"symbol": symbol, "apikey": _TD_KEY},
-                                timeout=8,
-                )
+        r = _TD_SESSION.get(
+            f"{_TD_BASE}/statistics",
+            params={"symbol": symbol, "apikey": _TD_KEY},
+            timeout=8,
+        )
         if r.status_code != 200:
-                        return None
+            return None
         body = r.json()
         if body.get("status") == "error" or "statistics" not in body:
-                        return None
+            return None
         stats = body.get("statistics", {})
         valuations = stats.get("valuations_metrics", {})
         financials = stats.get("financials", {})
         stock_stats = stats.get("stock_statistics", {})
-        balance = financials.get("balance_sheet", {})
         highlights = stats.get("highlights", {})
 
         def _f(d, *keys):
-                        for k in keys:
-                                            v = d.get(k)
-                                            if v is not None:
-                                                                    try:
-                                                                                                return float(v)
-except (TypeError, ValueError):
+            for k in keys:
+                v = d.get(k)
+                if v is not None:
+                    try:
+                        return float(v)
+                    except (TypeError, ValueError):
                         pass
             return None
 
         return {
-                        "market_cap": _f(highlights, "market_capitalization"),
-                        "trailing_pe": _f(valuations, "trailing_pe"),
-                        "forward_pe": _f(valuations, "forward_pe"),
-                        "price_to_book": _f(valuations, "price_to_book_mrq"),
-                        "beta": _f(stock_stats, "beta"),
-                        "fifty_two_high": _f(stock_stats, "52_week_high"),
-                        "fifty_two_low": _f(stock_stats, "52_week_low"),
-                        "dividend_yield": _f(highlights, "dividend_yield"),
-                        "eps_trailing": _f(highlights, "diluted_eps_ttm"),
-                        "profit_margin": _f(highlights, "profit_margin"),
-                        "revenue": _f(financials.get("income_statement", {}), "total_revenue"),
+            "market_cap": _f(highlights, "market_capitalization"),
+            "trailing_pe": _f(valuations, "trailing_pe"),
+            "forward_pe": _f(valuations, "forward_pe"),
+            "price_to_book": _f(valuations, "price_to_book_mrq"),
+            "beta": _f(stock_stats, "beta"),
+            "fifty_two_high": _f(stock_stats, "52_week_high"),
+            "fifty_two_low": _f(stock_stats, "52_week_low"),
+            "dividend_yield": _f(highlights, "dividend_yield"),
+            "eps_trailing": _f(highlights, "diluted_eps_ttm"),
+            "profit_margin": _f(highlights, "profit_margin"),
+            "revenue": _f(financials.get("income_statement", {}), "total_revenue"),
         }
-except Exception:
+    except Exception:
         return None
 
 
 def _td_time_series(symbol: str, period: str = "1Y") -> list[dict] | None:
-        """Twelve Data time series for chart data. Returns list of candle dicts or None."""
+    """Twelve Data time series for chart data. List of candle dicts or None."""
     if not _TD_KEY:
-                return None
+        return None
     period_map = {
-                "1D": ("1min", "1day"),
-                "5D": ("5min", "5day"),
-                "1M": ("1day", "1month"),
-                "3M": ("1day", "3month"),
-                "6M": ("1day", "6month"),
-                "1Y": ("1day", "1year"),
-                "3Y": ("1week", "3year"),
-                "5Y": ("1week", "5year"),
+        "1D": ("1min", "1day"),
+        "5D": ("5min", "5day"),
+        "1M": ("1day", "1month"),
+        "3M": ("1day", "3month"),
+        "6M": ("1day", "6month"),
+        "1Y": ("1day", "1year"),
+        "3Y": ("1week", "3year"),
+        "5Y": ("1week", "5year"),
     }
-    interval, outputsize_period = period_map.get(period, ("1day", "1year"))
+    interval, _outputsize_period = period_map.get(period, ("1day", "1year"))
     try:
-                r = _TD_SESSION.get(
-                                f"{_TD_BASE}/time_series",
-                                params={
-                                                    "symbol": symbol,
-                                                    "interval": interval,
-                                                    "outputsize": 365,
-                                                    "apikey": _TD_KEY,
-                                },
-                                timeout=10,
-                )
+        r = _TD_SESSION.get(
+            f"{_TD_BASE}/time_series",
+            params={
+                "symbol": symbol,
+                "interval": interval,
+                "outputsize": 365,
+                "apikey": _TD_KEY,
+            },
+            timeout=10,
+        )
         if r.status_code != 200:
-                        return None
+            return None
         body = r.json()
         if body.get("status") == "error" or "values" not in body:
-                        return None
+            return None
         candles = []
         for row in reversed(body["values"]):
-                        try:
-                                            candles.append({
-                                                                    "Date": row.get("datetime"),
-                                                                    "Open": float(row["open"]),
-                                                                    "High": float(row["high"]),
-                                                                    "Low": float(row["low"]),
-                                                                    "Close": float(row["close"]),
-                                                                    "Volume": float(row.get("volume") or 0),
-                                            })
-except (KeyError, ValueError, TypeError):
+            try:
+                candles.append({
+                    "Date": row.get("datetime"),
+                    "Open": float(row["open"]),
+                    "High": float(row["high"]),
+                    "Low": float(row["low"]),
+                    "Close": float(row["close"]),
+                    "Volume": float(row.get("volume") or 0),
+                })
+            except (KeyError, ValueError, TypeError):
                 continue
         return candles if candles else None
-except Exception:
+    except Exception:
         return None
 
 
 def quote(ticker: str) -> dict | None:
-        """Fast path: Twelve Data → yfinance fallback."""
+    """Fast path: Twelve Data → yfinance fallback."""
     if has_twelvedata():
-                q = _td_quote(ticker)
+        q = _td_quote(ticker)
         if q and q.get("price") is not None:
-                        return q
+            return q
     return yf_md.get_quote(ticker)
 
 
 def quotes_bulk(tickers: list[str], max_workers: int = 8) -> dict[str, dict | None]:
-        """Parallel quote fetch across the configured provider."""
+    """Parallel quote fetch across the configured provider."""
     with ThreadPoolExecutor(max_workers=max_workers) as pool:
-                results = list(pool.map(quote, tickers))
+        results = list(pool.map(quote, tickers))
     return dict(zip(tickers, results))
 
 
 def snapshot(ticker: str) -> dict | None:
-        """Get fundamentals snapshot: Twelve Data stats merged with yfinance fallback."""
-    # Start with yfinance fundamentals
+    """Fundamentals snapshot: Twelve Data stats merged over yfinance fallback."""
     base = yf_md.get_stock_fundamentals(ticker) or {}
 
-    # Overlay with Twelve Data statistics if available (more reliable on cloud)
     if has_twelvedata():
-                td_stats = _td_statistics(ticker)
+        td_stats = _td_statistics(ticker)
         if td_stats:
-                        for k, v in td_stats.items():
-                                            if v is not None:
-                                                                    base[k] = v
+            for k, v in td_stats.items():
+                if v is not None:
+                    base[k] = v
 
-                                    # Also get live price from Twelve Data quote
-                                    td_q = _td_quote(ticker)
+        # Also overlay a live price from the Twelve Data quote.
+        td_q = _td_quote(ticker)
         if td_q and td_q.get("price") is not None:
-                        base["price"] = td_q["price"]
+            base["price"] = td_q["price"]
             base["prev_close"] = td_q.get("prev_close")
             base["change_pct"] = td_q.get("change_pct")
             if td_q.get("currency"):
-                                base["currency"] = td_q["currency"]
+                base["currency"] = td_q["currency"]
 
-    # Ensure symbol is set
     if not base:
-                return None
+        return None
     base.setdefault("symbol", ticker)
     return base
 
 
 def history(ticker: str, period: str = "1Y") -> list[dict]:
-        """Get price history: Twelve Data → yfinance fallback."""
-    # Try Twelve Data first
+    """Price history: Twelve Data → yfinance fallback. Returns candle dicts."""
     if has_twelvedata():
-                candles = _td_time_series(ticker, period)
+        candles = _td_time_series(ticker, period)
         if candles:
-                        return candles
+            return candles
 
-    # Fall back to yfinance
-    import pandas as pd
     df = yf_md.get_history(ticker, period)
     if df is None or df.empty:
-                return []
+        return []
     df = df.reset_index()
     df.columns = [str(c) for c in df.columns]
     candles = df.to_dict(orient="records")
     for row in candles:
-                for k, v in list(row.items()):
-                                if hasattr(v, "isoformat"):
-                                                    row[k] = v.isoformat()
-                                        return candles
+        for k, v in list(row.items()):
+            if hasattr(v, "isoformat"):
+                row[k] = v.isoformat()
+    return candles
