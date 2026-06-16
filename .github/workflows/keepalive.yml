@@ -1,0 +1,17 @@
+# Keeps the Render free-tier backend awake so users never hit a ~50s cold
+# start. Render free sleeps after 15 min idle; this pings /healthz every 10 min.
+# NOTE: Render free has a ~750 hr/month cap — fine for ONE always-on service.
+name: keep-render-awake
+
+on:
+  schedule:
+    - cron: "*/10 * * * *"   # every 10 minutes
+  workflow_dispatch: {}
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Ping backend health endpoint
+        run: |
+          curl -fsS --max-time 60 https://motherboard-api.onrender.com/healthz || true

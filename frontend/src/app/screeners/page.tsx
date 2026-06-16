@@ -4,15 +4,19 @@ import Link from "next/link";
 import { useState } from "react";
 
 import { Shell } from "@/components/Shell";
-import { api } from "@/lib/api";
+import { api, type ScreenResult } from "@/lib/api";
 
 type ScreenDef = {
   label: string;
   desc: string;
-  run: () => Promise<any[]>;
+  run: () => Promise<ScreenResult>;
 };
 
 const SCREENS: ScreenDef[] = [
+  // Cloud-data-friendly first — these return rows on the live deployment with
+  // no extra API key (filter on market cap + P/E, which NSE always provides).
+  { label: "Large Cap", desc: "Market cap > ₹20,000 cr. Works on live data.", run: () => api.preset("Large Cap") },
+  { label: "Large Cap Value", desc: "Market cap > ₹50,000 cr, P/E < 25. Works on live data.", run: () => api.preset("Large Cap Value") },
   { label: "PEG Screen", desc: "EPS growth > 20, Sales growth > 15, PEG < 1, low debt.", run: () => api.preset("PEG Screen") },
   { label: "Hidden Gems", desc: "Small-cap (₹500–5000 cr) high-growth names.", run: () => api.preset("Hidden Gems") },
   { label: "Growth", desc: "Large-cap (> ₹5000 cr) consistent growers.", run: () => api.preset("Growth") },
@@ -60,22 +64,23 @@ function tickerOf(r: any): string {
 
 export default function ScreenersPage() {
   const [active, setActive] = useState(0);
-  const [rows, setRows] = useState<any[] | null>(null);
+  const [result, setResult] = useState<ScreenResult | null>(null);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
   async function run(i = active) {
     setActive(i);
-    setBusy(true); setErr(null); setRows(null);
+    setBusy(true); setErr(null); setResult(null);
     try {
-      setRows(await SCREENS[i].run());
+      setResult(await SCREENS[i].run());
     } catch (e: any) {
-      setErr(e?.detail || "Screen failed.");
+      setErr(e?.detail || "Screen failed. The data backend may be waking up — try again in a few seconds.");
     } finally {
       setBusy(false);
     }
   }
 
+  const rows = result?.rows ?? null;
   const cols = rows && rows.length
     ? Array.from(new Set(rows.flatMap((r) => Object.keys(r)))).filter((c) => c !== "symbol")
     : [];
@@ -109,7 +114,18 @@ export default function ScreenersPage() {
       </div>
 
       {err && <div className="text-red text-sm mb-3">{err}</div>}
-      {rows && rows.length === 0 && <div className="panel-2 p-4 text-mut">No matches.</div>}
+
+      {result && rows && rows.length === 0 && (
+        <div className="panel-2 p-4 text-mut">
+          <div>{result.note || "No matches for this screen."}</div>
+          {typeof result.scanned === "number" && (
+            <div className="text-xs mt-2 opacity-80">
+              Scanned {result.scanned} names
+              {typeof result.evaluable === "number" ? `, ${result.evaluable} returned usable data` : ""}.
+            </div>
+          )}
+        </div>
+      )}
 
       {rows && rows.length > 0 && (
         <div className="panel overflow-auto">

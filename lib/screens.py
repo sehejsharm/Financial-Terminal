@@ -47,13 +47,12 @@ FILTER_METRICS = [
 ]
 
 
-@st.cache_data(ttl=3600, show_spinner=False)
-def get_metrics(ticker: str) -> dict | None:
-    """Best-effort metric set for one ticker (see module caveats).
+def _fetch_fundamentals_default(ticker: str) -> dict:
+    """Default fundamentals fetch: yfinance with an NSE overlay for .NS names.
 
-    For .NS symbols we overlay NSE's direct data (name, sector, P/E, mcap)
-    on top of whatever yfinance returns — many fields blank-out on cloud IPs
-    where Yahoo bot-detects us, so without NSE the screener returns nothing.
+    Many yfinance fields blank-out on cloud IPs where Yahoo bot-detects us, so
+    we overlay NSE's direct data (name, sector, P/E, mcap) where available. The
+    backend injects a richer provider (NSE + Twelve Data + yfinance) instead.
     """
     f = get_stock_fundamentals(ticker) or {}
     if nse.is_indian(ticker):
@@ -62,6 +61,12 @@ def get_metrics(ticker: str) -> dict | None:
         for k, v in n.items():
             if v is not None and f.get(k) in (None, "", 0):
                 f[k] = v
+    return f
+
+
+def _build_metrics(ticker: str, f: dict | None) -> dict | None:
+    """Pure transform: raw fundamentals dict -> screen metric row. No network."""
+    f = f or {}
     if not f or f.get("market_cap") is None:
         return None
     mcap_cr = f["market_cap"] / 1e7  # INR -> crore
@@ -87,6 +92,12 @@ def get_metrics(ticker: str) -> dict | None:
         "promoter": round(promoter, 1) if promoter is not None else None,
         "pe": f.get("trailing_pe"),
     }
+
+
+@st.cache_data(ttl=3600, show_spinner=False)
+def get_metrics(ticker: str) -> dict | None:
+    """Best-effort metric set for one ticker (Streamlit path; see caveats)."""
+    return _build_metrics(ticker, _fetch_fundamentals_default(ticker))
 
 
 def _ge(v, t):
@@ -123,21 +134,40 @@ PRESETS = {
                            and _ge(m["roce"], 18) and _le(m["de"], 0.5)
                            and _ge(m["promoter"], 50)),
     },
+    # Cloud-data-friendly presets: filter only on market cap + P/E, which NSE
+    # provides for every name even when Yahoo blocks our IP. These return rows
+    # on the live deployment without any extra API key.
+    "Large Cap": {
+        "desc": "Market cap > ₹20,000 cr. Works on live cloud data (NSE).",
+        "test": lambda m: _ge(m["mcap_cr"], 20000),
+    },
+    "Large Cap Value": {
+        "desc": "Market cap > ₹50,000 cr and P/E < 25. Works on live data.",
+        "test": lambda m: _ge(m["mcap_cr"], 50000) and _le(m["pe"], 25),
+    },
 }
 
 
 def scan_universe(universe: list[str] | None = None,
-                  max_workers: int = 12) -> list[dict]:
+                  max_workers: int = 12,
+                  fundamentals_fn=None) -> list[dict]:
     """Fetch metrics for every ticker in the universe (skips failures).
 
-    Parallelised — yfinance is network-bound and was the dominant cost when
-    sequential. Threaded fetch cuts a 50-ticker scan from ~60s to ~6s.
+    Parallelised — data fetch is network-bound and was the dominant cost when
+    sequential. `fundamentals_fn(ticker) -> dict` lets the backend inject its
+    resilient provider layer (NSE + Twelve Data + yfinance) so fields populate
+    on cloud IPs where Yahoo blocks us. When None, the Streamlit default
+    (yfinance + NSE, cached per ticker) is used.
     """
     from concurrent.futures import ThreadPoolExecutor
     tickers = universe or SCREEN_UNIVERSE
+    if fundamentals_fn is None:
+        fetch = get_metrics
+    else:
+        fetch = lambda t: _build_metrics(t, fundamentals_fn(t))
     rows: list[dict] = []
     with ThreadPoolExecutor(max_workers=max_workers) as pool:
-        for m in pool.map(get_metrics, tickers):
+        for m in pool.map(fetch, tickers):
             if m:
                 rows.append(m)
     return rows

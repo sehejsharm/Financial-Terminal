@@ -11,6 +11,8 @@ Auth: POST /api/v1/auth/login → bearer token → use on every other endpoint.
 """
 from __future__ import annotations
 
+import threading
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
@@ -49,6 +51,7 @@ app.add_middleware(
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
+    max_age=600,  # cache CORS preflight 10 min -> far fewer OPTIONS round-trips
 )
 app.add_middleware(AuditMiddleware)
 
@@ -61,3 +64,19 @@ for r in (auth.router, market.router, fundamentals.router, screens.router,
           options.router, value_chain.router, ai.router, watchlists.router,
           macro.router, deals.router, admin.router):
     app.include_router(r, prefix=_V1)
+
+
+@app.on_event("startup")
+def _prewarm() -> None:
+    """Best-effort warm-up so the first request doesn't pay import + network
+    cold-start (yfinance/curl_cffi import, NSE session). Never blocks or
+    crashes boot — runs on a daemon thread and swallows all errors."""
+
+    def _run() -> None:
+        try:
+            from backend import providers
+            providers.quotes_bulk(["^NSEI", "^BSESN", "^NSEBANK", "^INDIAVIX"])
+        except Exception:
+            pass
+
+    threading.Thread(target=_run, daemon=True).start()

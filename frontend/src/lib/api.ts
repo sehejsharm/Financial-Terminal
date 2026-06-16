@@ -133,6 +133,26 @@ export type AuditEvent = {
   method: string; path: string; status: number; latency_ms: number;
 };
 
+export type ScreenResult = {
+  rows: any[];
+  scanned?: number;
+  evaluable?: number | null;
+  note?: string | null;
+};
+
+// Backend now returns {rows, scanned, evaluable, note}; tolerate the old bare
+// array too so a partial deploy never breaks the screeners page.
+function normScreen(r: unknown): ScreenResult {
+  if (Array.isArray(r)) return { rows: r };
+  const o = (r ?? {}) as any;
+  return {
+    rows: Array.isArray(o.rows) ? o.rows : [],
+    scanned: o.scanned,
+    evaluable: o.evaluable ?? null,
+    note: o.note ?? null,
+  };
+}
+
 export const api = {
   // auth
   login: (username: string, password: string) =>
@@ -244,17 +264,17 @@ export const api = {
 
   // screens
   preset: (name: string) =>
-    apiFetch<any[]>(`/api/v1/screens/preset/${encodeURIComponent(name)}`),
+    apiFetch<unknown>(`/api/v1/screens/preset/${encodeURIComponent(name)}`).then(normScreen),
   screenBuffett: (min_score = 70) =>
-    apiFetch<any[]>("/api/v1/screens/buffett", {
+    apiFetch<unknown>("/api/v1/screens/buffett", {
       method: "POST", body: JSON.stringify({ min_score }),
-    }),
+    }).then(normScreen),
   screenGraham: (growth_default = 8, bond_yield = 7, min_mos = 20) =>
-    apiFetch<any[]>("/api/v1/screens/graham", {
+    apiFetch<unknown>("/api/v1/screens/graham", {
       method: "POST", body: JSON.stringify({ growth_default, bond_yield, min_mos }),
-    }),
+    }).then(normScreen),
   screenEtfs: (sort_by = "ytd_return", sector: string | null = null) =>
-    apiFetch<any[]>("/api/v1/screens/etfs", {
+    apiFetch<unknown>("/api/v1/screens/etfs", {
       method: "POST", body: JSON.stringify({ sort_by, sector }),
-    }),
+    }).then(normScreen),
 };
