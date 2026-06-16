@@ -1,0 +1,106 @@
+"""Storage layer — file-backed JSON today, Postgres-ready interface.
+
+Swapping to SQL later means writing a single new implementation of `Storage`
+and rebinding `get_storage()`. Nothing else in the backend changes.
+"""
+from __future__ import annotations
+
+import json
+import threading
+from pathlib import Path
+from typing import Any
+
+from backend.config import DATA_DIR
+
+
+class Storage:
+    """Pluggable storage interface (watchlists, saved screens, audit log)."""
+
+    def watchlists_for(self, username: str) -> list[dict]: ...
+    def upsert_watchlist(self, username: str, wl: dict) -> dict: ...
+    def delete_watchlist(self, username: str, wl_id: str) -> bool: ...
+
+    def append_audit(self, event: dict) -> None: ...
+    def recent_audit(self, limit: int = 200) -> list[dict]: ...
+
+
+class JSONStore(Storage):
+    """Simple thread-safe JSON store. Each entity is a single file."""
+
+    def __init__(self, root: Path = DATA_DIR):
+        self.root = root
+        self.root.mkdir(parents=True, exist_ok=True)
+        self._lock = threading.RLock()
+        self.wl_path = self.root / "watchlists.json"
+        self.audit_path = self.root / "audit.jsonl"
+
+    # ── private helpers ──────────────────────────────────────────────────────
+    def _load_watchlists(self) -> dict:
+        if not self.wl_path.exists():
+            return {}
+        try:
+            return json.loads(self.wl_path.read_text() or "{}")
+        except Exception:
+            return {}
+
+    def _save_watchlists(self, data: dict) -> None:
+        self.wl_path.write_text(json.dumps(data, indent=2))
+
+    # ── watchlists ──────────────────────────────────────────────────────────
+    def watchlists_for(self, username: str) -> list[dict]:
+        with self._lock:
+            return self._load_watchlists().get(username.lower(), [])
+
+    def upsert_watchlist(self, username: str, wl: dict) -> dict:
+        with self._lock:
+            data = self._load_watchlists()
+            bucket = data.setdefault(username.lower(), [])
+            for i, existing in enumerate(bucket):
+                if existing.get("id") == wl["id"]:
+                    bucket[i] = wl
+                    self._save_watchlists(data)
+                    return wl
+            bucket.append(wl)
+            self._save_watchlists(data)
+            return wl
+
+    def delete_watchlist(self, username: str, wl_id: str) -> bool:
+        with self._lock:
+            data = self._load_watchlists()
+            bucket = data.get(username.lower(), [])
+            new_bucket = [w for w in bucket if w.get("id") != wl_id]
+            if len(new_bucket) == len(bucket):
+                return False
+            data[username.lower()] = new_bucket
+            self._save_watchlists(data)
+            return True
+
+    # ── audit log (append-only JSONL) ────────────────────────────────────────
+    def append_audit(self, event: dict) -> None:
+        with self._lock:
+            with open(self.audit_path, "a", encoding="utf-8") as fh:
+                fh.write(json.dumps(event, default=str) + "\n")
+
+    def recent_audit(self, limit: int = 200) -> list[dict]:
+        if not self.audit_path.exists():
+            return []
+        # Read last `limit` lines efficiently enough for our scale.
+        with open(self.audit_path, "r", encoding="utf-8") as fh:
+            lines = fh.readlines()[-limit:]
+        out: list[dict] = []
+        for line in lines:
+            try:
+                out.append(json.loads(line))
+            except Exception:
+                continue
+        return out
+
+
+_storage: Storage | None = None
+
+
+def get_storage() -> Storage:
+    global _storage
+    if _storage is None:
+        _storage = JSONStore()
+    return _storage
