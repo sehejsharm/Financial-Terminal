@@ -47,16 +47,27 @@ export function CommandPalette({
             autoFocus
             placeholder="Type a ticker (RELIANCE.NS, AAPL) or page (Terminal, Screeners)…"
             className="w-full bg-transparent border-0 border-b border-line px-4 py-3.5 text-txt placeholder:text-mut/70 focus:outline-none"
-            onKeyDown={(e) => {
-              if (e.key === "Enter" && q && hits.length === 0) {
-                // Bare ticker entered — jump straight to Terminal for it.
-                go(`/terminal?t=${encodeURIComponent(q.toUpperCase())}`);
-              }
-            }}
           />
           <Command.List className="max-h-[60vh] overflow-y-auto py-1">
+            {/* Synthetic "open raw query" row — cmdk's own keyboard handler
+                selects it on Enter, which fixes the earlier bug where the
+                onKeyDown on Input was swallowed when hits=[]. Always shown so
+                Enter always navigates somewhere. */}
+            {q.trim().length > 0 && (
+              <Command.Group heading="Jump" className="px-2 py-1 text-mut">
+                <Command.Item
+                  value={`__open_${q}`}
+                  onSelect={() => go(`/terminal?t=${encodeURIComponent(q.trim().toUpperCase())}`)}
+                  className="flex items-center gap-3 px-3 py-2 rounded cursor-pointer
+                             data-[selected=true]:bg-panel data-[selected=true]:text-amber"
+                >
+                  <span className="text-mut text-[10px] uppercase tracking-wider">GO</span>
+                  <span className="text-txt">Open <span className="text-amber">{q.trim().toUpperCase()}</span> in Terminal</span>
+                </Command.Item>
+              </Command.Group>
+            )}
             <Command.Empty className="px-4 py-3 text-mut text-xs">
-              No matches. Hit Enter to open “{q.toUpperCase()}” in Terminal anyway.
+              Keep typing — or press Enter to open “{q.toUpperCase()}” directly.
             </Command.Empty>
 
             <Command.Group heading="Pages" className="px-2 py-1 text-mut">

@@ -316,21 +316,41 @@ _INDEX_NAMES = {
 
 
 def index_quote(ticker: str) -> dict | None:
-    """Index quotes via /api/allIndices."""
+    """Index quotes via /api/allIndices.
+
+    Match logic is exact-then-substring + space-insensitive — NSE has used
+    both "NIFTY MIDCAP 100" and "NIFTY MIDCAP100" historically, and adds/
+    removes the leading "S&P" / "Nifty" qualifiers without notice.
+    """
     if ticker not in _INDEX_NAMES:
         return None
     data = _get("/api/allIndices")
     if not data:
         return None
-    target = _INDEX_NAMES[ticker]
-    for row in data.get("data", []):
-        # NSE returns 'index' as the display name (e.g. "NIFTY 50").
-        if row.get("index", "").upper() == target.upper():
-            return {
-                "symbol": ticker,
-                "price": _safe_float(row.get("last")),
-                "prev_close": _safe_float(row.get("previousClose")),
-                "change_pct": _safe_float(row.get("percentChange")),
-                "currency": "INR",
-            }
+    target = _INDEX_NAMES[ticker].upper()
+    target_squashed = target.replace(" ", "")
+
+    def _row_to_quote(row):
+        return {
+            "symbol": ticker,
+            "price": _safe_float(row.get("last")),
+            "prev_close": _safe_float(row.get("previousClose")),
+            "change_pct": _safe_float(row.get("percentChange")),
+            "currency": "INR",
+        }
+
+    rows = data.get("data", [])
+    # Pass 1: exact match (case-insensitive)
+    for row in rows:
+        if row.get("index", "").upper() == target:
+            return _row_to_quote(row)
+    # Pass 2: space-insensitive match (handles "NIFTY 500" vs "NIFTY500")
+    for row in rows:
+        if row.get("index", "").upper().replace(" ", "") == target_squashed:
+            return _row_to_quote(row)
+    # Pass 3: substring — last resort for renamed indices
+    for row in rows:
+        name = row.get("index", "").upper()
+        if target in name or target_squashed in name.replace(" ", ""):
+            return _row_to_quote(row)
     return None

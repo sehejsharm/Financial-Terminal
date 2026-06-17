@@ -44,10 +44,62 @@ export const token = {
   clear: () => clearCookie(TOKEN_COOKIE),
 };
 
+// ── client-side cache ────────────────────────────────────────────────────
+// Tiny localStorage cache for GET responses that are slow upstream and don't
+// change often (financials, ownership, ratings). Skipped for live data
+// (quote, quote-bulk, history, movers). Keeps the UI feeling instant after
+// you've visited a ticker once, without inventing a new state-management
+// layer. Wiped automatically on 401 (logout).
+const CACHE_PREFIX = "mb_cache_v1:";
+const CACHE_TTL_MS: Record<string, number> = {
+  "/api/v1/fundamentals/": 5 * 60_000,
+  "/api/v1/market/snapshot/": 60_000,
+  "/api/v1/market/search": 5 * 60_000,
+  "/api/v1/value-chain/": 12 * 60 * 60_000,
+  "/api/v1/macro/": 30 * 60_000,
+};
+function ttlFor(path: string): number {
+  for (const [pref, ttl] of Object.entries(CACHE_TTL_MS)) {
+    if (path.startsWith(pref)) return ttl;
+  }
+  return 0;
+}
+function cacheGet(path: string): unknown | null {
+  if (typeof localStorage === "undefined") return null;
+  const ttl = ttlFor(path);
+  if (!ttl) return null;
+  try {
+    const raw = localStorage.getItem(CACHE_PREFIX + path);
+    if (!raw) return null;
+    const { v, t } = JSON.parse(raw) as { v: unknown; t: number };
+    if (Date.now() - t > ttl) { localStorage.removeItem(CACHE_PREFIX + path); return null; }
+    return v;
+  } catch { return null; }
+}
+function cacheSet(path: string, v: unknown) {
+  if (typeof localStorage === "undefined") return;
+  if (!ttlFor(path)) return;
+  try { localStorage.setItem(CACHE_PREFIX + path, JSON.stringify({ v, t: Date.now() })); }
+  catch { /* quota; ignore */ }
+}
+function cacheClearAll() {
+  if (typeof localStorage === "undefined") return;
+  for (let i = localStorage.length - 1; i >= 0; i--) {
+    const k = localStorage.key(i);
+    if (k && k.startsWith(CACHE_PREFIX)) localStorage.removeItem(k);
+  }
+}
+
 export async function apiFetch<T = unknown>(
   path: string,
   init: RequestInit = {},
 ): Promise<T> {
+  const isGet = !init.method || init.method.toUpperCase() === "GET";
+  if (isGet) {
+    const hit = cacheGet(path);
+    if (hit !== null) return hit as T;
+  }
+
   const headers = new Headers(init.headers);
   headers.set("Accept", "application/json");
   if (init.body && !headers.has("Content-Type")) {
@@ -63,11 +115,13 @@ export async function apiFetch<T = unknown>(
       const body = await res.json();
       detail = (body?.detail || body?.message || detail) as string;
     } catch { /* not JSON */ }
-    if (res.status === 401) token.clear();
+    if (res.status === 401) { token.clear(); cacheClearAll(); }
     throw new ApiError(res.status, detail);
   }
   if (res.status === 204) return undefined as T;
-  return (await res.json()) as T;
+  const body = (await res.json()) as T;
+  if (isGet) cacheSet(path, body);
+  return body;
 }
 
 // ── typed call helpers ────────────────────────────────────────────────────
