@@ -41,6 +41,8 @@ def diag():
             "fred": {"configured": bool(os.getenv("FRED_API_KEY"))},
             "groq": {"configured": bool(os.getenv("GROQ_API_KEY"))},
             "gemini": {"configured": bool(os.getenv("GEMINI_API_KEY"))},
+            "fmp": {"configured": bool(os.getenv("FMP_API_KEY")),
+                    "ok": False, "sample": None},
         },
         "cache": cache_info(),
     }
@@ -66,4 +68,12 @@ def diag():
         out["providers"]["yfinance"]["sample"] = q
     except Exception as e:
         out["providers"]["yfinance"]["error"] = str(e)[:200]
+    try:
+        from backend import providers as p
+        if p.has_fmp():
+            stmt = p.fmp_statement("AAPL", "income", limit=1)
+            out["providers"]["fmp"]["ok"] = bool(stmt and stmt.get("rows"))
+            out["providers"]["fmp"]["sample"] = (stmt or {}).get("columns")
+    except Exception as e:
+        out["providers"]["fmp"]["error"] = str(e)[:200]
     return out

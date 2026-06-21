@@ -87,25 +87,43 @@ def wacc(equity_value: float, debt_value: float, cost_equity_pct: float,
     return {"wacc": val, "we": we * 100, "wd": wd * 100}
 
 
+def _comps_row(t: str) -> dict | None:
+    f = get_stock_fundamentals(t)
+    if not f:
+        return None
+    ev_ebitda = None
+    if f.get("market_cap") and f.get("ebitda"):
+        ev = f["market_cap"]  # market cap as a simple EV proxy (no debt data layer)
+        ev_ebitda = ev / f["ebitda"] if f["ebitda"] else None
+    return {
+        "Ticker": t.replace(".NS", ""),
+        "Name": f.get("name", t),
+        "P/E": round(f["trailing_pe"], 1) if f.get("trailing_pe") else None,
+        "Fwd P/E": round(f["forward_pe"], 1) if f.get("forward_pe") else None,
+        "P/B": round(f["price_to_book"], 2) if f.get("price_to_book") else None,
+        "P/S": round(f["price_to_sales"], 2) if f.get("price_to_sales") else None,
+        "EV/EBITDA*": round(ev_ebitda, 1) if ev_ebitda else None,
+        "ROE%": round(f["roe"] * 100, 1) if f.get("roe") is not None else None,
+    }
+
+
 def comps_matrix(tickers: list[str]) -> pd.DataFrame:
-    """Relative-valuation table across peers (the Comps Matrix)."""
-    rows = []
-    for t in tickers:
-        f = get_stock_fundamentals(t)
-        if not f:
-            continue
-        ev_ebitda = None
-        if f.get("market_cap") and f.get("ebitda"):
-            ev = f["market_cap"]  # market cap as a simple EV proxy (no debt data layer)
-            ev_ebitda = ev / f["ebitda"] if f["ebitda"] else None
-        rows.append({
-            "Ticker": t.replace(".NS", ""),
-            "Name": f.get("name", t),
-            "P/E": round(f["trailing_pe"], 1) if f.get("trailing_pe") else None,
-            "Fwd P/E": round(f["forward_pe"], 1) if f.get("forward_pe") else None,
-            "P/B": round(f["price_to_book"], 2) if f.get("price_to_book") else None,
-            "P/S": round(f["price_to_sales"], 2) if f.get("price_to_sales") else None,
-            "EV/EBITDA*": round(ev_ebitda, 1) if ev_ebitda else None,
-            "ROE%": round(f["roe"] * 100, 1) if f.get("roe") is not None else None,
-        })
+    """Relative-valuation table across peers (the Comps Matrix).
+
+    Peers are fetched in parallel with a per-peer timeout so one slow/blocked
+    name can't hang the whole request (the old sequential loop did)."""
+    from concurrent.futures import ThreadPoolExecutor
+
+    if not tickers:
+        return pd.DataFrame()
+    with ThreadPoolExecutor(max_workers=min(8, len(tickers))) as pool:
+        futures = [(t, pool.submit(_comps_row, t)) for t in tickers]
+        rows = []
+        for t, fut in futures:  # preserves input order
+            try:
+                r = fut.result(timeout=12)
+            except Exception:
+                r = None
+            if r:
+                rows.append(r)
     return pd.DataFrame(rows)

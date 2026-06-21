@@ -34,15 +34,18 @@ def get_yield_curve() -> pd.DataFrame:
 
     Columns: maturity, years, yield. Empty if FRED is unavailable.
     """
-    rows: list[dict] = []
-    for label, sid in CURVE_SERIES.items():
-        s = get_series(sid, observations=10)
-        if s.empty:
-            continue
-        rows.append({
-            "maturity": label,
-            "years": MATURITY_YEARS[label],
-            "yield": float(s.iloc[-1]),
-        })
+    from concurrent.futures import ThreadPoolExecutor
+
+    def _one(item):
+        label, sid = item
+        ser = get_series(sid, observations=10)
+        if ser.empty:
+            return None
+        return {"maturity": label, "years": MATURITY_YEARS[label],
+                "yield": float(ser.iloc[-1])}
+
+    items = list(CURVE_SERIES.items())
+    with ThreadPoolExecutor(max_workers=min(11, len(items))) as pool:
+        rows = [r for r in pool.map(_one, items) if r]
     df = pd.DataFrame(rows)
     return df.sort_values("years").reset_index(drop=True) if not df.empty else df

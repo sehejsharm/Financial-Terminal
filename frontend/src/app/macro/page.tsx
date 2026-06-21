@@ -18,18 +18,20 @@ const COUNTRY_LABELS: Record<string, { label: string; flag: string }> = {
 
 function YieldCurveChart({ points }: { points: YieldPoint[] }) {
   if (!points.length) return null;
-  const W = 760, H = 280, padX = 50, padY = 28;
-  const xs = points.map((p) => p.years);
+  const W = 760, H = 280, padX = 52, padY = 34;
   const ys = points.map((p) => p.yield);
-  const xMin = Math.min(...xs), xMax = Math.max(...xs);
-  const yMin = Math.min(...ys) - 0.3, yMax = Math.max(...ys) + 0.3;
-  const sx = (x: number) => padX + ((x - xMin) / (xMax - xMin || 1)) * (W - 2 * padX);
+  const yMin = Math.min(...ys) - 0.25, yMax = Math.max(...ys) + 0.25;
+  // Even (categorical) spacing by maturity — a yield curve is read left→right by
+  // tenor, not by absolute years, so 1M…3Y don't bunch up on the far left.
+  const n = points.length;
+  const sx = (i: number) => padX + (n === 1 ? 0.5 : i / (n - 1)) * (W - 2 * padX);
   const sy = (y: number) => H - padY - ((y - yMin) / (yMax - yMin || 1)) * (H - 2 * padY);
-  const path = points.map((p, i) => `${i === 0 ? "M" : "L"} ${sx(p.years)} ${sy(p.yield)}`).join(" ");
+  const path = points.map((p, i) => `${i === 0 ? "M" : "L"} ${sx(i).toFixed(1)} ${sy(p.yield).toFixed(1)}`).join(" ");
   const inverted = ys[0] > ys[ys.length - 1];
+  const stroke = inverted ? "#ff4d4f" : "#ffb000";
 
   return (
-    <svg viewBox={`0 0 ${W} ${H}`} className="w-full" style={{ minWidth: 600 }}>
+    <svg viewBox={`0 0 ${W} ${H}`} className="w-full" preserveAspectRatio="xMidYMid meet" style={{ minWidth: 600 }}>
       {[0, 1, 2, 3, 4].map((i) => {
         const y = padY + (i * (H - 2 * padY)) / 4;
         const v = yMax - (i * (yMax - yMin)) / 4;
@@ -41,13 +43,13 @@ function YieldCurveChart({ points }: { points: YieldPoint[] }) {
           </g>
         );
       })}
-      <path d={path} fill="none" stroke={inverted ? "#ff4d4f" : "#ffb000"} strokeWidth={2.5} />
+      <path d={path} fill="none" stroke={stroke} strokeWidth={2.5} />
       {points.map((p, i) => (
         <g key={i}>
-          <circle cx={sx(p.years)} cy={sy(p.yield)} r={3.5} fill={inverted ? "#ff4d4f" : "#ffb000"} />
-          <text x={sx(p.years)} y={sy(p.yield) - 9} textAnchor="middle" fontSize={9}
+          <circle cx={sx(i)} cy={sy(p.yield)} r={3.5} fill={stroke} />
+          <text x={sx(i)} y={sy(p.yield) - 10} textAnchor="middle" fontSize={9}
                 fill="#cdd1d8" fontFamily="JetBrains Mono, monospace">{p.yield.toFixed(2)}</text>
-          <text x={sx(p.years)} y={H - 8} textAnchor="middle" fontSize={10} fill="#7d8694"
+          <text x={sx(i)} y={H - 10} textAnchor="middle" fontSize={10} fill="#7d8694"
                 fontFamily="JetBrains Mono, monospace">{p.maturity}</text>
         </g>
       ))}

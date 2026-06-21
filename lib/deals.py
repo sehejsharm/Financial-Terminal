@@ -25,10 +25,28 @@ _BLOCK_URL = "https://nsearchives.nseindia.com/content/equities/block.csv"
 
 
 def _fetch_csv(url: str) -> pd.DataFrame:
+    """Fetch an NSE archive CSV. NSE blocks bare datacenter requests, so we use
+    the same curl_cffi Chrome impersonation + warmed homepage cookie as lib.nse
+    (falls back to plain requests if curl_cffi is unavailable)."""
+    text = None
     try:
-        resp = requests.get(url, headers=_HEADERS, timeout=12)
-        resp.raise_for_status()
-        df = pd.read_csv(StringIO(resp.text))
+        from curl_cffi import requests as cc
+        s = cc.Session(impersonate="chrome120")
+        s.get("https://www.nseindia.com", headers=_HEADERS, timeout=8)  # warm cookies
+        r = s.get(url, headers=_HEADERS, timeout=12)
+        if r.status_code == 200 and r.text:
+            text = r.text
+    except Exception:
+        text = None
+    if text is None:
+        try:
+            resp = requests.get(url, headers=_HEADERS, timeout=12)
+            resp.raise_for_status()
+            text = resp.text
+        except Exception:
+            return pd.DataFrame()
+    try:
+        df = pd.read_csv(StringIO(text))
         df.columns = [str(c).strip() for c in df.columns]
         return df
     except Exception:

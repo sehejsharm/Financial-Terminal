@@ -138,7 +138,7 @@ function TerminalInner() {
             />
           </div>
           <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-6">
-            <MetricCard label="Dividend yield" value={snap?.dividend_yield != null ? fmtPct((snap.dividend_yield as number) * 100) : "—"} />
+            <MetricCard label="Dividend yield" value={snap?.dividend_yield != null ? fmtPct(snap.dividend_yield as number) : "—"} />
             <MetricCard label="ROE" value={snap?.roe != null ? fmtPct((snap.roe as number) * 100) : "—"} />
             <MetricCard label="Profit margin" value={snap?.profit_margin != null ? fmtPct((snap.profit_margin as number) * 100) : "—"} />
             <MetricCard label="Debt / Equity" value={fmtNum(snap?.debt_to_equity as number, 1)} />

@@ -187,26 +187,42 @@ def snapshot(ticker: str) -> dict | None:
     """
     base: dict = {}
 
-    if nse.is_indian(ticker) and not ticker.startswith("^"):
-        nse_data = nse.snapshot(ticker)
-        if nse_data:
-            for k, v in nse_data.items():
-                if v is not None:
-                    base[k] = v
+    # Fetch all providers concurrently — these are independent network calls and
+    # were the dominant cost when run serially (NSE + yfinance + Twelve Data ~5s).
+    is_in = nse.is_indian(ticker) and not ticker.startswith("^")
+    with ThreadPoolExecutor(max_workers=4) as pool:
+        f_nse = pool.submit(nse.snapshot, ticker) if is_in else None
+        f_yf = pool.submit(yf_md.get_stock_fundamentals, ticker)
+        f_td_stats = pool.submit(_td_statistics, ticker) if has_twelvedata() else None
+        f_td_q = pool.submit(_td_quote, ticker) if has_twelvedata() else None
 
-    yf_data = yf_md.get_stock_fundamentals(ticker) or {}
+        def _result(fut):
+            if fut is None:
+                return None
+            try:
+                return fut.result(timeout=12)
+            except Exception:
+                return None
+
+        nse_data = _result(f_nse)
+        yf_data = _result(f_yf) or {}
+        td_stats = _result(f_td_stats)
+        td_q = _result(f_td_q)
+
+    if nse_data:
+        for k, v in nse_data.items():
+            if v is not None:
+                base[k] = v
+
     for k, v in yf_data.items():
         if v is not None and base.get(k) in (None, "", 0):
             base[k] = v
 
-    td_q = None
     if has_twelvedata():
-        td_stats = _td_statistics(ticker)
         if td_stats:
             for k, v in td_stats.items():
                 if v is not None and base.get(k) in (None, "", 0):
                     base[k] = v
-        td_q = _td_quote(ticker)
         if td_q and td_q.get("price") is not None:
             # Don't override an NSE price for an Indian stock — INR vs USD.
             if not nse.is_indian(ticker):
@@ -260,3 +276,132 @@ def history(ticker: str, period: str = "1Y") -> list[dict]:
             if hasattr(v, "isoformat"):
                 row[k] = v.isoformat()
     return candles
+
+
+# ── Financial Modeling Prep (FMP) — free statements provider ─────────────────
+# yfinance's statement endpoints (.financials/.balance_sheet/.cashflow) are
+# blocked from datacenter IPs, and Twelve Data's free tier excludes
+# fundamentals. FMP's free tier covers US income/balance/cashflow statements
+# (~250 req/day). Set FMP_API_KEY. Indian (.NS) names aren't on FMP free, so
+# those fall through to the "unavailable" note (best-effort free).
+_FMP_KEY = (os.getenv("FMP_API_KEY") or "").strip() or None
+_FMP_BASE = "https://financialmodelingprep.com/stable"
+
+_FMP_PATHS = {
+    "income": "income-statement",
+    "balance": "balance-sheet-statement",
+    "cashflow": "cash-flow-statement",
+}
+
+# (display label, [candidate FMP keys in priority order])
+_FMP_FIELDS = {
+    "income": [
+        ("Revenue", ["revenue"]),
+        ("Cost of Revenue", ["costOfRevenue"]),
+        ("Gross Profit", ["grossProfit"]),
+        ("Operating Expenses", ["operatingExpenses"]),
+        ("Operating Income", ["operatingIncome"]),
+        ("EBITDA", ["ebitda"]),
+        ("Pre-Tax Income", ["incomeBeforeTax"]),
+        ("Net Income", ["netIncome"]),
+        ("EPS (diluted)", ["epsdiluted", "epsDiluted", "eps"]),
+    ],
+    "balance": [
+        ("Cash & Equivalents", ["cashAndCashEquivalents"]),
+        ("Total Current Assets", ["totalCurrentAssets"]),
+        ("Total Assets", ["totalAssets"]),
+        ("Total Current Liabilities", ["totalCurrentLiabilities"]),
+        ("Total Debt", ["totalDebt"]),
+        ("Total Liabilities", ["totalLiabilities"]),
+        ("Shareholders' Equity", ["totalStockholdersEquity"]),
+        ("Retained Earnings", ["retainedEarnings"]),
+    ],
+    "cashflow": [
+        ("Net Income", ["netIncome"]),
+        ("Operating Cash Flow", ["operatingCashFlow",
+                                 "netCashProvidedByOperatingActivities"]),
+        ("Capital Expenditure", ["capitalExpenditure"]),
+        ("Free Cash Flow", ["freeCashFlow"]),
+        ("Dividends Paid", ["dividendsPaid"]),
+        ("Net Change in Cash", ["netChangeInCash"]),
+    ],
+}
+
+
+def has_fmp() -> bool:
+    return _FMP_KEY is not None
+
+
+def _fmp_get(path: str, params: dict):
+    if not _FMP_KEY:
+        return None
+    try:
+        p = dict(params)
+        p["apikey"] = _FMP_KEY
+        r = _TD_SESSION.get(f"{_FMP_BASE}/{path}", params=p, timeout=10)
+        if r.status_code != 200:
+            return None
+        body = r.json()
+        if isinstance(body, dict) and (body.get("Error Message") or body.get("error")):
+            return None
+        return body
+    except Exception:
+        return None
+
+
+def _pick(d: dict, keys: list[str]):
+    for k in keys:
+        v = d.get(k)
+        if v is not None:
+            return v
+    return None
+
+
+def fmp_statement(symbol: str, kind: str, limit: int = 5,
+                  quarterly: bool = False) -> dict | None:
+    """FMP statement -> {columns, rows} matching the frontend shape, or None.
+
+    Returns None on any failure (no key, non-US symbol, quota) so the caller
+    can fall back to the honest 'unavailable' note without a regression.
+    """
+    path = _FMP_PATHS.get(kind)
+    if not path:
+        return None
+    period = "quarter" if quarterly else "annual"
+    data = _fmp_get(path, {"symbol": symbol, "limit": limit, "period": period})
+    if not isinstance(data, list) or not data:
+        return None
+    periods = [str(d.get("date") or d.get("calendarYear") or i)
+               for i, d in enumerate(data)]
+    rows = []
+    for label, keys in _FMP_FIELDS[kind]:
+        vals = [_pick(d, keys) for d in data]
+        if all(v is None for v in vals):
+            continue
+        row = {"line": label}
+        for per, v in zip(periods, vals):
+            row[per] = float(v) if isinstance(v, (int, float)) else None
+        rows.append(row)
+    if not rows:
+        return None
+    return {"columns": periods, "rows": rows}
+
+
+def fmp_price_target(symbol: str) -> dict | None:
+    """FMP analyst price-target consensus -> {low, mean, median, high} or None.
+    Often premium even on FMP free; returns None gracefully when unavailable."""
+    data = _fmp_get("price-target-consensus", {"symbol": symbol})
+    rec = None
+    if isinstance(data, list) and data:
+        rec = data[0]
+    elif isinstance(data, dict):
+        rec = data
+    if not rec:
+        return None
+    out = {
+        "low": rec.get("targetLow"),
+        "mean": rec.get("targetConsensus") or rec.get("targetMedian"),
+        "median": rec.get("targetMedian"),
+        "high": rec.get("targetHigh"),
+    }
+    return out if any(v is not None for v in out.values()) else None

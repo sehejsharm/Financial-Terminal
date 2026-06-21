@@ -9,9 +9,11 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 
-from backend import auth
+import pandas as pd
+
+from backend import auth, providers
 from backend.cache import cached
-from backend.serialize import clean_dict, frame_payload, records
+from backend.serialize import clean, clean_dict, frame_payload, records
 from lib.fundamentals import (
     BALANCE_ROWS,
     CASHFLOW_ROWS,
@@ -35,9 +37,19 @@ router = APIRouter(prefix="/fundamentals", tags=["fundamentals"])
 _KINDS = {"income": INCOME_ROWS, "balance": BALANCE_ROWS, "cashflow": CASHFLOW_ROWS}
 
 
-_UNAVAIL_NOTE = ("Free providers (yfinance) blank this field for many "
-                 "tickers on cloud hosts. Set TWELVE_DATA_API_KEY or use "
-                 "the Streamlit app for fuller coverage.")
+_UNAVAIL_NOTE = ("Financial statements are unavailable for this ticker on "
+                 "free data here. yfinance is IP-blocked on cloud hosts and "
+                 "Twelve Data's free tier excludes fundamentals. US tickers "
+                 "populate when FMP_API_KEY is set (Financial Modeling Prep, "
+                 "free); Indian (NSE) statements aren't on free APIs.")
+
+
+def _df_colmajor(df: pd.DataFrame) -> dict:
+    """yfinance estimate frame -> column-major {col: {row: value}} (JSON-safe)."""
+    out: dict = {}
+    for col in df.columns:
+        out[str(col)] = {str(idx): clean(val) for idx, val in df[col].items()}
+    return out
 
 
 @router.get("/{ticker}/statement/{kind}")
@@ -51,8 +63,14 @@ def statement(ticker: str, kind: str, quarterly: bool = False,
     try:
         df = select_rows(get_statement(ticker, kind, quarterly), _KINDS[kind])
     except Exception:
-        return empty
+        df = None
     if df is None or getattr(df, "empty", True):
+        # yfinance blocked / empty -> try FMP (free, US coverage).
+        fmp = (providers.fmp_statement(ticker, kind, quarterly=quarterly)
+               if providers.has_fmp() else None)
+        if fmp and fmp.get("rows"):
+            return {"ticker": ticker, "kind": kind, "quarterly": quarterly,
+                    "columns": fmp["columns"], "rows": fmp["rows"]}
         return empty
     try:
         rows = [{"line": str(idx),
@@ -73,9 +91,23 @@ def statement(ticker: str, kind: str, quarterly: bool = False,
 @cached(ttl=3600)
 def estimates(ticker: str, _user: dict = Depends(auth.current_user)):
     try:
-        return get_estimates(ticker) or {}
+        raw = get_estimates(ticker) or {}
     except Exception:
-        return {}
+        raw = {}
+    out: dict = {}
+    pt = raw.get("price_targets")
+    if isinstance(pt, dict) and pt:
+        out["price_targets"] = clean_dict(pt)
+    for key in ("earnings_estimate", "revenue_estimate", "growth_estimates"):
+        df = raw.get(key)
+        if isinstance(df, pd.DataFrame) and not df.empty:
+            out[key] = _df_colmajor(df)
+    # FMP fallback for price targets when yfinance gives none.
+    if not out.get("price_targets") and providers.has_fmp():
+        pt2 = providers.fmp_price_target(ticker)
+        if pt2:
+            out["price_targets"] = clean_dict(pt2)
+    return out
 
 
 @router.get("/{ticker}/capital-structure")

@@ -54,11 +54,11 @@ export function Financials({ ticker, currency }: { ticker: string; currency: str
 
       {data && !busy && data.rows.length === 0 && (
         <div className="panel-2 p-4 text-mut text-sm">
-          Income/balance/cashflow statements for <span className="text-amber">{ticker}</span> aren&apos;t
-          available from the free data provider on this host. Yahoo Finance blocks
-          datacenter IPs; NSE&apos;s public API doesn&apos;t expose annual reports as structured
-          JSON. Set <code className="text-amber">TWELVE_DATA_API_KEY</code> on the backend
-          for full statement coverage, or view this section in the Streamlit app.
+          Statements for <span className="text-amber">{ticker}</span> aren&apos;t available on
+          free data here. yfinance is IP-blocked on cloud hosts. <strong>US</strong> tickers
+          populate when <code className="text-amber">FMP_API_KEY</code> (Financial Modeling
+          Prep, free) is set on the backend; Indian (NSE) annual reports aren&apos;t exposed by
+          any free API. For full coverage use a paid feed or the Streamlit app.
         </div>
       )}
 
