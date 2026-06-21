@@ -5,7 +5,14 @@
 # User data (holdings, accounts/credentials)
 data/portfolio.json
 data/users.json
+data/watchlists.json
+data/audit.jsonl
+data/.jwt_secret
 data/INITIAL_ADMIN_PASSWORD.txt
+
+# Deploy-time secrets + runtime data (Oracle/Docker VM)
+deploy/.env
+deploy/data/
 
 # Python
 __pycache__/

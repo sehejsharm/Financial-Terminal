@@ -1,0 +1,11 @@
+# Auto-HTTPS reverse proxy for the Motherboard backend.
+#
+# Caddy automatically obtains and renews a free Let's Encrypt certificate for
+# $DOMAIN — no certbot, no manual renewal. Requirements for the cert to issue:
+#   1. $DOMAIN's DNS A-record points at this VM's public IP (DuckDNS).
+#   2. Ports 80 and 443 are reachable from the internet (OCI security list +
+#      host iptables — setup.sh handles the host side).
+{$DOMAIN} {
+	encode gzip
+	reverse_proxy backend:8000
+}

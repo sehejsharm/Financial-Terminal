@@ -1,0 +1,43 @@
+# Motherboard backend on an Oracle Cloud "Always Free" VM (Mumbai).
+#
+# Two containers:
+#   • backend — the FastAPI app (private; only reachable inside the compose net)
+#   • caddy   — public reverse proxy that terminates TLS (auto Let's Encrypt)
+#
+# Port 8000 is never exposed to the internet — only Caddy's 80/443 are. Caddy
+# fetches and auto-renews an HTTPS cert for your DuckDNS domain.
+#
+#   cp .env.example .env        # then fill in .env (gitignored, never committed)
+#   bash setup.sh               # or: sudo docker compose up -d --build
+services:
+  backend:
+    build:
+      context: ..
+      dockerfile: backend/Dockerfile
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      - APP_VERSION=oracle-1
+    volumes:
+      - ./data:/app/data        # persists users / watchlists / audit / jwt secret
+    expose:
+      - "8000"                  # internal only — reachable by Caddy, not the world
+
+  caddy:
+    image: caddy:2
+    restart: unless-stopped
+    depends_on:
+      - backend
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      - DOMAIN=${DOMAIN}        # e.g. motherboard-sehej.duckdns.org (from .env)
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data        # Let's Encrypt certs — persist across restarts
+      - caddy_config:/config
+
+volumes:
+  caddy_data:
+  caddy_config:
