@@ -190,8 +190,9 @@ def snapshot(ticker: str) -> dict | None:
     # Fetch all providers concurrently — these are independent network calls and
     # were the dominant cost when run serially (NSE + yfinance + Twelve Data ~5s).
     is_in = nse.is_indian(ticker) and not ticker.startswith("^")
-    with ThreadPoolExecutor(max_workers=4) as pool:
+    with ThreadPoolExecutor(max_workers=5) as pool:
         f_nse = pool.submit(nse.snapshot, ticker) if is_in else None
+        f_fmp = pool.submit(fmp_snapshot, ticker) if has_fmp() else None
         f_yf = pool.submit(yf_md.get_stock_fundamentals, ticker)
         f_td_stats = pool.submit(_td_statistics, ticker) if has_twelvedata() else None
         f_td_q = pool.submit(_td_quote, ticker) if has_twelvedata() else None
@@ -205,6 +206,7 @@ def snapshot(ticker: str) -> dict | None:
                 return None
 
         nse_data = _result(f_nse)
+        fmp_data = _result(f_fmp)
         yf_data = _result(f_yf) or {}
         td_stats = _result(f_td_stats)
         td_q = _result(f_td_q)
@@ -212,6 +214,12 @@ def snapshot(ticker: str) -> dict | None:
     if nse_data:
         for k, v in nse_data.items():
             if v is not None:
+                base[k] = v
+
+    # FMP is reliable on cloud (covers US + NSE) — fill before flaky yfinance.
+    if fmp_data:
+        for k, v in fmp_data.items():
+            if v is not None and base.get(k) in (None, "", 0):
                 base[k] = v
 
     for k, v in yf_data.items():
@@ -405,3 +413,60 @@ def fmp_price_target(symbol: str) -> dict | None:
         "high": rec.get("targetHigh"),
     }
     return out if any(v is not None for v in out.values()) else None
+
+
+def fmp_snapshot(symbol: str) -> dict | None:
+    """Reliable fundamentals snapshot from FMP (profile + ratios-ttm).
+
+    FMP's free tier covers US *and* many international names incl. NSE (.NS),
+    so this replaces the flaky yfinance `.info` scrape that Yahoo blocks from
+    cloud IPs. Returns a yfinance-compatible dict (matching the units the
+    frontend expects) or None.
+    """
+    prof = _fmp_get("profile", {"symbol": symbol})
+    if isinstance(prof, list) and prof:
+        prof = prof[0]
+    if not isinstance(prof, dict):
+        return None
+    out: dict = {}
+    out["name"] = prof.get("companyName") or symbol
+    out["sector"] = prof.get("sector") or None
+    out["industry"] = prof.get("industry") or None
+    out["market_cap"] = prof.get("marketCap")
+    out["beta"] = prof.get("beta")
+    out["price"] = prof.get("price")
+    out["currency"] = prof.get("currency")
+    ch = prof.get("change")
+    if isinstance(prof.get("price"), (int, float)) and isinstance(ch, (int, float)):
+        out["prev_close"] = prof["price"] - ch
+    rng = prof.get("range")
+    if isinstance(rng, str) and "-" in rng:
+        try:
+            lo, hi = rng.split("-", 1)
+            out["fifty_two_low"] = float(lo)
+            out["fifty_two_high"] = float(hi)
+        except Exception:
+            pass
+
+    r = _fmp_get("ratios-ttm", {"symbol": symbol})
+    if isinstance(r, list) and r:
+        r = r[0]
+    if isinstance(r, dict):
+        pe = _pick(r, ["priceToEarningsRatioTTM", "peRatioTTM"])
+        if pe is not None:
+            out["trailing_pe"] = pe
+        roe = _pick(r, ["returnOnEquityTTM"])
+        if roe is not None:
+            out["roe"] = roe                      # fraction; frontend x100
+        pm = _pick(r, ["netProfitMarginTTM"])
+        if pm is not None:
+            out["profit_margin"] = pm             # fraction; frontend x100
+        de = _pick(r, ["debtToEquityRatioTTM", "debtToEquityTTM"])
+        if de is not None:
+            out["debt_to_equity"] = de * 100      # match yfinance %-scale
+        dy = _pick(r, ["dividendYieldTTM"])
+        if dy is not None:
+            out["dividend_yield"] = dy * 100      # percent
+
+    clean = {k: v for k, v in out.items() if v is not None}
+    return clean or None
