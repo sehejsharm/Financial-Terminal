@@ -113,14 +113,18 @@ def estimates(ticker: str, _user: dict = Depends(auth.current_user)):
 @router.get("/{ticker}/capital-structure")
 @cached(ttl=3600)
 def cap_structure(ticker: str, _user: dict = Depends(auth.current_user)):
+    empty = {"total_debt": None, "cash": None, "market_cap": None,
+             "shares": None, "currency": "USD"}
     try:
-        return capital_structure(ticker) or {
-            "total_debt": None, "cash": None, "market_cap": None,
-            "shares": None, "currency": "USD",
-        }
+        cs = capital_structure(ticker)
     except Exception:
-        return {"total_debt": None, "cash": None, "market_cap": None,
-                "shares": None, "currency": "USD"}
+        cs = None
+    # yfinance blocked / missing -> FMP fallback (reliable on cloud, US coverage)
+    if (not cs or cs.get("total_debt") is None) and providers.has_fmp():
+        fc = providers.fmp_capital(ticker)
+        if fc:
+            return fc
+    return cs or empty
 
 
 @router.get("/comps")

@@ -455,9 +455,12 @@ def fmp_snapshot(symbol: str) -> dict | None:
         pe = _pick(r, ["priceToEarningsRatioTTM", "peRatioTTM"])
         if pe is not None:
             out["trailing_pe"] = pe
-        roe = _pick(r, ["returnOnEquityTTM"])
-        if roe is not None:
-            out["roe"] = roe                      # fraction; frontend x100
+        cr = _pick(r, ["currentRatioTTM"])
+        if cr is not None:
+            out["current_ratio"] = cr
+        qr = _pick(r, ["quickRatioTTM"])
+        if qr is not None:
+            out["quick_ratio"] = qr
         pm = _pick(r, ["netProfitMarginTTM"])
         if pm is not None:
             out["profit_margin"] = pm             # fraction; frontend x100
@@ -468,5 +471,39 @@ def fmp_snapshot(symbol: str) -> dict | None:
         if dy is not None:
             out["dividend_yield"] = dy * 100      # percent
 
+    # ROE is exposed via key-metrics-ttm (not ratios-ttm) on FMP's stable API.
+    km = _fmp_get("key-metrics-ttm", {"symbol": symbol})
+    if isinstance(km, list) and km:
+        km = km[0]
+    if isinstance(km, dict):
+        roe = _pick(km, ["returnOnEquityTTM"])
+        if roe is not None:
+            out["roe"] = roe                      # fraction; frontend x100
+
     clean = {k: v for k, v in out.items() if v is not None}
     return clean or None
+
+
+def fmp_capital(symbol: str) -> dict | None:
+    """Capital structure from FMP (balance sheet + profile). US coverage on the
+    free tier; returns None for names FMP doesn't cover (e.g. .NS) so the caller
+    falls back gracefully."""
+    bs = _fmp_get("balance-sheet-statement", {"symbol": symbol, "limit": 1})
+    if isinstance(bs, list) and bs:
+        bs = bs[0]
+    if not isinstance(bs, dict):
+        return None
+    prof = _fmp_get("profile", {"symbol": symbol})
+    if isinstance(prof, list) and prof:
+        prof = prof[0]
+    prof = prof if isinstance(prof, dict) else {}
+    out = {
+        "total_debt": bs.get("totalDebt"),
+        "cash": _pick(bs, ["cashAndCashEquivalents", "cashAndShortTermInvestments"]),
+        "market_cap": prof.get("marketCap"),
+        "shares": _pick(bs, ["weightedAverageShsOut", "commonStock"]),
+        "currency": prof.get("currency") or bs.get("reportedCurrency") or "USD",
+    }
+    if out["total_debt"] is None and out["market_cap"] is None:
+        return None
+    return out
