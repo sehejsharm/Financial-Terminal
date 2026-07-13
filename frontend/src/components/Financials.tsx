@@ -1,7 +1,8 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 
+import { DataAge } from "@/components/DataAge";
 import { api, type Statement } from "@/lib/api";
 import { humanNumber } from "@/lib/utils";
 
@@ -18,16 +19,18 @@ export function Financials({ ticker, currency }: { ticker: string; currency: str
   const [kind, setKind] = useState<Kind>("income");
   const [quarterly, setQuarterly] = useState(false);
   const [data, setData] = useState<Statement | null>(null);
+  const [fetchedAt, setFetchedAt] = useState<number | null>(null);
   const [busy, setBusy] = useState(false);
-  const [err, setErr] = useState<string | null>(null);
 
-  useEffect(() => {
-    setBusy(true); setErr(null); setData(null);
-    api.statement(ticker, kind, quarterly)
-      .then(setData)
-      .catch(() => setData({ ticker, kind, columns: [], rows: [] } as Statement))
+  const load = useCallback((fresh = false) => {
+    setBusy(true);
+    api.statement(ticker, kind, quarterly, { fresh })
+      .then((m) => { setData(m.data); setFetchedAt(m.fetchedAt); })
+      .catch(() => { setData({ ticker, kind, columns: [], rows: [] } as Statement); setFetchedAt(Date.now()); })
       .finally(() => setBusy(false));
   }, [ticker, kind, quarterly]);
+
+  useEffect(() => { setData(null); setFetchedAt(null); load(); }, [load]);
 
   return (
     <div>
@@ -42,6 +45,7 @@ export function Financials({ ticker, currency }: { ticker: string; currency: str
           </button>
         ))}
         <div className="flex-1" />
+        <DataAge at={fetchedAt} onRefresh={() => load(true)} busy={busy} />
         <button
           onClick={() => setQuarterly((v) => !v)}
           className={`btn ${quarterly ? "btn-primary" : "btn-ghost"}`}

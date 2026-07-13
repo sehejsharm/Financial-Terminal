@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import json
 import re
+from datetime import datetime, timezone
 
 import plotly.graph_objects as go
 import streamlit as st
@@ -82,6 +83,11 @@ def get_chain_data(ticker: str, company_name: str) -> dict | None:
         data = json.loads(m.group())
     except json.JSONDecodeError:
         return None
+    # Provenance: this is generated content, not filing-sourced data. Stamped
+    # inside the cached payload so the timestamp reflects actual generation
+    # time, not cache-serve time.
+    data["generated_at"] = datetime.now(timezone.utc).isoformat(timespec="seconds")
+    data["source"] = ai_analyst.active_provider()
     return data
 
 

@@ -64,7 +64,7 @@ function ttlFor(path: string): number {
   }
   return 0;
 }
-function cacheGet(path: string): unknown | null {
+function cacheGet(path: string): { v: unknown; t: number } | null {
   if (typeof localStorage === "undefined") return null;
   const ttl = ttlFor(path);
   if (!ttl) return null;
@@ -73,7 +73,7 @@ function cacheGet(path: string): unknown | null {
     if (!raw) return null;
     const { v, t } = JSON.parse(raw) as { v: unknown; t: number };
     if (Date.now() - t > ttl) { localStorage.removeItem(CACHE_PREFIX + path); return null; }
-    return v;
+    return { v, t };
   } catch { return null; }
 }
 function cacheSet(path: string, v: unknown) {
@@ -90,14 +90,29 @@ function cacheClearAll() {
   }
 }
 
-export async function apiFetch<T = unknown>(
+export type FetchOpts = {
+  /** Bypass the localStorage cache and hit the network (still re-caches). */
+  fresh?: boolean;
+};
+
+export type FetchMeta<T> = {
+  data: T;
+  /** Epoch ms when this payload was fetched from the network. */
+  fetchedAt: number;
+  fromCache: boolean;
+};
+
+/** Like apiFetch, but also reports when the data was actually fetched, so the
+ *  UI can render "Updated Xm ago" instead of silently serving stale cache. */
+export async function apiFetchMeta<T = unknown>(
   path: string,
   init: RequestInit = {},
-): Promise<T> {
+  opts: FetchOpts = {},
+): Promise<FetchMeta<T>> {
   const isGet = !init.method || init.method.toUpperCase() === "GET";
-  if (isGet) {
+  if (isGet && !opts.fresh) {
     const hit = cacheGet(path);
-    if (hit !== null) return hit as T;
+    if (hit !== null) return { data: hit.v as T, fetchedAt: hit.t, fromCache: true };
   }
 
   const headers = new Headers(init.headers);
@@ -118,10 +133,18 @@ export async function apiFetch<T = unknown>(
     if (res.status === 401) { token.clear(); cacheClearAll(); }
     throw new ApiError(res.status, detail);
   }
-  if (res.status === 204) return undefined as T;
+  if (res.status === 204) return { data: undefined as T, fetchedAt: Date.now(), fromCache: false };
   const body = (await res.json()) as T;
   if (isGet) cacheSet(path, body);
-  return body;
+  return { data: body, fetchedAt: Date.now(), fromCache: false };
+}
+
+export async function apiFetch<T = unknown>(
+  path: string,
+  init: RequestInit = {},
+  opts: FetchOpts = {},
+): Promise<T> {
+  return (await apiFetchMeta<T>(path, init, opts)).data;
 }
 
 // ── typed call helpers ────────────────────────────────────────────────────
@@ -156,6 +179,10 @@ export type ChainNode = { name: string; note?: string };
 export type ValueChain = {
   ticker: string; name: string;
   suppliers?: ChainNode[]; customers?: ChainNode[]; competitors?: ChainNode[];
+  /** ISO timestamp of when the AI generated this map (server-side). */
+  generated_at?: string;
+  /** AI provider that produced the map, e.g. "Groq (Llama 3.3)". */
+  source?: string;
 };
 export type OptionRow = Record<string, number | string | boolean | null>;
 export type OptionChain = {
@@ -192,6 +219,8 @@ export type ScreenResult = {
   scanned?: number;
   evaluable?: number | null;
   note?: string | null;
+  /** ISO timestamp of the underlying universe scan (server-side cache). */
+  as_of?: string | null;
 };
 
 // Backend now returns {rows, scanned, evaluable, note}; tolerate the old bare
@@ -204,6 +233,7 @@ function normScreen(r: unknown): ScreenResult {
     scanned: o.scanned,
     evaluable: o.evaluable ?? null,
     note: o.note ?? null,
+    as_of: o.as_of ?? null,
   };
 }
 
@@ -231,8 +261,10 @@ export const api = {
     apiFetch<{ ticker: string; period: string; candles: any[] }>(
       `/api/v1/market/history/${encodeURIComponent(ticker)}?period=${period}`,
     ),
-  snapshot: (ticker: string) =>
-    apiFetch<Snapshot>(`/api/v1/market/snapshot/${encodeURIComponent(ticker)}`),
+  snapshot: (ticker: string, opts?: FetchOpts) =>
+    apiFetch<Snapshot>(`/api/v1/market/snapshot/${encodeURIComponent(ticker)}`, {}, opts),
+  snapshotMeta: (ticker: string, opts?: FetchOpts) =>
+    apiFetchMeta<Snapshot>(`/api/v1/market/snapshot/${encodeURIComponent(ticker)}`, {}, opts),
   movers: (kind: "gainers" | "losers" = "gainers", count = 8) =>
     apiFetch<Mover[]>(`/api/v1/market/movers?kind=${kind}&count=${count}`),
   news: (ticker: string, limit = 15) =>
@@ -242,9 +274,10 @@ export const api = {
 
   // macro
   macroCountries: () => apiFetch<string[]>("/api/v1/macro/countries"),
-  macroIndicators: (country = "US") =>
-    apiFetch<Indicator[]>(`/api/v1/macro/indicators?country=${encodeURIComponent(country)}`),
-  yieldCurve: () => apiFetch<YieldPoint[]>("/api/v1/macro/yield-curve"),
+  macroIndicators: (country = "US", opts?: FetchOpts) =>
+    apiFetchMeta<Indicator[]>(`/api/v1/macro/indicators?country=${encodeURIComponent(country)}`, {}, opts),
+  yieldCurve: (opts?: FetchOpts) =>
+    apiFetchMeta<YieldPoint[]>("/api/v1/macro/yield-curve", {}, opts),
 
   // deals
   bulkDeals: () => apiFetch<DealRow[]>("/api/v1/deals/bulk"),
@@ -262,9 +295,10 @@ export const api = {
     apiFetch<AuditEvent[]>(`/api/v1/admin/audit?limit=${limit}`),
 
   // fundamentals
-  statement: (ticker: string, kind: "income" | "balance" | "cashflow", quarterly = false) =>
-    apiFetch<Statement>(
+  statement: (ticker: string, kind: "income" | "balance" | "cashflow", quarterly = false, opts?: FetchOpts) =>
+    apiFetchMeta<Statement>(
       `/api/v1/fundamentals/${encodeURIComponent(ticker)}/statement/${kind}?quarterly=${quarterly}`,
+      {}, opts,
     ),
   estimates: (ticker: string) =>
     apiFetch<Estimates>(`/api/v1/fundamentals/${encodeURIComponent(ticker)}/estimates`),
@@ -289,7 +323,7 @@ export const api = {
 
   // value chain
   valueChain: (ticker: string) =>
-    apiFetch<ValueChain>(`/api/v1/value-chain/${encodeURIComponent(ticker)}`),
+    apiFetchMeta<ValueChain>(`/api/v1/value-chain/${encodeURIComponent(ticker)}`),
 
   // ai
   aiProvider: () =>

@@ -175,7 +175,7 @@ def quotes_bulk(tickers: list[str], max_workers: int = 8) -> dict[str, dict | No
     return dict(zip(tickers, results))
 
 
-def snapshot(ticker: str) -> dict | None:
+def snapshot(ticker: str, quota_safe: bool = False) -> dict | None:
     """Fundamentals snapshot. Provider preference (Indian first):
 
         1. NSE direct  — for .NS / .BO; gives name, sector, P/E, mcap, 52-w.
@@ -184,18 +184,25 @@ def snapshot(ticker: str) -> dict | None:
 
     We layer rather than choose: each provider fills the fields it has, so
     we get the union. Returns None only if we have literally nothing.
+
+    quota_safe=True skips the daily/minute-quota providers (FMP: 3 HTTP calls
+    per name against a 250/day budget; Twelve Data: 8 req/min) — required for
+    universe scans, where a single 70-name pass through FMP would exhaust the
+    whole day's allowance.
     """
     base: dict = {}
 
     # Fetch all providers concurrently — these are independent network calls and
     # were the dominant cost when run serially (NSE + yfinance + Twelve Data ~5s).
     is_in = nse.is_indian(ticker) and not ticker.startswith("^")
+    use_fmp = has_fmp() and not quota_safe
+    use_td = has_twelvedata() and not quota_safe
     with ThreadPoolExecutor(max_workers=5) as pool:
         f_nse = pool.submit(nse.snapshot, ticker) if is_in else None
-        f_fmp = pool.submit(fmp_snapshot, ticker) if has_fmp() else None
+        f_fmp = pool.submit(fmp_snapshot, ticker) if use_fmp else None
         f_yf = pool.submit(yf_md.get_stock_fundamentals, ticker)
-        f_td_stats = pool.submit(_td_statistics, ticker) if has_twelvedata() else None
-        f_td_q = pool.submit(_td_quote, ticker) if has_twelvedata() else None
+        f_td_stats = pool.submit(_td_statistics, ticker) if use_td else None
+        f_td_q = pool.submit(_td_quote, ticker) if use_td else None
 
         def _result(fut):
             if fut is None:

@@ -27,6 +27,10 @@ if REDIS_URL:
 
 
 def _key(name: str, args: tuple, kwargs: dict) -> str:
+    # Ignore underscore-prefixed kwargs (FastAPI injects the resolved auth
+    # dependency as `_user`); keying on it made every cache entry per-user,
+    # so user B never hit user A's warm movers/quotes.
+    kwargs = {k: v for k, v in kwargs.items() if not k.startswith("_")}
     payload = pickle.dumps((args, sorted(kwargs.items())))
     return f"mb:{name}:{hashlib.sha1(payload).hexdigest()}"
 
@@ -61,9 +65,24 @@ _lru = _LRU()
 
 
 def cached(ttl: int = 600) -> Callable:
-    """Cache the wrapped function's return value for `ttl` seconds."""
+    """Cache the wrapped function's return value for `ttl` seconds.
+
+    The wrapper exposes `.refresh(*args, **kwargs)`: recompute unconditionally
+    and overwrite the entry. The background prewarmer uses it to rewrite hot
+    entries just before expiry so user requests never pay the provider
+    round-trip.
+    """
 
     def deco(fn):
+        def _store(key: str, value: Any) -> None:
+            if _redis is not None:
+                try:
+                    _redis.setex(key, ttl, pickle.dumps(value))
+                except Exception:
+                    pass
+            else:
+                _lru.set(key, value, ttl)
+
         @functools.wraps(fn)
         def wrapper(*args, **kwargs):
             key = _key(fn.__qualname__, args, kwargs)
@@ -74,19 +93,21 @@ def cached(ttl: int = 600) -> Callable:
                         return pickle.loads(blob)
                     except Exception:
                         pass
-                value = fn(*args, **kwargs)
-                try:
-                    _redis.setex(key, ttl, pickle.dumps(value))
-                except Exception:
-                    pass
-                return value
-            hit = _lru.get(key)
-            if hit is not None:
-                return hit
+            else:
+                hit = _lru.get(key)
+                if hit is not None:
+                    return hit
             value = fn(*args, **kwargs)
-            _lru.set(key, value, ttl)
+            _store(key, value)
             return value
 
+        def refresh(*args, **kwargs):
+            key = _key(fn.__qualname__, args, kwargs)
+            value = fn(*args, **kwargs)
+            _store(key, value)
+            return value
+
+        wrapper.refresh = refresh
         return wrapper
 
     return deco

@@ -29,15 +29,22 @@ def quote(ticker: str, _user: dict = Depends(auth.current_user)):
     return q
 
 
+@cached(ttl=30)
+def _bulk_quotes(syms: tuple[str, ...]) -> dict:
+    """Cached on the normalized (sorted, deduped) symbol tuple so key order,
+    whitespace, and duplicates don't fragment cache entries. The background
+    prewarmer refreshes the dashboard set through this same function."""
+    return providers.quotes_bulk(list(syms))
+
+
 @router.get("/quote-bulk")
-@cached(ttl=15)
 def quote_bulk(symbols: str = Query(..., description="Comma-separated tickers"),
                _user: dict = Depends(auth.current_user)):
     """Parallel batch quote — single round-trip from the client's view."""
     syms = [s.strip().upper() for s in symbols.split(",") if s.strip()][:30]
     if not syms:
         raise HTTPException(400, "No symbols provided")
-    return providers.quotes_bulk(syms)
+    return _bulk_quotes(tuple(sorted(set(syms))))
 
 
 @router.get("/history/{ticker}")
@@ -57,10 +64,8 @@ def snapshot(ticker: str, _user: dict = Depends(auth.current_user)):
     return f
 
 
-@router.get("/movers")
 @cached(ttl=300)
-def movers(kind: str = "gainers", count: int = 8,
-           _user: dict = Depends(auth.current_user)):
+def _movers(kind: str, count: int):
     """NIFTY 50 movers — NSE direct (works on cloud IPs) → yfinance fallback.
 
     Bugfix: `if nse_rows:` treated an empty NSE list as "missing" and fell
@@ -71,6 +76,12 @@ def movers(kind: str = "gainers", count: int = 8,
     if nse_rows is not None:
         return nse_rows
     return md.get_movers(kind=kind, count=count)
+
+
+@router.get("/movers")
+def movers(kind: str = "gainers", count: int = 8,
+           _user: dict = Depends(auth.current_user)):
+    return _movers(kind, count)
 
 
 def _news_payload(items):

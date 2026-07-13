@@ -10,6 +10,8 @@ fundamentals populate on cloud IPs where Yahoo blocks us.
 """
 from __future__ import annotations
 
+from datetime import datetime, timezone
+
 from fastapi import APIRouter, Depends, HTTPException
 
 from backend import auth, providers
@@ -28,22 +30,39 @@ _PRESETS = set(screens.PRESETS.keys())
 _UNIVERSE_SIZE = len(screens.SCREEN_UNIVERSE)
 
 
-def _envelope(rows, scanned, evaluable, note=None):
-    return {"rows": rows, "scanned": scanned, "evaluable": evaluable, "note": note}
+def _envelope(rows, scanned, evaluable, note=None, as_of=None):
+    return {"rows": rows, "scanned": scanned, "evaluable": evaluable,
+            "note": note, "as_of": as_of}
 
 
-def _scan():
-    """Scan via the provider layer rather than yfinance alone."""
-    return screens.scan_universe(fundamentals_fn=providers.snapshot)
+@cached(ttl=600)
+def _scan_cached() -> dict:
+    """One shared universe scan for all presets + custom screens.
+
+    Previously each preset cached its own copy AND custom screens were
+    uncached, so every cache miss re-fetched the whole ~70-name universe
+    (~13 s). Now the expensive part is computed once, refreshed by the
+    background prewarmer, and preset/custom filtering is pure Python over
+    the cached rows (<10 ms).
+
+    quota_safe: the scan skips FMP/Twelve Data — one pass through FMP is
+    3 HTTP calls x 70 names against a 250/day free budget. NSE covers the
+    market-cap/P-E presets on cloud hosts; growth metrics fill in where
+    yfinance is reachable.
+    """
+    rows = screens.scan_universe(
+        fundamentals_fn=lambda t: providers.snapshot(t, quota_safe=True))
+    return {"rows": rows,
+            "as_of": datetime.now(timezone.utc).isoformat(timespec="seconds")}
 
 
 @router.get("/preset/{name}")
-@cached(ttl=900)
 def preset(name: str, _user: dict = Depends(auth.current_user)):
     if name not in _PRESETS:
         raise HTTPException(404, f"Unknown preset '{name}'. "
                                  f"Available: {sorted(_PRESETS)}")
-    rows = _scan()
+    scan = _scan_cached()
+    rows = scan["rows"]
     matched = screens.run_preset(name, rows)
     note = None
     if not matched:
@@ -51,15 +70,18 @@ def preset(name: str, _user: dict = Depends(auth.current_user)):
                 f"metrics are often unavailable from free data on cloud hosts — "
                 f"set TWELVE_DATA_API_KEY for full fundamentals, or try the "
                 f"'Large Cap' presets (price + market-cap only).")
-    return _envelope(matched, scanned=_UNIVERSE_SIZE, evaluable=len(rows), note=note)
+    return _envelope(matched, scanned=_UNIVERSE_SIZE, evaluable=len(rows),
+                     note=note, as_of=scan["as_of"])
 
 
 @router.post("/custom")
 def custom(body: CustomScreenRequest,
            _user: dict = Depends(auth.current_user)):
-    rows = _scan()
-    matched = screens.apply_filters(rows, [f.model_dump() for f in body.filters])
-    return _envelope(matched, scanned=_UNIVERSE_SIZE, evaluable=len(rows))
+    scan = _scan_cached()
+    matched = screens.apply_filters(scan["rows"],
+                                    [f.model_dump() for f in body.filters])
+    return _envelope(matched, scanned=_UNIVERSE_SIZE,
+                     evaluable=len(scan["rows"]), as_of=scan["as_of"])
 
 
 @router.post("/buffett")

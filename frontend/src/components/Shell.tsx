@@ -6,6 +6,7 @@ import { useEffect, useState } from "react";
 import { Activity, BarChart3, Filter, Globe, Home, LogOut, Newspaper, Search, Shield, Terminal, Waves } from "lucide-react";
 
 import { api, token } from "@/lib/api";
+import { useLiveStatus } from "@/lib/useLive";
 import { cn } from "@/lib/utils";
 
 import { CommandPalette } from "./CommandPalette";
@@ -29,6 +30,9 @@ export function Shell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const [me, setMe] = useState<{ username: string; role: string } | null>(null);
   const [paletteOpen, setPaletteOpen] = useState(false);
+  // Honest header badge: LIVE only when a panel on this page is actually
+  // polling (useLive registry). Static pages show STATIC — no fake pulse.
+  const { polling } = useLiveStatus();
 
   // Boot: verify token; bounce to /login if missing/invalid.
   useEffect(() => {
@@ -67,6 +71,13 @@ export function Shell({ children }: { children: React.ReactNode }) {
               <Link
                 key={href}
                 href={href}
+                // Intent-based prefetch: the always-visible sidebar meant Next
+                // eagerly RSC-prefetched every route on first paint. Prefetch
+                // on hover/focus instead — imperceptible when actually
+                // navigating, zero waste otherwise.
+                prefetch={false}
+                onMouseEnter={() => router.prefetch(href)}
+                onFocus={() => router.prefetch(href)}
                 className={cn(
                   "flex items-center gap-3 px-3 py-2 rounded text-sm uppercase tracking-wider transition-colors",
                   active
@@ -104,9 +115,14 @@ export function Shell({ children }: { children: React.ReactNode }) {
               <kbd className="text-[10px] px-1.5 py-0.5 rounded border border-line2 text-mut">⌘K</kbd>
             </button>
             <div className="flex-1" />
-            <div className="flex items-center gap-2 text-[11px] text-mut">
-              <Activity size={12} className="text-green animate-pulse" />
-              LIVE
+            <div
+              className="flex items-center gap-2 text-[11px] text-mut"
+              title={polling
+                ? "Panels on this page auto-refresh while the tab is visible"
+                : "No auto-refresh on this page — data loads on demand"}
+            >
+              <Activity size={12} className={polling ? "text-green animate-pulse" : "text-mut"} />
+              {polling ? "LIVE" : "STATIC"}
             </div>
           </div>
         </header>

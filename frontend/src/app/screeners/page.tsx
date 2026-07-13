@@ -1,8 +1,9 @@
 "use client";
 
 import Link from "next/link";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
+import { DataAge } from "@/components/DataAge";
 import { Shell } from "@/components/Shell";
 import { api, type ScreenResult } from "@/lib/api";
 
@@ -80,6 +81,10 @@ export default function ScreenersPage() {
     }
   }
 
+  // Auto-run the default preset on load — the server keeps the universe scan
+  // warm in the background, so this returns in ms instead of a 13s cold scan.
+  useEffect(() => { run(0); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, []);
+
   const rows = result?.rows ?? null;
   const cols = rows && rows.length
     ? Array.from(new Set(rows.flatMap((r) => Object.keys(r)))).filter((c) => c !== "symbol")
@@ -103,6 +108,7 @@ export default function ScreenersPage() {
 
       <div className="flex items-center gap-3 mb-4">
         <div className="text-mut text-xs flex-1">{SCREENS[active].desc}</div>
+        {result?.as_of && <DataAge at={result.as_of} prefix="Scan data" />}
         {rows && rows.length > 0 && (
           <button onClick={() => exportCsv(SCREENS[active].label, cols, rows)} className="btn-ghost">
             Export CSV

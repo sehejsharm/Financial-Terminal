@@ -12,6 +12,7 @@ Auth: POST /api/v1/auth/login → bearer token → use on every other endpoint.
 from __future__ import annotations
 
 import threading
+import time
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -66,17 +67,61 @@ for r in (auth.router, market.router, fundamentals.router, screens.router,
     app.include_router(r, prefix=_V1)
 
 
+# Must match the dashboard's SNAPSHOT_TICKERS (frontend/src/app/page.tsx) after
+# the route's normalization (sorted, deduped) so the prewarmer writes the exact
+# cache entry user requests read.
+_DASH_TICKERS = tuple(sorted({
+    "^NSEI", "^BSESN", "^NSEBANK", "^INDIAVIX",
+    "^CNXIT", "^CNXFMCG", "^CNXAUTO", "^CNXPHARMA",
+    "^CNXMETAL", "^CNXENERGY", "^CNXMIDCAP", "^CNX500",
+}))
+
+
 @app.on_event("startup")
 def _prewarm() -> None:
-    """Best-effort warm-up so the first request doesn't pay import + network
-    cold-start (yfinance/curl_cffi import, NSE session). Never blocks or
-    crashes boot — runs on a daemon thread and swallows all errors."""
+    """Background cache prewarmer.
 
-    def _run() -> None:
-        try:
-            from backend import providers
-            providers.quotes_bulk(["^NSEI", "^BSESN", "^NSEBANK", "^INDIAVIX"])
-        except Exception:
-            pass
+    Two daemon loops keep the hot read paths warm so user requests are served
+    from cache (<10 ms + JSON) instead of paying live provider round-trips:
 
-    threading.Thread(target=_run, daemon=True).start()
+      fast loop  — dashboard index quotes every 25 s (cache TTL 30 s) and
+                   NIFTY movers every 240 s (TTL 300 s). NSE-direct only:
+                   ~0.5 req/s average, no metered API involved.
+      slow loop  — the ~70-name screener universe scan every 540 s (TTL
+                   600 s). Runs on its own thread because a scan takes
+                   seconds and must not delay quote refreshes. quota_safe:
+                   never touches FMP / Twelve Data.
+
+    First iterations double as the original one-shot warm-up (imports + NSE
+    cookie session). Everything is best-effort: errors are swallowed and the
+    loops keep going.
+    """
+
+    def _fast() -> None:
+        from backend.routes import market
+        tick = 0
+        while True:
+            try:
+                market._bulk_quotes.refresh(_DASH_TICKERS)
+            except Exception:
+                pass
+            if tick % 10 == 0:  # every ~250 s, under the 300 s movers TTL
+                for kind in ("gainers", "losers"):
+                    try:
+                        market._movers.refresh(kind, 8)
+                    except Exception:
+                        pass
+            tick += 1
+            time.sleep(25)
+
+    def _slow() -> None:
+        from backend.routes import screens as screens_routes
+        while True:
+            try:
+                screens_routes._scan_cached.refresh()
+            except Exception:
+                pass
+            time.sleep(540)
+
+    threading.Thread(target=_fast, daemon=True, name="prewarm-fast").start()
+    threading.Thread(target=_slow, daemon=True, name="prewarm-slow").start()

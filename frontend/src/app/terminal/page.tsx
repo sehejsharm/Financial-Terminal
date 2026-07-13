@@ -1,9 +1,10 @@
 "use client";
 
 import { useRouter, useSearchParams } from "next/navigation";
-import { Suspense, useEffect, useState } from "react";
+import { Suspense, useCallback, useEffect, useState } from "react";
 
 import { AIPanel } from "@/components/AIPanel";
+import { DataAge } from "@/components/DataAge";
 import { CapitalStructureView } from "@/components/CapitalStructure";
 import { Comparables } from "@/components/Comparables";
 import { DebtProfile } from "@/components/DebtProfile";
@@ -20,6 +21,7 @@ import { StreetRatings } from "@/components/StreetRatings";
 import { ValueChainMap } from "@/components/ValueChainMap";
 import { Wacc } from "@/components/Wacc";
 import { api, type Quote, type Snapshot } from "@/lib/api";
+import { useLive } from "@/lib/useLive";
 import { curForTicker, fmtNum, fmtPct, humanNumber, inferCurrency } from "@/lib/utils";
 
 const FUNCTIONS = [
@@ -52,24 +54,30 @@ function TerminalInner() {
   const [fn, setFn] = useState<Fn>("Snapshot");
   const [period, setPeriod] = useState<(typeof PERIODS)[number]>("1Y");
   const [snap, setSnap] = useState<Snapshot | null>(null);
-  const [quote, setQuote] = useState<Quote | null>(null);
+  const [snapAt, setSnapAt] = useState<number | null>(null);
+  const [snapBusy, setSnapBusy] = useState(false);
   const [candles, setCandles] = useState<any[]>([]);
-  const [loading, setLoading] = useState(false);
-  const [err, setErr] = useState<string | null>(null);
 
-  // Header data (snapshot + quote) on ticker change.
-  // Stream each result independently so the page paints with whichever
-  // returns first — no waiting on the slowest call.
-  useEffect(() => {
-    setLoading(true); setErr(null); setSnap(null); setQuote(null);
-    let gotQuote = false, gotSnap = false;
-    api.quote(ticker)
-      .then((q) => { setQuote(q); gotQuote = true; setLoading(false); })
-      .catch(() => { gotQuote = false; if (gotSnap === false && gotQuote === false) setErr(`Could not load data for ${ticker}.`); });
-    api.snapshot(ticker)
-      .then((s) => { setSnap(s); gotSnap = true; setLoading(false); })
-      .catch(() => { /* snapshot can fail; quote alone is enough for the header */ });
+  // Live quote: polls every 15s while the tab is visible (pauses hidden).
+  const quoteLive = useLive<Quote>(() => api.quote(ticker), 15_000, [ticker]);
+  const quote = quoteLive.data;
+
+  // Snapshot (fundamentals): loads on ticker change; the header refresh
+  // button forces past the localStorage cache.
+  const loadSnap = useCallback((fresh = false) => {
+    setSnapBusy(true);
+    api.snapshotMeta(ticker, { fresh })
+      .then((m) => { setSnap(m.data); setSnapAt(m.fetchedAt); })
+      .catch(() => { /* snapshot can fail; quote alone is enough for the header */ })
+      .finally(() => setSnapBusy(false));
   }, [ticker]);
+  useEffect(() => { setSnap(null); setSnapAt(null); loadSnap(); }, [loadSnap]);
+
+  function refreshHeader() { loadSnap(true); quoteLive.refresh(); }
+
+  const loading = !quote && !snap && !quoteLive.error;
+  const err = quoteLive.error && !quote && !snap
+    ? `Could not load data for ${ticker}.` : null;
 
   // History reloads on ticker OR period change.
   useEffect(() => {
@@ -112,6 +120,10 @@ function TerminalInner() {
           <div className="text-xl font-bold tracking-tight truncate">{name}</div>
           <div className="text-mut text-xs mt-0.5">
             {(snap?.sector as string) || "—"} / {(snap?.industry as string) || "—"}
+          </div>
+          <div className="mt-1.5 flex items-center gap-3">
+            <DataAge at={quoteLive.updatedAt} prefix="Quote" />
+            <DataAge at={snapAt} prefix="Fundamentals" onRefresh={refreshHeader} busy={snapBusy} />
           </div>
         </div>
         <MetricCard

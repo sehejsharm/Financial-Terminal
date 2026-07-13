@@ -1,7 +1,8 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 
+import { DataAge } from "@/components/DataAge";
 import { MetricCard } from "@/components/MetricCard";
 import { Shell } from "@/components/Shell";
 import { api, type Indicator, type YieldPoint } from "@/lib/api";
@@ -61,22 +62,28 @@ export default function MacroPage() {
   const [countries, setCountries] = useState<string[]>(["US", "IN", "EU", "UK", "JP", "CN"]);
   const [country, setCountry] = useState("US");
   const [inds, setInds] = useState<Indicator[] | null>(null);
+  const [indsAt, setIndsAt] = useState<number | null>(null);
   const [curve, setCurve] = useState<YieldPoint[] | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
   useEffect(() => {
     api.macroCountries().then(setCountries).catch(() => {});
-    api.yieldCurve().then(setCurve).catch(() => setCurve([]));
   }, []);
 
-  useEffect(() => {
-    setBusy(true); setErr(null); setInds(null);
-    api.macroIndicators(country)
-      .then(setInds)
+  const loadCurve = useCallback((fresh = false) => {
+    api.yieldCurve({ fresh }).then((m) => setCurve(m.data)).catch(() => setCurve([]));
+  }, []);
+  useEffect(() => { loadCurve(); }, [loadCurve]);
+
+  const loadInds = useCallback((fresh = false) => {
+    setBusy(true); setErr(null);
+    api.macroIndicators(country, { fresh })
+      .then((m) => { setInds(m.data); setIndsAt(m.fetchedAt); })
       .catch((e) => setErr(e?.detail || "Macro feed unavailable."))
       .finally(() => setBusy(false));
   }, [country]);
+  useEffect(() => { setInds(null); setIndsAt(null); loadInds(); }, [loadInds]);
 
   const inversion = curve && curve.length >= 2 ? curve[0].yield > curve[curve.length - 1].yield : false;
   const spread10y2y = (() => {
@@ -112,7 +119,11 @@ export default function MacroPage() {
 
       {inds && (
         <>
-          <div className="heading mb-2">Key indicators — {COUNTRY_LABELS[country]?.label ?? country}</div>
+          <div className="flex items-center gap-3 mb-2">
+            <div className="heading">Key indicators — {COUNTRY_LABELS[country]?.label ?? country}</div>
+            <div className="flex-1" />
+            <DataAge at={indsAt} onRefresh={() => { loadInds(true); loadCurve(true); }} busy={busy} />
+          </div>
           <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3 mb-8">
             {inds.map((ind) => (
               <div key={ind.name} className="panel-2 p-3.5 flex flex-col gap-1">

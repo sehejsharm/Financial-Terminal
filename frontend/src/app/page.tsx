@@ -1,12 +1,14 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useState } from "react";
+import { useState } from "react";
 
+import { DataAge } from "@/components/DataAge";
 import { MetricCard } from "@/components/MetricCard";
 import { Shell } from "@/components/Shell";
 import { WatchlistEditor } from "@/components/WatchlistEditor";
 import { api, type Mover, type Quote } from "@/lib/api";
+import { useLive } from "@/lib/useLive";
 import { curForTicker, fmtNum, fmtPct } from "@/lib/utils";
 
 // All NSE-resolvable so the dashboard fills via the direct NSE provider
@@ -27,21 +29,24 @@ const NAMES: Record<string, string> = {
 
 function MoversPanel() {
   const [kind, setKind] = useState<"gainers" | "losers">("gainers");
-  const [rows, setRows] = useState<Mover[]>([]);
-  const [busy, setBusy] = useState(false);
-
-  useEffect(() => {
-    setBusy(true);
-    api.movers(kind, 8).then((r) => setRows(Array.isArray(r) ? r : [])).catch(() => setRows([])).finally(() => setBusy(false));
-  }, [kind]);
+  // Movers refresh every 60s while the tab is visible (server cache TTL 300s,
+  // kept warm by the backend prewarmer, so each poll is cheap).
+  const { data, busy, updatedAt, refresh } = useLive<Mover[]>(
+    () => api.movers(kind, 8).then((r) => (Array.isArray(r) ? r : [])),
+    60_000,
+    [kind],
+  );
+  const rows = data ?? [];
 
   return (
     <div className="panel-2 p-4">
       <div className="flex items-center gap-2 mb-3">
         <button onClick={() => setKind("gainers")} className={`btn ${kind === "gainers" ? "btn-primary" : "btn-ghost"}`}>Gainers</button>
         <button onClick={() => setKind("losers")} className={`btn ${kind === "losers" ? "btn-primary" : "btn-ghost"}`}>Losers</button>
+        <div className="flex-1" />
+        <DataAge at={updatedAt} onRefresh={refresh} busy={busy} />
       </div>
-      {busy && <div className="text-mut text-xs">Loading…</div>}
+      {busy && rows.length === 0 && <div className="text-mut text-xs">Loading…</div>}
       {!busy && rows.length === 0 && <div className="text-mut text-xs">No data.</div>}
       <div className="flex flex-col gap-1">
         {rows.map((m, i) => {
@@ -61,18 +66,22 @@ function MoversPanel() {
 }
 
 export default function DashboardPage() {
-  const [quotes, setQuotes] = useState<Record<string, Quote | null>>({});
-  const [loaded, setLoaded] = useState(false);
-
-  useEffect(() => {
-    api.quoteBulk(SNAPSHOT_TICKERS)
-      .then((m) => { setQuotes(m); setLoaded(true); })
-      .catch(() => { setQuotes({}); setLoaded(true); });
-  }, []);
+  // Index quotes poll every 15s while visible (paused in background tabs).
+  // The backend keeps this exact symbol set warm, so polls return in ~ms.
+  const { data, busy, updatedAt, refresh } = useLive<Record<string, Quote | null>>(
+    () => api.quoteBulk(SNAPSHOT_TICKERS),
+    15_000,
+  );
+  const quotes = data ?? {};
+  const loaded = data !== null;
 
   return (
     <Shell>
-      <h1 className="heading mb-3">MARKET SNAPSHOT</h1>
+      <div className="flex items-center gap-3 mb-3">
+        <h1 className="heading">MARKET SNAPSHOT</h1>
+        <div className="flex-1" />
+        <DataAge at={updatedAt} onRefresh={refresh} busy={busy} />
+      </div>
       <div className="grid gap-3 mb-8" style={{ gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))" }}>
         {SNAPSHOT_TICKERS.map((t) => {
           const q = quotes[t];
