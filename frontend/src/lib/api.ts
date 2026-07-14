@@ -202,6 +202,10 @@ export type OptionChain = {
   calls: OptionRow[]; puts: OptionRow[]; max_pain: number | null;
 };
 export type AIResp = { ticker: string; markdown: string };
+export type VcReport = {
+  ts: string; user: string | null; ticker: string;
+  node_name: string; role: string; reason: string;
+};
 export type Mover = Record<string, number | string | null>;
 export type Frame = { columns: string[]; rows: Array<Record<string, number | string | null>> };
 export type CompRow = Record<string, number | string | null>;
@@ -345,6 +349,12 @@ export const api = {
   // value chain
   valueChain: (ticker: string) =>
     apiFetchMeta<ValueChain>(`/api/v1/value-chain/${encodeURIComponent(ticker)}`),
+  reportValueChain: (ticker: string, payload: { node_name: string; role: string; reason?: string }) =>
+    apiFetch<{ ok: boolean }>(`/api/v1/value-chain/${encodeURIComponent(ticker)}/report`, {
+      method: "POST", body: JSON.stringify({ reason: "", ...payload }),
+    }),
+  vcReports: (limit = 200) =>
+    apiFetch<VcReport[]>(`/api/v1/value-chain/reports/all?limit=${limit}`),
 
   // ai
   aiProvider: () =>

@@ -4,12 +4,13 @@ import { useEffect, useState } from "react";
 import { Trash2 } from "lucide-react";
 
 import { Shell } from "@/components/Shell";
-import { api, type AdminUser, type AuditEvent } from "@/lib/api";
+import { api, type AdminUser, type AuditEvent, type VcReport } from "@/lib/api";
 
 export default function AdminPage() {
   const [users, setUsers] = useState<AdminUser[] | null>(null);
   const [audit, setAudit] = useState<AuditEvent[] | null>(null);
-  const [tab, setTab] = useState<"users" | "audit">("users");
+  const [vcReports, setVcReports] = useState<VcReport[] | null>(null);
+  const [tab, setTab] = useState<"users" | "audit" | "vc">("users");
   const [forbidden, setForbidden] = useState(false);
 
   // New-user form
@@ -21,6 +22,7 @@ export default function AdminPage() {
   function refresh() {
     api.adminUsers().then(setUsers).catch((e) => { if (e?.status === 403) setForbidden(true); else setUsers([]); });
     api.adminAudit(100).then(setAudit).catch(() => setAudit([]));
+    api.vcReports().then(setVcReports).catch(() => setVcReports([]));
   }
   useEffect(refresh, []);
 
@@ -54,7 +56,50 @@ export default function AdminPage() {
       <div className="flex items-center gap-2 mb-4">
         <button onClick={() => setTab("users")} className={`btn ${tab === "users" ? "btn-primary" : "btn-ghost"}`}>Users</button>
         <button onClick={() => setTab("audit")} className={`btn ${tab === "audit" ? "btn-primary" : "btn-ghost"}`}>Audit log</button>
+        <button onClick={() => setTab("vc")} className={`btn ${tab === "vc" ? "btn-primary" : "btn-ghost"}`}>
+          VC reports{vcReports && vcReports.length > 0 ? ` (${vcReports.length})` : ""}
+        </button>
       </div>
+
+      {tab === "vc" && (
+        <>
+          <div className="text-mut text-xs mb-3">
+            Value-chain relationships users flagged as wrong (AI-generated maps).
+            Review and, where confirmed, pin a corrected map from the terminal.
+          </div>
+          {(!vcReports || vcReports.length === 0) && (
+            <div className="panel-2 p-4 text-mut text-sm">No reports. Nothing flagged yet.</div>
+          )}
+          {vcReports && vcReports.length > 0 && (
+            <div className="panel overflow-x-auto">
+              <table className="w-full text-xs">
+                <thead className="text-mut uppercase tracking-wider">
+                  <tr className="border-b border-line">
+                    <th className="text-left px-3 py-2 font-medium">When</th>
+                    <th className="text-left px-3 py-2 font-medium">By</th>
+                    <th className="text-left px-3 py-2 font-medium">Map</th>
+                    <th className="text-left px-3 py-2 font-medium">Node</th>
+                    <th className="text-left px-3 py-2 font-medium">Role</th>
+                    <th className="text-left px-3 py-2 font-medium">Reason</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {vcReports.map((r, i) => (
+                    <tr key={i} className="border-b border-line/60 hover:bg-panel">
+                      <td className="px-3 py-2 text-mut whitespace-nowrap">{r.ts?.slice(0, 16).replace("T", " ")}</td>
+                      <td className="px-3 py-2">{r.user ?? "—"}</td>
+                      <td className="px-3 py-2 text-amber">{r.ticker}</td>
+                      <td className="px-3 py-2">{r.node_name}</td>
+                      <td className="px-3 py-2 uppercase text-mut">{r.role}</td>
+                      <td className="px-3 py-2 text-mut">{r.reason || "—"}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </>
+      )}
 
       {tab === "users" && (
         <>
