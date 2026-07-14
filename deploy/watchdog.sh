@@ -7,6 +7,8 @@
 # hangs, which Docker's restart policy does NOT act on by itself.
 #
 # Installed by setup.sh as /etc/cron.d/motherboard-watchdog (runs every 2 min).
+#
+# (trivial touch to verify the GitHub Actions auto-deploy pipeline end-to-end)
 set -u
 cd "$(dirname "$0")"
 
