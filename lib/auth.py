@@ -138,6 +138,42 @@ def _reset_failures(key: str) -> None:
     _failures.pop(key, None)
 
 
+def ensure_env_admin() -> None:
+    """Sync the master-admin account with MOTHERBOARD_ADMIN_USER/PASSWORD on
+    every backend boot.
+
+    Previously the admin was seeded ONLY when users.json didn't exist, so any
+    later .env password change silently did nothing — the login kept using
+    whatever password happened to be set at first boot ("invalid credentials"
+    with no way to recover except editing the JSON by hand). Now deploy/.env
+    is the source of truth: change the password there, restart the backend,
+    log in with the new one. No-op when either env var is unset."""
+    user = os.getenv("MOTHERBOARD_ADMIN_USER", "").strip()
+    pw = os.getenv("MOTHERBOARD_ADMIN_PASSWORD", "").strip()
+    if not user or not pw:
+        return
+    data = _load()
+    key = user.lower()
+    salt = secrets.token_hex(16)
+    rec = data["users"].get(key)
+    if rec is None:
+        data["users"][key] = {
+            "display": user, "salt": salt, "hash": _hash(pw, salt),
+            "role": ROLE_MASTER, "active": True, "created": _now(),
+        }
+    else:
+        # Skip the write when the password already matches — avoids churning
+        # the salt/hash (and file mtime) on every boot.
+        if _hash(pw, rec["salt"]) == rec["hash"] and rec.get("active", True) \
+                and rec.get("role") == ROLE_MASTER:
+            return
+        rec["salt"] = salt
+        rec["hash"] = _hash(pw, salt)
+        rec["active"] = True
+        rec["role"] = ROLE_MASTER
+    _save(data)
+
+
 def verify_credentials(username: str, password: str) -> dict | None:
     """Return a sanitized user dict on success (and if active), else None."""
     data = _load()

@@ -91,6 +91,18 @@ _DASH_TICKERS = tuple(sorted({
 
 
 @app.on_event("startup")
+def _sync_admin() -> None:
+    """deploy/.env is the source of truth for the master-admin credentials —
+    re-synced on every boot so a password change in .env + restart is all a
+    lockout recovery takes."""
+    try:
+        from lib.auth import ensure_env_admin
+        ensure_env_admin()
+    except Exception:
+        pass
+
+
+@app.on_event("startup")
 def _prewarm() -> None:
     """Background cache prewarmer.
 
