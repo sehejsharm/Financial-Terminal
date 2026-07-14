@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 
 import { api } from "@/lib/api";
+import { FN_CODES, parseCommand } from "@/lib/commands";
 
 type SearchHit = { symbol: string; name: string; exchange?: string };
 
@@ -49,6 +50,30 @@ export function CommandPalette({
             className="w-full bg-transparent border-0 border-b border-line px-4 py-3.5 text-txt placeholder:text-mut/70 focus:outline-none"
           />
           <Command.List className="max-h-[60vh] overflow-y-auto py-1">
+            {/* Bloomberg-style command line: "RELIANCE.NS DES", "AAPL OMON",
+                "RELIANCE TCS INFY CF" — parsed live and shown first so Enter
+                executes the function jump. */}
+            {(() => {
+              const cmd = parseCommand(q);
+              if (!cmd) return null;
+              return (
+                <Command.Group heading="Command" className="px-2 py-1 text-mut">
+                  <Command.Item
+                    value={`__cmd_${q}`}
+                    onSelect={() => go(cmd.href)}
+                    className="flex items-center gap-3 px-3 py-2 rounded cursor-pointer
+                               data-[selected=true]:bg-panel data-[selected=true]:text-amber"
+                  >
+                    <span className="text-green text-[10px] uppercase tracking-wider">{cmd.code}</span>
+                    <span className="text-txt">
+                      <span className="text-amber">{cmd.tickers.join(" · ")}</span>
+                      {" → "}{cmd.fnLabel}
+                    </span>
+                  </Command.Item>
+                </Command.Group>
+              );
+            })()}
+
             {/* Synthetic "open raw query" row — cmdk's own keyboard handler
                 selects it on Enter, which fixes the earlier bug where the
                 onKeyDown on Input was swallowed when hits=[]. Always shown so
@@ -107,10 +132,11 @@ export function CommandPalette({
           </Command.List>
         </Command>
 
-        <div className="border-t border-line px-4 py-2 flex items-center gap-3 text-[10px] text-mut">
+        <div className="border-t border-line px-4 py-2 flex items-center gap-3 text-[10px] text-mut flex-wrap">
           <span><kbd className="px-1 border border-line2 rounded">↑↓</kbd> navigate</span>
           <span><kbd className="px-1 border border-line2 rounded">↵</kbd> select</span>
           <span><kbd className="px-1 border border-line2 rounded">esc</kbd> close</span>
+          <span className="opacity-70">commands: TICKER + {Object.keys(FN_CODES).slice(0, 8).join("/")}… · multi-ticker + CF compares</span>
         </div>
       </div>
     </div>

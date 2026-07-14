@@ -206,6 +206,49 @@ export type VcReport = {
   ts: string; user: string | null; ticker: string;
   node_name: string; role: string; reason: string;
 };
+
+// ── Phase 6 types ───────────────────────────────────────────────────────────
+export type Position = { id: string; ticker: string; qty: number; cost: number };
+export type PortfolioRow = Position & {
+  name?: string; sector?: string | null; beta?: number | null;
+  dividend_yield?: number | null; price?: number | null; value?: number | null;
+  pnl?: number | null; pnl_pct?: number | null; day_pnl?: number | null;
+  weight?: number | null; currency?: string | null;
+};
+export type PortfolioSummary = {
+  positions: PortfolioRow[];
+  totals: { value: number; cost: number; pnl: number; pnl_pct: number | null; day_pnl: number } | null;
+  sectors: { sector: string; value: number; weight: number }[];
+  factors: { beta: number | null; dividend_yield: number | null; top_weight: number | null } | null;
+};
+export type Alert = {
+  id: string; kind: "price" | "pe" | "spread_10y2y"; ticker: string | null;
+  op: ">" | "<"; value: number; active: boolean;
+  created_at: string; triggered_at: string | null;
+};
+export type AlertEvent = { ts: string; alert_id: string; message: string; value: number };
+export type Note = { ticker: string; text: string; updated_at: string | null };
+export type WorkspacePane = { widget: string; ticker?: string | null };
+export type WorkspaceLayout = { id: string; name: string; panes: WorkspacePane[]; split: number[] };
+export type SentimentItem = { title: string; sentiment: "bull" | "bear" | "neutral" };
+export type SentimentResp = {
+  ticker: string; items: SentimentItem[]; score: number | null;
+  history: { ts: string; ticker: string; score: number; n: number }[];
+};
+export type FlowRow = {
+  symbol: string; deals: number; participants: number | null;
+  buy_qty: number; sell_qty: number; net_qty: number;
+  buy_value: number | null; sell_value: number | null; net_value: number | null;
+};
+export type InsiderRow = {
+  symbol?: string; company?: string; person?: string; category?: string;
+  type?: string; qty?: number | null; value?: number | null; date?: string;
+};
+export type CalendarRow = {
+  name: string; unit: string; last_value: number | null; prior: number | null;
+  surprise_vs_prior: number | null; last_release: string | null;
+  stale: boolean; next_release_est: string | null;
+};
 export type Mover = Record<string, number | string | null>;
 export type Frame = { columns: string[]; rows: Array<Record<string, number | string | null>> };
 export type CompRow = Record<string, number | string | null>;
@@ -380,6 +423,52 @@ export const api = {
     }),
   deleteWatchlist: (id: string) =>
     apiFetch<void>(`/api/v1/watchlists/${id}`, { method: "DELETE" }),
+
+  // portfolio
+  portfolio: () => apiFetch<{ positions: Position[] }>("/api/v1/portfolio"),
+  portfolioSummary: () => apiFetch<PortfolioSummary>("/api/v1/portfolio/summary"),
+  addPosition: (ticker: string, qty: number, cost: number) =>
+    apiFetch<Position>("/api/v1/portfolio/positions", {
+      method: "POST", body: JSON.stringify({ ticker, qty, cost }),
+    }),
+  deletePosition: (id: string) =>
+    apiFetch<void>(`/api/v1/portfolio/positions/${encodeURIComponent(id)}`, { method: "DELETE" }),
+
+  // alerts
+  alerts: () => apiFetch<{ alerts: Alert[]; events: AlertEvent[] }>("/api/v1/alerts"),
+  createAlert: (a: { kind: string; ticker?: string | null; op: string; value: number }) =>
+    apiFetch<Alert>("/api/v1/alerts", { method: "POST", body: JSON.stringify(a) }),
+  deleteAlert: (id: string) =>
+    apiFetch<void>(`/api/v1/alerts/${encodeURIComponent(id)}`, { method: "DELETE" }),
+  alertEvents: () => apiFetch<AlertEvent[]>("/api/v1/alerts/events"),
+
+  // notes
+  note: (ticker: string) => apiFetch<Note>(`/api/v1/notes/${encodeURIComponent(ticker)}`),
+  saveNote: (ticker: string, text: string) =>
+    apiFetch<{ ok: boolean }>(`/api/v1/notes/${encodeURIComponent(ticker)}`, {
+      method: "PUT", body: JSON.stringify({ text }),
+    }),
+
+  // workspaces
+  workspaces: () => apiFetch<{ layouts: WorkspaceLayout[] }>("/api/v1/workspaces"),
+  saveWorkspaces: (layouts: WorkspaceLayout[]) =>
+    apiFetch<{ ok: boolean }>("/api/v1/workspaces", {
+      method: "PUT", body: JSON.stringify({ layouts }),
+    }),
+
+  // sentiment + flow intel + calendar
+  sentiment: (ticker: string) =>
+    apiFetch<SentimentResp>("/api/v1/ai/sentiment", {
+      method: "POST", body: JSON.stringify({ ticker }),
+    }),
+  dealsAggregate: (kind: "bulk" | "block" = "bulk", days = 30) =>
+    apiFetch<{ rows: FlowRow[]; from: string | null; to: string | null; note: string | null }>(
+      `/api/v1/deals/aggregate?kind=${kind}&days=${days}`),
+  insiderDeals: () =>
+    apiFetch<{ rows: InsiderRow[]; note: string | null }>("/api/v1/deals/insider"),
+  macroCalendar: (country = "US") =>
+    apiFetch<{ country: string; rows: CalendarRow[]; note: string }>(
+      `/api/v1/macro/calendar?country=${encodeURIComponent(country)}`),
 
   // screens
   preset: (name: string) =>

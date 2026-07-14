@@ -30,16 +30,20 @@ from backend.config import CORS_ORIGINS
 from backend.routes import (
     admin,
     ai,
+    alerts,
     auth,
     deals,
     fundamentals,
     health,
     macro,
     market,
+    notes,
     options,
+    portfolio,
     screens,
     value_chain,
     watchlists,
+    workspaces,
 )
 
 app = FastAPI(
@@ -71,7 +75,8 @@ app.include_router(health.router)
 _V1 = "/api/v1"
 for r in (auth.router, market.router, fundamentals.router, screens.router,
           options.router, value_chain.router, ai.router, watchlists.router,
-          macro.router, deals.router, admin.router):
+          macro.router, deals.router, admin.router, portfolio.router,
+          alerts.router, notes.router, workspaces.router):
     app.include_router(r, prefix=_V1)
 
 
@@ -122,6 +127,17 @@ def _prewarm() -> None:
             tick += 1
             time.sleep(25)
 
+    def _alerts() -> None:
+        from backend.routes import alerts as alerts_routes
+        time.sleep(45)  # let providers warm before the first pass
+        interval = int(os.getenv("ALERT_EVAL_SEC", "60") or 60)
+        while True:
+            try:
+                alerts_routes.evaluate_all()
+            except Exception:
+                pass
+            time.sleep(max(30, interval))
+
     def _slow() -> None:
         from backend.routes import screens as screens_routes
         # Delay the first scan so boot (movers + quotes + TLS issuance) isn't
@@ -140,3 +156,4 @@ def _prewarm() -> None:
 
     threading.Thread(target=_fast, daemon=True, name="prewarm-fast").start()
     threading.Thread(target=_slow, daemon=True, name="prewarm-slow").start()
+    threading.Thread(target=_alerts, daemon=True, name="alert-eval").start()

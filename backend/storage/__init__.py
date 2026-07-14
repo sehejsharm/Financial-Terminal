@@ -23,6 +23,11 @@ class Storage:
     def append_audit(self, event: dict) -> None: ...
     def recent_audit(self, limit: int = 200) -> list[dict]: ...
 
+    # Generic per-user JSON documents (portfolios, alerts, notes, workspaces).
+    def user_doc(self, kind: str, username: str, default: Any = None) -> Any: ...
+    def save_user_doc(self, kind: str, username: str, doc: Any) -> None: ...
+    def all_user_docs(self, kind: str) -> dict[str, Any]: ...
+
 
 class JSONStore(Storage):
     """Simple thread-safe JSON store. Each entity is a single file."""
@@ -74,6 +79,41 @@ class JSONStore(Storage):
             data[username.lower()] = new_bucket
             self._save_watchlists(data)
             return True
+
+    # ── generic per-user documents ───────────────────────────────────────────
+    # One JSON file per entity kind: data/{kind}.json = {username: doc}.
+    # Powers portfolios / alerts / notes / workspaces without a new schema
+    # per feature. `kind` is allow-listed to keep file paths safe.
+    _DOC_KINDS = {"portfolios", "alerts", "notes", "workspaces"}
+
+    def _doc_path(self, kind: str) -> Path:
+        if kind not in self._DOC_KINDS:
+            raise ValueError(f"unknown doc kind '{kind}'")
+        return self.root / f"{kind}.json"
+
+    def _load_docs(self, kind: str) -> dict:
+        p = self._doc_path(kind)
+        if not p.exists():
+            return {}
+        try:
+            return json.loads(p.read_text() or "{}")
+        except Exception:
+            return {}
+
+    def user_doc(self, kind: str, username: str, default: Any = None) -> Any:
+        with self._lock:
+            docs = self._load_docs(kind)
+            return docs.get(username.lower(), default)
+
+    def save_user_doc(self, kind: str, username: str, doc: Any) -> None:
+        with self._lock:
+            docs = self._load_docs(kind)
+            docs[username.lower()] = doc
+            self._doc_path(kind).write_text(json.dumps(docs, indent=2, default=str))
+
+    def all_user_docs(self, kind: str) -> dict[str, Any]:
+        with self._lock:
+            return self._load_docs(kind)
 
     # ── audit log (append-only JSONL) ────────────────────────────────────────
     def append_audit(self, event: dict) -> None:

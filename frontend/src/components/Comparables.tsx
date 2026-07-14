@@ -6,9 +6,13 @@ import { useEffect, useState } from "react";
 import { api, type CompRow } from "@/lib/api";
 import { fmtNum } from "@/lib/utils";
 
-/** Peer relative-valuation matrix. Editable peer list, defaults to IT majors. */
-export function Comparables({ ticker }: { ticker: string }) {
-  const defaults = [ticker, "TCS.NS", "INFY.NS", "WIPRO.NS"].join(", ");
+/** Peer relative-valuation matrix. Editable peer list, defaults to IT majors.
+ *  `peers` (from the ⌘K command line, e.g. "RELIANCE TCS INFY CF") overrides
+ *  the default set. */
+export function Comparables({ ticker, peers }: { ticker: string; peers?: string[] }) {
+  const defaults = (peers && peers.length
+    ? [ticker, ...peers.filter((p) => p !== ticker)]
+    : [ticker, "TCS.NS", "INFY.NS", "WIPRO.NS"]).join(", ");
   const [input, setInput] = useState(defaults);
   const [rows, setRows] = useState<CompRow[] | null>(null);
   const [busy, setBusy] = useState(false);

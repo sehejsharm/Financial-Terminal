@@ -4,9 +4,15 @@
 
 # User data (holdings, accounts/credentials)
 data/portfolio.json
+data/portfolios.json
 data/users.json
 data/watchlists.json
+data/alerts.json
+data/notes.json
+data/workspaces.json
 data/audit.jsonl
+data/vc_reports.jsonl
+data/sentiment.jsonl
 data/.jwt_secret
 data/INITIAL_ADMIN_PASSWORD.txt
 

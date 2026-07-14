@@ -308,6 +308,33 @@ def movers(kind: str = "gainers", count: int = 10) -> list[dict] | None:
     return out or None
 
 
+# ── insider (PIT/SAST) disclosures ───────────────────────────────────────
+def insider_transactions(count: int = 100) -> list[dict] | None:
+    """Recent insider-trading (PIT) disclosures from NSE's corporates API.
+    Best-effort: returns None when NSE blocks or reshapes the endpoint."""
+    data = _get("/api/corporates-pit", {"index": "equities"})
+    if not isinstance(data, dict):
+        return None
+    rows = data.get("data")
+    if not isinstance(rows, list):
+        return None
+    out = []
+    for r in rows[:count]:
+        if not isinstance(r, dict):
+            continue
+        out.append({
+            "symbol": r.get("symbol"),
+            "company": r.get("company"),
+            "person": r.get("acqName"),
+            "category": r.get("personCategory"),
+            "type": r.get("tdpTransactionType") or r.get("acqMode"),
+            "qty": _safe_float(r.get("secAcq")),
+            "value": _safe_float(r.get("secVal")),
+            "date": r.get("intimDate") or r.get("date"),
+        })
+    return out or None
+
+
 # ── index snapshot (NIFTY etc.) ──────────────────────────────────────────
 # Map the Yahoo-style symbols Streamlit uses to NSE's "index" display names
 # returned by /api/allIndices. Expanded so the Dashboard can fill more tiles

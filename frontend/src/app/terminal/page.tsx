@@ -14,6 +14,7 @@ import { EstimatesView } from "@/components/Estimates";
 import { Financials } from "@/components/Financials";
 import { MetricCard } from "@/components/MetricCard";
 import { News } from "@/components/News";
+import { Notes } from "@/components/Notes";
 import { OptionsChain } from "@/components/OptionsChain";
 import { Ownership } from "@/components/Ownership";
 import { PriceChart } from "@/components/PriceChart";
@@ -22,6 +23,7 @@ import { StreetRatings } from "@/components/StreetRatings";
 import { ValueChainMap } from "@/components/ValueChainMap";
 import { Wacc } from "@/components/Wacc";
 import { api, type Quote, type Snapshot } from "@/lib/api";
+import { FN_CODES } from "@/lib/commands";
 import { useLive } from "@/lib/useLive";
 import { curForTicker, fmtNum, fmtPct, formatPercent, humanNumber, inferCurrency } from "@/lib/utils";
 
@@ -41,6 +43,7 @@ const FUNCTIONS = [
   "Options & Greeks",
   "AI deep-dive",
   "Recent news",
+  "Notes",
 ] as const;
 type Fn = typeof FUNCTIONS[number];
 
@@ -55,13 +58,23 @@ function TerminalInner() {
   const [fn, setFn] = useState<Fn>("Snapshot");
 
   // Keep state in sync with the URL: in-app navigations (value-chain
-  // drill-down, movers links) router.push a new ?t= — without this effect the
-  // query param changed but the page kept showing the old ticker.
+  // drill-down, movers links, ⌘K command line) router.push new params —
+  // without this effect the query changed but the page kept old state.
+  // fn accepts either a mnemonic ("DES", "CF") or the full label.
   useEffect(() => {
     const t = (sp.get("t") || "").toUpperCase();
     if (t && t !== ticker) setTicker(t);
+    const f = sp.get("fn");
+    if (f) {
+      const label = FN_CODES[f.toUpperCase()] ?? f;
+      if ((FUNCTIONS as readonly string[]).includes(label) && label !== fn) {
+        setFn(label as Fn);
+      }
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sp]);
+
+  const peers = (sp.get("peers") || "").split(",").map((s) => s.trim().toUpperCase()).filter(Boolean);
   const [period, setPeriod] = useState<(typeof PERIODS)[number]>("1Y");
   const [snap, setSnap] = useState<Snapshot | null>(null);
   const [snapAt, setSnapAt] = useState<number | null>(null);
@@ -134,6 +147,11 @@ function TerminalInner() {
           <div className="mt-1.5 flex items-center gap-3">
             <DataAge at={quoteLive.updatedAt} prefix="Quote" />
             <DataAge at={snapAt} prefix="Fundamentals" onRefresh={refreshHeader} busy={snapBusy} />
+            <a href={`/tearsheet?t=${encodeURIComponent(ticker)}`} target="_blank"
+               className="text-[10.5px] text-mut hover:text-amber underline decoration-dotted"
+               title="Print-ready one-page tear sheet (save as PDF from the print dialog)">
+              Tear sheet →
+            </a>
           </div>
         </div>
         <MetricCard
@@ -193,7 +211,7 @@ function TerminalInner() {
       {!loading && !err && fn === "Financials" && <Financials ticker={ticker} currency={inferCurrency(ticker, snap?.currency as string)} />}
       {!loading && !err && fn === "Estimates & targets" && <EstimatesView ticker={ticker} currency={inferCurrency(ticker, snap?.currency as string)} />}
       {!loading && !err && fn === "Capital structure" && <CapitalStructureView ticker={ticker} />}
-      {!loading && !err && fn === "Comparables" && <Comparables ticker={ticker} />}
+      {!loading && !err && fn === "Comparables" && <Comparables ticker={ticker} peers={peers} />}
       {!loading && !err && fn === "Debt profile" && <DebtProfile ticker={ticker} snap={snap} />}
       {!loading && !err && fn === "Ownership / insiders" && <Ownership ticker={ticker} />}
       {!loading && !err && fn === "Earnings history" && <EarningsHistory ticker={ticker} />}
@@ -203,6 +221,7 @@ function TerminalInner() {
       {!loading && !err && fn === "Options & Greeks" && <OptionsChain ticker={ticker} />}
       {!loading && !err && fn === "AI deep-dive" && <AIPanel ticker={ticker} />}
       {!loading && !err && fn === "Recent news" && <News ticker={ticker} />}
+      {!loading && !err && fn === "Notes" && <Notes ticker={ticker} />}
       </ErrorBoundary>
     </Shell>
   );

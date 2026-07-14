@@ -178,6 +178,51 @@ def get_indicator(name: str, country: str = "US") -> dict:
     }
 
 
+def _cadence_days(name: str, unit: str) -> int | None:
+    """Typical release cadence; None for daily series (FX, spreads)."""
+    n = name.lower()
+    if "gdp" in n:
+        return 91
+    if "/" in name and unit != "%":
+        return None        # FX — daily
+    if "spread" in n:
+        return None        # daily
+    return 30              # monthly indicators
+
+
+def get_calendar(country: str = "US") -> list[dict]:
+    """Economic release calendar with a change-vs-prior 'surprise' proxy.
+
+    Honest scope: true surprise indexes need CONSENSUS estimates, which no
+    free API provides — 'surprise' here is actual vs prior print, labeled as
+    such. Next-release dates are estimated from cadence, not an official
+    schedule."""
+    inds = COUNTRY_INDICATORS.get(country, INDICATORS)
+    rows = []
+    for name, cfg in inds.items():
+        cadence = _cadence_days(name, cfg["unit"])
+        if cadence is None:
+            continue  # daily series don't belong on a release calendar
+        ind = get_indicator(name, country)
+        next_est = None
+        if ind.get("date"):
+            try:
+                next_est = (pd.Timestamp(ind["date"])
+                            + pd.Timedelta(days=cadence)).date().isoformat()
+            except Exception:
+                next_est = None
+        rows.append({
+            "name": name, "unit": cfg["unit"],
+            "last_value": ind.get("value"), "prior": ind.get("prior"),
+            "surprise_vs_prior": ind.get("change"),
+            "last_release": ind.get("date"), "stale": ind.get("stale", False),
+            "next_release_est": next_est,
+        })
+    rows.sort(key=lambda r: (r["next_release_est"] is None,
+                             r["next_release_est"] or ""))
+    return rows
+
+
 def get_dashboard(country: str = "US") -> list[dict]:
     """Return all configured indicators for the given country as a list of dicts.
 

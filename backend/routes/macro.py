@@ -10,7 +10,7 @@ from backend import auth
 from backend.cache import cached
 from backend.serialize import records
 from lib.config import get_fred_key
-from lib.macro import COUNTRIES, get_dashboard
+from lib.macro import COUNTRIES, get_calendar, get_dashboard
 from lib.rates import get_yield_curve
 
 router = APIRouter(prefix="/macro", tags=["macro"])
@@ -46,6 +46,25 @@ def indicators(country: str = "US",
     if country not in COUNTRIES:
         raise HTTPException(400, f"Unknown country '{country}'. Use one of: {COUNTRIES}")
     return _with_deadline(lambda: get_dashboard(country))
+
+
+@router.get("/calendar")
+@cached(ttl=3600)
+def calendar(country: str = "US",
+             _user: dict = Depends(auth.current_user)):
+    """Economic release calendar. 'Surprise' is actual-vs-prior (no free
+    consensus feed exists); next dates are cadence estimates."""
+    if not get_fred_key():
+        raise HTTPException(503, "No FRED_API_KEY configured on the backend.")
+    if country not in COUNTRIES:
+        raise HTTPException(400, f"Unknown country '{country}'. Use one of: {COUNTRIES}")
+    return {
+        "country": country,
+        "rows": _with_deadline(lambda: get_calendar(country)),
+        "note": ("Surprise = change vs the prior print (free data has no "
+                 "consensus estimates). Next-release dates are cadence "
+                 "estimates, not official schedules."),
+    }
 
 
 @router.get("/yield-curve")

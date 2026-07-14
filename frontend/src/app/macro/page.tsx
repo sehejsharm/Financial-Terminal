@@ -5,7 +5,7 @@ import { useCallback, useEffect, useState } from "react";
 import { DataAge } from "@/components/DataAge";
 import { MetricCard } from "@/components/MetricCard";
 import { Shell } from "@/components/Shell";
-import { api, type Indicator, type YieldCurve, type YieldPoint } from "@/lib/api";
+import { api, type CalendarRow, type Indicator, type YieldCurve, type YieldPoint } from "@/lib/api";
 import { fmtNum } from "@/lib/utils";
 
 const COUNTRY_LABELS: Record<string, { label: string; flag: string }> = {
@@ -87,6 +87,12 @@ export default function MacroPage() {
       .finally(() => setBusy(false));
   }, [country]);
   useEffect(() => { setInds(null); setIndsAt(null); loadInds(); }, [loadInds]);
+
+  const [cal, setCal] = useState<{ rows: CalendarRow[]; note: string } | null>(null);
+  useEffect(() => {
+    setCal(null);
+    api.macroCalendar(country).then(setCal).catch(() => setCal({ rows: [], note: "" }));
+  }, [country]);
 
   const pts = curve?.points ?? [];
   const inversion = pts.length >= 2 ? pts[0].yield > pts[pts.length - 1].yield : false;
@@ -189,6 +195,46 @@ export default function MacroPage() {
           <div className="panel-2 p-4 text-mut text-sm">
             {curve.note || "Not available for this market."}
           </div>
+        </>
+      )}
+
+      {cal && cal.rows.length > 0 && (
+        <>
+          <div className="heading mt-8 mb-2">
+            Release calendar — {COUNTRY_LABELS[country]?.label ?? country}
+          </div>
+          <div className="panel overflow-x-auto mb-2">
+            <table className="w-full text-xs">
+              <thead className="text-mut uppercase tracking-wider">
+                <tr className="border-b border-line">
+                  <th className="text-left px-3 py-2 font-medium">Indicator</th>
+                  <th className="text-right px-3 py-2 font-medium">Last</th>
+                  <th className="text-right px-3 py-2 font-medium">Prior</th>
+                  <th className="text-right px-3 py-2 font-medium">Surprise (vs prior)</th>
+                  <th className="text-right px-3 py-2 font-medium">Last release</th>
+                  <th className="text-right px-3 py-2 font-medium">Next (est.)</th>
+                </tr>
+              </thead>
+              <tbody>
+                {cal.rows.map((r) => (
+                  <tr key={r.name} className="border-b border-line/60 hover:bg-panel">
+                    <td className="px-3 py-2">
+                      {r.name}
+                      {r.stale && <span className="ml-2 text-[9px] px-1 py-0.5 rounded border border-amber/50 text-amber uppercase">Stale</span>}
+                    </td>
+                    <td className="px-3 py-2 num text-right">{r.last_value != null ? fmtNum(r.last_value, 2) : "—"}</td>
+                    <td className="px-3 py-2 num text-right">{r.prior != null ? fmtNum(r.prior, 2) : "—"}</td>
+                    <td className={`px-3 py-2 num text-right ${r.surprise_vs_prior == null ? "text-mut" : r.surprise_vs_prior >= 0 ? "text-green" : "text-red"}`}>
+                      {r.surprise_vs_prior != null ? `${r.surprise_vs_prior >= 0 ? "+" : ""}${fmtNum(r.surprise_vs_prior, 2)}` : "—"}
+                    </td>
+                    <td className="px-3 py-2 num text-right text-mut">{r.last_release ?? "—"}</td>
+                    <td className="px-3 py-2 num text-right">{r.next_release_est ?? "—"}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          <div className="text-[10.5px] text-mut">{cal.note}</div>
         </>
       )}
     </Shell>
