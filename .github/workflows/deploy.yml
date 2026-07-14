@@ -1,0 +1,54 @@
+# Auto-deploys the backend to the Oracle VM on every push to the deploy
+# branch — no manual SSH required after this is set up once.
+#
+# One-time setup (do this in the GitHub web UI, NOT in chat with Claude —
+# never paste a private key into a conversation):
+#   Repo -> Settings -> Secrets and variables -> Actions -> New repository secret
+#     SSH_HOST        = 137.23.53.32   (the Oracle VM's public IP)
+#     SSH_USER         = ubuntu
+#     SSH_PRIVATE_KEY  = contents of ~/.ssh/oracle_vm (the private key file,
+#                        NOT the .pub file — paste the whole thing incl.
+#                        the BEGIN/END lines)
+#
+# After that, every push to claude/stock-market-dashboard-2BBMA (or
+# whichever branch you set below) automatically SSHes into the VM, pulls,
+# and rebuilds the containers — same commands you were running by hand.
+name: deploy-backend
+
+on:
+  push:
+    branches: ["claude/stock-market-dashboard-2BBMA"]
+    paths:
+      - "backend/**"
+      - "lib/**"
+      - "deploy/**"
+      - "requirements*.txt"
+  workflow_dispatch: {}   # lets you trigger it manually from the Actions tab
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: SSH in and redeploy
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.SSH_HOST }}
+          username: ${{ secrets.SSH_USER }}
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          timeout: 60s
+          command_timeout: 15m
+          script: |
+            set -e
+            cd ~/Financial-Terminal
+            git fetch origin
+            git checkout claude/stock-market-dashboard-2BBMA
+            git reset --hard origin/claude/stock-market-dashboard-2BBMA
+            cd deploy
+            sudo docker compose up -d --build
+            sleep 10
+            sudo docker compose ps
+
+      - name: Verify health
+        run: |
+          sleep 20
+          curl -fsS --max-time 20 https://sehejmotherboard.duckdns.org/healthz
