@@ -18,10 +18,26 @@ export function humanNumber(n: number | null | undefined, prefix = ""): string {
   return `${sign}${prefix}${abs.toLocaleString(undefined, { maximumFractionDigits: 2 })}`;
 }
 
+/** Signed percent — ONLY for genuine change/delta values (price change,
+ *  indicator change). Level metrics (yield, ROE, margin) must use
+ *  formatPercent, which never fakes a "+" direction on a static level. */
 export function fmtPct(v: number | null | undefined, digits = 2): string {
   if (v === null || v === undefined || Number.isNaN(v)) return "—";
   const sign = v >= 0 ? "+" : "";
   return `${sign}${v.toFixed(digits)}%`;
+}
+
+/** Canonical unsigned percent formatter for LEVEL metrics.
+ *  `fraction: true` converts 0.51 -> "51.00%" (providers frequently store
+ *  percent-like fields as decimals — the off-by-100 class of bug). */
+export function formatPercent(
+  v: number | null | undefined,
+  opts: { fraction?: boolean; digits?: number } = {},
+): string {
+  if (v === null || v === undefined || Number.isNaN(v)) return "—";
+  const { fraction = false, digits = 2 } = opts;
+  const pct = fraction ? v * 100 : v;
+  return `${pct.toFixed(digits)}%`;
 }
 
 export function fmtNum(v: number | null | undefined, digits = 2): string {

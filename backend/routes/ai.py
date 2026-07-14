@@ -18,6 +18,17 @@ def _guard():
                             "GEMINI_API_KEY)")
 
 
+def _normalize_units(f: dict) -> dict:
+    """Convert provider quirk units before the fundamentals reach the LLM
+    prompt, so the narrative quotes the same canonical numbers the UI shows
+    (e.g. D/E as a 0.37x ratio, not yfinance's percent-scaled 36.65)."""
+    f = dict(f)
+    de = f.get("debt_to_equity")
+    if isinstance(de, (int, float)):
+        f["debt_to_equity"] = round(de / 100, 2)
+    return f
+
+
 @router.get("/provider")
 def provider(_user: dict = Depends(auth.current_user)):
     return {"available": ai_analyst.is_available(),
@@ -27,7 +38,7 @@ def provider(_user: dict = Depends(auth.current_user)):
 @router.post("/bull-bear")
 def bull_bear(body: AIRequest, _user: dict = Depends(auth.current_user)):
     _guard()
-    f = get_stock_fundamentals(body.ticker) or {}
+    f = _normalize_units(get_stock_fundamentals(body.ticker) or {})
     try:
         text = ai_analyst.bull_bear_case(body.ticker, f, None)
     except ai_analyst.AnalystError as e:
@@ -38,7 +49,7 @@ def bull_bear(body: AIRequest, _user: dict = Depends(auth.current_user)):
 @router.post("/deep-analysis")
 def deep(body: AIRequest, _user: dict = Depends(auth.current_user)):
     _guard()
-    f = get_stock_fundamentals(body.ticker) or {}
+    f = _normalize_units(get_stock_fundamentals(body.ticker) or {})
     try:
         text = ai_analyst.deep_analysis(body.ticker, f, None)
     except ai_analyst.AnalystError as e:

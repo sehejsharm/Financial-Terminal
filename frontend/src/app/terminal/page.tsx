@@ -22,7 +22,7 @@ import { ValueChainMap } from "@/components/ValueChainMap";
 import { Wacc } from "@/components/Wacc";
 import { api, type Quote, type Snapshot } from "@/lib/api";
 import { useLive } from "@/lib/useLive";
-import { curForTicker, fmtNum, fmtPct, humanNumber, inferCurrency } from "@/lib/utils";
+import { curForTicker, fmtNum, fmtPct, formatPercent, humanNumber, inferCurrency } from "@/lib/utils";
 
 const FUNCTIONS = [
   "Snapshot",
@@ -159,10 +159,15 @@ function TerminalInner() {
             />
           </div>
           <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-6">
-            <MetricCard label="Dividend yield" value={snap?.dividend_yield != null ? fmtPct(snap.dividend_yield as number) : "—"} />
-            <MetricCard label="ROE" value={snap?.roe != null ? fmtPct((snap.roe as number) * 100) : "—"} />
-            <MetricCard label="Profit margin" value={snap?.profit_margin != null ? fmtPct((snap.profit_margin as number) * 100) : "—"} />
-            <MetricCard label="Debt / Equity" value={fmtNum(snap?.debt_to_equity as number, 1)} />
+            {/* Level metrics: unsigned formatPercent — a "+" prefix falsely
+                reads as a day-over-day change on what is a static level. */}
+            <MetricCard label="Dividend yield" value={formatPercent(snap?.dividend_yield as number)} />
+            <MetricCard label="ROE" value={formatPercent(snap?.roe as number, { fraction: true })} />
+            <MetricCard label="Profit margin" value={formatPercent(snap?.profit_margin as number, { fraction: true })} />
+            {/* Canonical D/E form is a ratio with "x" (matches Debt Profile);
+                providers ship it percent-scaled (36.7 == 0.37x). */}
+            <MetricCard label="Debt / Equity"
+                        value={snap?.debt_to_equity != null ? `${fmtNum((snap.debt_to_equity as number) / 100, 2)}x` : "—"} />
           </div>
           <div className="mb-2 heading">1-Year Chart</div>
           <PriceChart data={candles} height={380} />

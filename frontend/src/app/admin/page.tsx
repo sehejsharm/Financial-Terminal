@@ -93,7 +93,7 @@ export default function AdminPage() {
                       <td className="px-3 py-2 text-txt">{usr.username}</td>
                       <td className="px-3 py-2 text-amber">{usr.role}</td>
                       <td className="px-3 py-2">{usr.active === false ? "—" : "✓"}</td>
-                      <td className="px-3 py-2 text-mut">{usr.created_at?.slice(0, 10) ?? ""}</td>
+                      <td className="px-3 py-2 text-mut">{usr.created_at ? usr.created_at.slice(0, 10) : "—"}</td>
                       <td className="px-3 py-2 text-right">
                         {usr.role !== "master_admin" && usr.active !== false && (
                           <button onClick={() => deactivate(usr.username)} className="text-mut hover:text-red" title="Deactivate">

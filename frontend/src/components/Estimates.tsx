@@ -4,7 +4,8 @@ import { useEffect, useState } from "react";
 
 import { MetricCard } from "@/components/MetricCard";
 import { api, type Estimates as Est } from "@/lib/api";
-import { fmtNum, humanNumber } from "@/lib/utils";
+import { looksPercentLabel, prettyLabel } from "@/lib/labels";
+import { fmtNum, formatPercent, humanNumber } from "@/lib/utils";
 
 /** Renders any record-of-records estimate block as a table. */
 function EstTable({ title, block, cur }: { title: string; block?: Record<string, Record<string, number | null>>; cur: string }) {
@@ -15,30 +16,38 @@ function EstTable({ title, block, cur }: { title: string; block?: Record<string,
   return (
     <div className="mb-6">
       <div className="heading mb-2">{title}</div>
-      <div className="panel overflow-auto">
+      <div className="panel overflow-x-auto">
         <table className="w-full text-xs">
           <thead className="text-mut uppercase tracking-wider">
             <tr className="border-b border-line">
               <th className="text-left px-3 py-2 font-medium">Metric</th>
               {cols.map((c) => (
-                <th key={c} className="text-right px-3 py-2 font-medium">{c}</th>
+                // Period codes ("0q", "+1y") and camelCase keys humanized.
+                <th key={c} className="text-right px-3 py-2 font-medium whitespace-nowrap">{prettyLabel(c)}</th>
               ))}
             </tr>
           </thead>
           <tbody>
-            {rows.map((rk) => (
-              <tr key={rk} className="border-b border-line/60 hover:bg-panel">
-                <td className="px-3 py-2 text-txt">{rk}</td>
-                {cols.map((c) => {
-                  const v = block[c]?.[rk];
-                  return (
-                    <td key={c} className="px-3 py-2 num text-right text-txt/90">
-                      {typeof v === "number" ? humanNumber(v) : "—"}
-                    </td>
-                  );
-                })}
-              </tr>
-            ))}
+            {rows.map((rk) => {
+              const pct = looksPercentLabel(rk) || looksPercentLabel(title);
+              return (
+                <tr key={rk} className="border-b border-line/60 hover:bg-panel">
+                  <td className="px-3 py-2 text-txt whitespace-nowrap">{prettyLabel(rk)}</td>
+                  {cols.map((c) => {
+                    const v = block[c]?.[rk];
+                    let display = "—";
+                    if (typeof v === "number") {
+                      display = pct && Math.abs(v) <= 1.5
+                        ? formatPercent(v, { fraction: true })
+                        : humanNumber(v);
+                    }
+                    return (
+                      <td key={c} className="px-3 py-2 num text-right text-txt/90">{display}</td>
+                    );
+                  })}
+                </tr>
+              );
+            })}
           </tbody>
         </table>
       </div>

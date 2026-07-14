@@ -199,9 +199,14 @@ def reset_password(username: str, password: str) -> tuple[bool, str]:
 
 def list_users() -> list[dict]:
     data = _load()
+    # Emit both keys: the API/frontend expects `created_at`; `created` kept
+    # for the Streamlit admin page. Empty string -> genuinely unknown (old
+    # user files seeded before the timestamp existed) — the UI shows "—".
     return [
         {"username": r["display"], "role": r["role"],
-         "active": r.get("active", True), "created": r.get("created", "")}
+         "active": r.get("active", True),
+         "created": r.get("created", ""),
+         "created_at": r.get("created") or None}
         for r in data["users"].values()
     ]
 

@@ -86,13 +86,32 @@ def movers(kind: str = "gainers", count: int = 8,
     return _movers(kind, count)
 
 
+_TAG_RE = None
+
+
+def _strip_html(s):
+    """Some feeds ship summaries as raw HTML documents
+    ("<body><p>STORY: ...</p></body>") — strip tags, unescape entities, and
+    collapse whitespace before anything reaches the UI."""
+    global _TAG_RE
+    if not s or not isinstance(s, str):
+        return s
+    import html as _html
+    import re as _re
+    if _TAG_RE is None:
+        _TAG_RE = _re.compile(r"<[^>]+>")
+    out = _TAG_RE.sub(" ", s)
+    out = _html.unescape(out)
+    return _re.sub(r"\s+", " ", out).strip()
+
+
 def _news_payload(items):
     return [
         {
-            "title": it.get("title"),
-            "publisher": it.get("publisher"),
+            "title": _strip_html(it.get("title")),
+            "publisher": _strip_html(it.get("publisher")),
             "link": it.get("link"),
-            "summary": it.get("summary"),
+            "summary": _strip_html(it.get("summary")),
             "published": it["published"].isoformat()
                          if it.get("published") else None,
         }
