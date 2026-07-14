@@ -58,12 +58,15 @@ export function Financials({ ticker, currency }: { ticker: string; currency: str
 
       {data && !busy && data.rows.length === 0 && (
         <div className="panel-2 p-4 text-mut text-sm">
-          Statements for <span className="text-amber">{ticker}</span> aren&apos;t available on
-          free data here. yfinance is IP-blocked on cloud hosts. <strong>US</strong> tickers
-          populate when <code className="text-amber">FMP_API_KEY</code> (Financial Modeling
-          Prep, free) is set on the backend; Indian (NSE) annual reports aren&apos;t exposed by
-          any free API. For full coverage use a paid feed or the Streamlit app.
+          {data.note || (
+            <>Statements for <span className="text-amber">{ticker}</span> aren&apos;t
+            available from the configured data providers.</>
+          )}
         </div>
+      )}
+
+      {data && !busy && data.rows.length > 0 && data.source && (
+        <div className="text-[10.5px] text-mut mb-2">Source: {data.source}</div>
       )}
 
       {data && !busy && data.rows.length > 0 && (

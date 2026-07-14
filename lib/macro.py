@@ -17,64 +17,86 @@ import streamlit as st
 
 from lib.config import get_fred_key
 
-# Display name -> (FRED series id, transform).
-# transform: "level" | "yoy" (year-over-year % change) | "pct" (already a %).
+# Display name -> {"ids": [FRED series ids, tried in order], unit, kind}.
+# kind: "level" | "yoy" (year-over-year % change).
+#
+# Several OECD "Main Economic Indicators" series FRED used to carry (the
+# *MEI / *IXOB / IRSTCI / IRLTLT families) stopped updating when OECD
+# retired MEI in 2024 — that's why non-US tabs went blank or froze (India's
+# repo-rate proxy last printed 2022). Each indicator now lists candidate
+# series tried in order, and every response carries as_of + a stale flag so
+# old data is BADGED, never silently presented as current.
 INDICATORS: dict[str, dict] = {
-    "Real GDP (QoQ SAAR)": {"id": "A191RL1Q225SBEA", "unit": "%", "kind": "level"},
-    "Unemployment rate": {"id": "UNRATE", "unit": "%", "kind": "level"},
-    "CPI (YoY)": {"id": "CPIAUCSL", "unit": "%", "kind": "yoy"},
-    "Core CPI (YoY)": {"id": "CPILFESL", "unit": "%", "kind": "yoy"},
-    "Fed funds rate": {"id": "FEDFUNDS", "unit": "%", "kind": "level"},
-    "10Y-2Y spread": {"id": "T10Y2Y", "unit": "%", "kind": "level"},
-    "Retail sales (YoY)": {"id": "RSAFS", "unit": "%", "kind": "yoy"},
-    "Industrial production (YoY)": {"id": "INDPRO", "unit": "%", "kind": "yoy"},
+    "Real GDP (QoQ SAAR)": {"ids": ["A191RL1Q225SBEA"], "unit": "%", "kind": "level"},
+    "Unemployment rate": {"ids": ["UNRATE"], "unit": "%", "kind": "level"},
+    "CPI (YoY)": {"ids": ["CPIAUCSL"], "unit": "%", "kind": "yoy"},
+    "Core CPI (YoY)": {"ids": ["CPILFESL"], "unit": "%", "kind": "yoy"},
+    "Fed funds rate": {"ids": ["FEDFUNDS"], "unit": "%", "kind": "level"},
+    "10Y-2Y spread": {"ids": ["T10Y2Y"], "unit": "%", "kind": "level"},
+    "Retail sales (YoY)": {"ids": ["RSAFS"], "unit": "%", "kind": "yoy"},
+    "Industrial production (YoY)": {"ids": ["INDPRO"], "unit": "%", "kind": "yoy"},
 }
 
-# FRED tracks many international series too. These cover the biggies users
-# ask about — IMF/World Bank could plug in for the rest later.
 COUNTRY_INDICATORS: dict[str, dict[str, dict]] = {
     "US": INDICATORS,
     "IN": {
-        "Real GDP growth": {"id": "NGDPRSAXDCINQ", "unit": "%", "kind": "yoy"},
-        "CPI (YoY)": {"id": "INDCPALTT01IXOBQ", "unit": "%", "kind": "yoy"},
-        "Industrial production (YoY)": {"id": "INDPROINMISMEI", "unit": "%", "kind": "yoy"},
-        "Policy repo rate": {"id": "INTDSRINM193N", "unit": "%", "kind": "level"},
-        "10Y govt yield": {"id": "IRLTLT01INM156N", "unit": "%", "kind": "level"},
-        "USD / INR": {"id": "DEXINUS", "unit": "INR", "kind": "level"},
-        "Unemployment rate": {"id": "LRUNTTTTINQ156S", "unit": "%", "kind": "level"},
+        "Real GDP growth": {"ids": ["NGDPRSAXDCINQ"], "unit": "%", "kind": "yoy"},
+        "CPI (YoY)": {"ids": ["INDCPIALLMINMEI", "INDCPALTT01IXOBM",
+                              "INDCPALTT01IXOBQ"], "unit": "%", "kind": "yoy"},
+        "Industrial production (YoY)": {"ids": ["INDPROINDMISMEI",
+                                                "INDPROINMISMEI"], "unit": "%", "kind": "yoy"},
+        "Interbank / policy rate": {"ids": ["IRSTCI01INM156N",
+                                            "INTDSRINM193N"], "unit": "%", "kind": "level"},
+        "10Y govt yield": {"ids": ["IRLTLT01INM156N"], "unit": "%", "kind": "level"},
+        "USD / INR": {"ids": ["DEXINUS"], "unit": "INR", "kind": "level"},
+        "Unemployment rate": {"ids": ["LRUNTTTTINQ156S"], "unit": "%", "kind": "level"},
     },
     "EU": {
-        "Real GDP growth": {"id": "CLVMNACSCAB1GQEA19", "unit": "%", "kind": "yoy"},
-        "HICP (YoY)": {"id": "CP0000EZ19M086NEST", "unit": "%", "kind": "yoy"},
-        "ECB deposit rate": {"id": "ECBDFR", "unit": "%", "kind": "level"},
-        "Unemployment rate": {"id": "LRHUTTTTEZM156S", "unit": "%", "kind": "level"},
-        "10Y bund yield": {"id": "IRLTLT01DEM156N", "unit": "%", "kind": "level"},
-        "Industrial production (YoY)": {"id": "EU28PRINTO01GYSAM", "unit": "%", "kind": "yoy"},
-        "EUR / USD": {"id": "DEXUSEU", "unit": "USD", "kind": "level"},
+        "Real GDP growth": {"ids": ["CLVMNACSCAB1GQEA19"], "unit": "%", "kind": "yoy"},
+        "HICP (YoY)": {"ids": ["CP0000EZ19M086NEST"], "unit": "%", "kind": "yoy"},
+        "ECB deposit rate": {"ids": ["ECBDFR"], "unit": "%", "kind": "level"},
+        "Unemployment rate": {"ids": ["LRHUTTTTEZM156S"], "unit": "%", "kind": "level"},
+        "10Y bund yield": {"ids": ["IRLTLT01DEM156N"], "unit": "%", "kind": "level"},
+        "Industrial production (YoY)": {"ids": ["EA19PRINTO01GYSAM",
+                                                "EU28PRINTO01GYSAM"], "unit": "%", "kind": "yoy"},
+        "EUR / USD": {"ids": ["DEXUSEU"], "unit": "USD", "kind": "level"},
     },
     "UK": {
-        "Real GDP growth": {"id": "NGDPRSAXDCGBQ", "unit": "%", "kind": "yoy"},
-        "CPI (YoY)": {"id": "GBRCPIALLMINMEI", "unit": "%", "kind": "yoy"},
-        "BoE bank rate": {"id": "IUDSOIA", "unit": "%", "kind": "level"},
-        "Unemployment rate": {"id": "LRUN64TTGBM156S", "unit": "%", "kind": "level"},
-        "10Y gilt yield": {"id": "IRLTLT01GBM156N", "unit": "%", "kind": "level"},
-        "GBP / USD": {"id": "DEXUSUK", "unit": "USD", "kind": "level"},
+        "Real GDP growth": {"ids": ["NGDPRSAXDCGBQ"], "unit": "%", "kind": "yoy"},
+        "CPI (YoY)": {"ids": ["GBRCPIALLMINMEI", "CPALTT01GBM659N"], "unit": "%", "kind": "yoy"},
+        "BoE bank rate / SONIA": {"ids": ["IUDSOIA", "BOERUKM"], "unit": "%", "kind": "level"},
+        "Unemployment rate": {"ids": ["LRUN64TTGBM156S"], "unit": "%", "kind": "level"},
+        "10Y gilt yield": {"ids": ["IRLTLT01GBM156N"], "unit": "%", "kind": "level"},
+        "GBP / USD": {"ids": ["DEXUSUK"], "unit": "USD", "kind": "level"},
     },
     "JP": {
-        "Real GDP growth": {"id": "JPNRGDPEXP", "unit": "%", "kind": "yoy"},
-        "CPI (YoY)": {"id": "JPNCPIALLMINMEI", "unit": "%", "kind": "yoy"},
-        "BoJ policy rate": {"id": "IRSTCI01JPM156N", "unit": "%", "kind": "level"},
-        "Unemployment rate": {"id": "LRUNTTTTJPM156S", "unit": "%", "kind": "level"},
-        "10Y JGB yield": {"id": "IRLTLT01JPM156N", "unit": "%", "kind": "level"},
-        "USD / JPY": {"id": "DEXJPUS", "unit": "JPY", "kind": "level"},
+        "Real GDP growth": {"ids": ["JPNRGDPEXP"], "unit": "%", "kind": "yoy"},
+        "CPI (YoY)": {"ids": ["JPNCPIALLMINMEI", "CPALTT01JPM659N"], "unit": "%", "kind": "yoy"},
+        "BoJ policy rate": {"ids": ["IRSTCI01JPM156N"], "unit": "%", "kind": "level"},
+        "Unemployment rate": {"ids": ["LRUNTTTTJPM156S"], "unit": "%", "kind": "level"},
+        "10Y JGB yield": {"ids": ["IRLTLT01JPM156N"], "unit": "%", "kind": "level"},
+        "USD / JPY": {"ids": ["DEXJPUS"], "unit": "JPY", "kind": "level"},
     },
     "CN": {
-        "Real GDP growth": {"id": "MKTGDPCNA646NWDB", "unit": "%", "kind": "yoy"},
-        "CPI (YoY)": {"id": "CHNCPIALLMINMEI", "unit": "%", "kind": "yoy"},
-        "Industrial production (YoY)": {"id": "CHNPROINDMISMEI", "unit": "%", "kind": "yoy"},
-        "USD / CNY": {"id": "DEXCHUS", "unit": "CNY", "kind": "level"},
+        "Real GDP growth": {"ids": ["MKTGDPCNA646NWDB"], "unit": "%", "kind": "yoy"},
+        "CPI (YoY)": {"ids": ["CHNCPIALLMINMEI", "CPALTT01CNM659N"], "unit": "%", "kind": "yoy"},
+        "Industrial production (YoY)": {"ids": ["CHNPROINDMISMEI"], "unit": "%", "kind": "yoy"},
+        "USD / CNY": {"ids": ["DEXCHUS"], "unit": "CNY", "kind": "level"},
     },
 }
+
+# Staleness thresholds (days since last observation) by indicator flavor.
+# Beyond these, the UI shows a STALE badge instead of presenting old data
+# as current.
+def _max_age_days(name: str, unit: str) -> int:
+    n = name.lower()
+    if "gdp" in n:
+        return 200          # quarterly, long publication lag
+    if "/" in name and unit != "%":
+        return 10           # FX — daily series
+    if "spread" in n or "rate" in n or "yield" in n or "sonia" in n:
+        return 45
+    return 75               # CPI / IP / retail / unemployment (monthly)
 
 COUNTRIES = list(COUNTRY_INDICATORS.keys())
 
@@ -116,21 +138,28 @@ def get_series(series_id: str, observations: int = 400) -> pd.Series:
 
 @st.cache_data(ttl=3600, show_spinner=False)
 def get_indicator(name: str, country: str = "US") -> dict:
-    """Return {name, value, prior, change, date, unit} for one indicator."""
+    """Return {name, value, prior, change, date, unit, stale} for one
+    indicator. Tries each candidate FRED series id in order."""
     cfg = COUNTRY_INDICATORS.get(country, INDICATORS).get(name)
     if not cfg:
         return {}
-    s = get_series(cfg["id"])
+    empty = {"name": name, "value": None, "prior": None, "change": None,
+             "date": None, "unit": cfg["unit"], "stale": False}
+
+    ids = cfg.get("ids") or ([cfg["id"]] if cfg.get("id") else [])
+    s = pd.Series(dtype=float)
+    for sid in ids:
+        s = get_series(sid)
+        if not s.empty:
+            break
     if s.empty:
-        return {"name": name, "value": None, "prior": None, "change": None,
-                "date": None, "unit": cfg["unit"]}
+        return empty
 
     if cfg["kind"] == "yoy":
         yoy = s.pct_change(12) * 100
         yoy = yoy.dropna()
         if yoy.empty:
-            return {"name": name, "value": None, "prior": None, "change": None,
-                    "date": None, "unit": cfg["unit"]}
+            return empty
         value = float(yoy.iloc[-1])
         prior = float(yoy.iloc[-2]) if len(yoy) >= 2 else None
         date = yoy.index[-1]
@@ -140,9 +169,12 @@ def get_indicator(name: str, country: str = "US") -> dict:
         date = s.index[-1]
 
     change = (value - prior) if prior is not None else None
+    ts = pd.Timestamp(date)
+    age_days = (pd.Timestamp.now() - ts).days
     return {
         "name": name, "value": value, "prior": prior, "change": change,
-        "date": pd.Timestamp(date).date().isoformat(), "unit": cfg["unit"],
+        "date": ts.date().isoformat(), "unit": cfg["unit"],
+        "stale": age_days > _max_age_days(name, cfg["unit"]),
     }
 
 

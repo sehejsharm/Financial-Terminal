@@ -360,6 +360,10 @@ def get_stock_fundamentals(ticker: str) -> dict:
         "price": g("currentPrice", "regularMarketPrice"),
         "prev_close": g("previousClose", "regularMarketPreviousClose"),
         "currency": g("currency") or "USD",
+        # Yahoo reports statement figures (revenue/ebitda) in financialCurrency,
+        # which can differ from the trading currency (e.g. INFY trades in INR
+        # but reports financials in USD) — ratios mixing the two are garbage.
+        "financial_currency": g("financialCurrency"),
         "market_cap": g("marketCap"),
         "trailing_pe": g("trailingPE"),
         "forward_pe": g("forwardPE"),

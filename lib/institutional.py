@@ -6,10 +6,14 @@ are approximated or generated descriptively rather than sourced from a feed.
 """
 from __future__ import annotations
 
+import logging
+
 import pandas as pd
 import streamlit as st
 
 from lib.market_data import get_stock_fundamentals, make_ticker
+
+log = logging.getLogger("motherboard.comps")
 
 
 @st.cache_data(ttl=3600, show_spinner=False)
@@ -87,14 +91,27 @@ def wacc(equity_value: float, debt_value: float, cost_equity_pct: float,
     return {"wacc": val, "we": we * 100, "wd": wd * 100}
 
 
+def _mixed_currency(f: dict) -> bool:
+    """True when statement figures (revenue/ebitda) are reported in a different
+    currency than the market cap — e.g. INFY.NS: mcap in INR, financials in
+    USD. Any multiple dividing across the mismatch is off by the FX rate
+    (INFY P/S "221", EV/EBITDA "1010"), so we null those instead of shipping
+    nonsense."""
+    fin = f.get("financial_currency")
+    cur = f.get("currency")
+    return bool(fin and cur and fin != cur)
+
+
 def _sane_ps(f: dict) -> float | None:
     """P/S with a sanity cross-check.
 
     yfinance's priceToSalesTrailing12Months is unreliable for some NSE names
-    (e.g. INFY.NS reported 221 — apparently ratioed against a partial-period
-    or unconsolidated revenue figure). When we can compute market_cap /
-    trailing revenue ourselves, prefer the reported ratio only if it agrees
-    within 3x; otherwise use the computed value."""
+    (e.g. INFY.NS reported 221 — mcap in INR ratioed against USD revenue).
+    When we can compute market_cap / trailing revenue ourselves in matching
+    units, prefer the reported ratio only if it agrees within 3x; otherwise
+    use the computed value."""
+    if _mixed_currency(f):
+        return None
     reported = f.get("price_to_sales")
     mcap, rev = f.get("market_cap"), f.get("revenue")
     computed = (mcap / rev) if (mcap and rev) else None
@@ -109,10 +126,14 @@ def _comps_row(t: str) -> dict | None:
     if not f:
         return None
     ev_ebitda = None
-    if f.get("market_cap") and f.get("ebitda"):
+    if f.get("market_cap") and f.get("ebitda") and not _mixed_currency(f):
         ev = f["market_cap"]  # market cap as a simple EV proxy (no debt data layer)
         ev_ebitda = ev / f["ebitda"] if f["ebitda"] else None
     ps = _sane_ps(f)
+    if _mixed_currency(f):
+        log.warning("comps: %s reports financials in %s but trades in %s — "
+                    "P/S and EV/EBITDA suppressed (mixed units)",
+                    t, f.get("financial_currency"), f.get("currency"))
     return {
         "Ticker": t.replace(".NS", ""),
         "Name": f.get("name", t),
@@ -123,6 +144,29 @@ def _comps_row(t: str) -> dict | None:
         "EV/EBITDA*": round(ev_ebitda, 1) if ev_ebitda else None,
         "ROE%": round(f["roe"] * 100, 1) if f.get("roe") is not None else None,
     }
+
+
+_CLAMP_COLS = ("P/E", "Fwd P/E", "P/B", "P/S", "EV/EBITDA*")
+
+
+def _clamp_outliers(rows: list[dict]) -> list[dict]:
+    """Null any multiple >5x the peer median and log it — bad provider data
+    should surface as a gap plus a warning, not ship silently as a fact."""
+    import statistics
+    for col in _CLAMP_COLS:
+        vals = [r[col] for r in rows if isinstance(r.get(col), (int, float)) and r[col] > 0]
+        if len(vals) < 3:
+            continue
+        med = statistics.median(vals)
+        if med <= 0:
+            continue
+        for r in rows:
+            v = r.get(col)
+            if isinstance(v, (int, float)) and v > 5 * med:
+                log.warning("comps: %s %s=%.2f is >5x peer median %.2f — suppressed",
+                            r.get("Ticker"), col, v, med)
+                r[col] = None
+    return rows
 
 
 def comps_matrix(tickers: list[str]) -> pd.DataFrame:
@@ -144,4 +188,4 @@ def comps_matrix(tickers: list[str]) -> pd.DataFrame:
                 r = None
             if r:
                 rows.append(r)
-    return pd.DataFrame(rows)
+    return pd.DataFrame(_clamp_outliers(rows))

@@ -163,6 +163,10 @@ export type Statement = {
   ticker: string; kind: string; quarterly?: boolean;
   columns: string[];
   rows: Array<Record<string, number | string | null> & { line: string }>;
+  /** Which provider produced the data (e.g. "FMP", "yfinance"). */
+  source?: string | null;
+  /** Backend explanation when rows are empty. */
+  note?: string | null;
 };
 export type Estimates = {
   price_targets?: Record<string, number | null>;
@@ -213,8 +217,17 @@ export type NewsItem = {
 export type Indicator = {
   name: string; value: number | null; prior: number | null;
   change: number | null; date: string | null; unit: string;
+  /** True when the last observation is older than a sane threshold for the
+   *  indicator's cadence — render a STALE badge, don't present as current. */
+  stale?: boolean;
 };
 export type YieldPoint = { maturity: string; years: number; yield: number };
+export type YieldCurve = {
+  country: string;
+  points: YieldPoint[];
+  /** Set when no curve exists for this market (explicit empty state). */
+  note?: string | null;
+};
 export type DealRow = Record<string, number | string | null>;
 export type AdminUser = { username: string; role: string; active?: boolean; created_at?: string };
 export type AuditEvent = {
@@ -284,8 +297,8 @@ export const api = {
   macroCountries: () => apiFetch<string[]>("/api/v1/macro/countries"),
   macroIndicators: (country = "US", opts?: FetchOpts) =>
     apiFetchMeta<Indicator[]>(`/api/v1/macro/indicators?country=${encodeURIComponent(country)}`, {}, opts),
-  yieldCurve: (opts?: FetchOpts) =>
-    apiFetchMeta<YieldPoint[]>("/api/v1/macro/yield-curve", {}, opts),
+  yieldCurve: (country = "US", opts?: FetchOpts) =>
+    apiFetchMeta<YieldCurve>(`/api/v1/macro/yield-curve?country=${encodeURIComponent(country)}`, {}, opts),
 
   // deals
   bulkDeals: () => apiFetch<DealRow[]>("/api/v1/deals/bulk"),

@@ -5,7 +5,7 @@ import { useCallback, useEffect, useState } from "react";
 import { DataAge } from "@/components/DataAge";
 import { MetricCard } from "@/components/MetricCard";
 import { Shell } from "@/components/Shell";
-import { api, type Indicator, type YieldPoint } from "@/lib/api";
+import { api, type Indicator, type YieldCurve, type YieldPoint } from "@/lib/api";
 import { fmtNum } from "@/lib/utils";
 
 const COUNTRY_LABELS: Record<string, { label: string; flag: string }> = {
@@ -63,7 +63,7 @@ export default function MacroPage() {
   const [country, setCountry] = useState("US");
   const [inds, setInds] = useState<Indicator[] | null>(null);
   const [indsAt, setIndsAt] = useState<number | null>(null);
-  const [curve, setCurve] = useState<YieldPoint[] | null>(null);
+  const [curve, setCurve] = useState<YieldCurve | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
@@ -71,10 +71,13 @@ export default function MacroPage() {
     api.macroCountries().then(setCountries).catch(() => {});
   }, []);
 
+  // Curve follows the selected country — no more US data under foreign labels.
   const loadCurve = useCallback((fresh = false) => {
-    api.yieldCurve({ fresh }).then((m) => setCurve(m.data)).catch(() => setCurve([]));
-  }, []);
-  useEffect(() => { loadCurve(); }, [loadCurve]);
+    api.yieldCurve(country, { fresh })
+      .then((m) => setCurve(m.data))
+      .catch(() => setCurve({ country, points: [], note: "Yield curve unavailable." }));
+  }, [country]);
+  useEffect(() => { setCurve(null); loadCurve(); }, [loadCurve]);
 
   const loadInds = useCallback((fresh = false) => {
     setBusy(true); setErr(null);
@@ -85,11 +88,11 @@ export default function MacroPage() {
   }, [country]);
   useEffect(() => { setInds(null); setIndsAt(null); loadInds(); }, [loadInds]);
 
-  const inversion = curve && curve.length >= 2 ? curve[0].yield > curve[curve.length - 1].yield : false;
+  const pts = curve?.points ?? [];
+  const inversion = pts.length >= 2 ? pts[0].yield > pts[pts.length - 1].yield : false;
   const spread10y2y = (() => {
-    if (!curve) return null;
-    const y2 = curve.find((p) => p.maturity === "2Y")?.yield;
-    const y10 = curve.find((p) => p.maturity === "10Y")?.yield;
+    const y2 = pts.find((p) => p.maturity === "2Y")?.yield;
+    const y10 = pts.find((p) => p.maturity === "10Y")?.yield;
     return y2 != null && y10 != null ? y10 - y2 : null;
   })();
 
@@ -127,15 +130,23 @@ export default function MacroPage() {
           <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3 mb-8">
             {inds.map((ind) => (
               <div key={ind.name} className="panel-2 p-3.5 flex flex-col gap-1">
-                <div className="label-xs">{ind.name}</div>
-                <div className="num text-xl text-white">
+                <div className="flex items-center gap-2">
+                  <div className="label-xs flex-1">{ind.name}</div>
+                  {ind.stale && (
+                    <span className="text-[9px] px-1.5 py-0.5 rounded border border-amber/50 text-amber uppercase tracking-wider"
+                          title={`Last observation ${ind.date ?? "unknown"} — older than expected for this indicator's release cadence.`}>
+                      Stale
+                    </span>
+                  )}
+                </div>
+                <div className={`num text-xl ${ind.stale ? "text-mut" : "text-white"}`}>
                   {ind.value != null ? `${fmtNum(ind.value, 2)}${ind.unit === "%" ? "%" : ""}` : "—"}
                 </div>
                 <div className="flex items-center justify-between text-[11px]">
                   <span className={ind.change == null ? "text-mut" : ind.change >= 0 ? "text-green" : "text-red"}>
                     {ind.change != null ? `${ind.change >= 0 ? "▲" : "▼"} ${Math.abs(ind.change).toFixed(2)}` : "—"}
                   </span>
-                  <span className="text-mut">{ind.date ?? ""}</span>
+                  <span className="text-mut">as of {ind.date ?? "—"}</span>
                 </div>
                 <div className="text-[10px] text-mut">prior {ind.prior != null ? fmtNum(ind.prior, 2) : "—"} · {ind.unit}</div>
               </div>
@@ -144,10 +155,13 @@ export default function MacroPage() {
         </>
       )}
 
-      {curve && curve.length > 0 && (
+      {curve && pts.length > 0 && (
         <>
           <div className="flex items-center justify-between mb-2">
-            <div className="heading">US Treasury yield curve</div>
+            <div className="heading">
+              {country === "US" ? "US Treasury yield curve"
+                : `${COUNTRY_LABELS[country]?.label ?? country} sovereign yield curve`}
+            </div>
             <div className="flex gap-3 text-[11px]">
               {spread10y2y != null && (
                 <span className={spread10y2y < 0 ? "text-red" : "text-mut"}>
@@ -159,10 +173,21 @@ export default function MacroPage() {
               </span>
             </div>
           </div>
-          <div className="panel-2 p-4 mb-4"><YieldCurveChart points={curve} /></div>
+          <div className="panel-2 p-4 mb-4"><YieldCurveChart points={pts} /></div>
           <div className="text-[10.5px] text-mut">
             An inverted curve (short rates above long rates) has historically preceded recessions.
             10Y–2Y is the spread most often cited as a signal.
+          </div>
+        </>
+      )}
+
+      {curve && pts.length === 0 && (
+        <>
+          <div className="heading mb-2">
+            {COUNTRY_LABELS[country]?.label ?? country} sovereign yield curve
+          </div>
+          <div className="panel-2 p-4 text-mut text-sm">
+            {curve.note || "Not available for this market."}
           </div>
         </>
       )}

@@ -98,7 +98,11 @@ export default function ScreenersPage() {
         {SCREENS.map((s, i) => (
           <button
             key={s.label}
-            onClick={() => setActive(i)}
+            // Run immediately on preset click. Previously this only set the
+            // active tab and kept the PREVIOUS preset's rows on screen, which
+            // made every preset look like it returned the identical dataset.
+            onClick={() => run(i)}
+            disabled={busy}
             className={`btn ${active === i ? "btn-primary" : "btn-ghost"}`}
           >
             {s.label}

@@ -31,6 +31,16 @@ SCREEN_UNIVERSE = [
     "BALKRISIND.NS", "ABBOTINDIA.NS", "COFORGE.NS", "PERSISTENT.NS", "MPHASIS.NS",
     "POLYCAB.NS", "ASTRAL.NS", "DEEPAKNTR.NS", "NAVINFLUOR.NS", "LALPATHLAB.NS",
     "AARTIIND.NS", "JUBLFOOD.NS", "RELAXO.NS", "VINATIORGA.NS", "CDSL.NS",
+    # Genuine mid/small caps so band-limited presets ("Hidden Gems",
+    # ₹500–5000 cr) have candidates — the original universe was almost
+    # entirely large-cap, so those presets could never match anything.
+    "KPITTECH.NS", "TANLA.NS", "ROUTE.NS", "MAPMYINDIA.NS", "LATENTVIEW.NS",
+    "HAPPSTMNDS.NS", "INTELLECT.NS", "BIRLASOFT.NS", "ZENSARTECH.NS",
+    "SONATSOFTW.NS", "MASTEK.NS", "NEWGEN.NS", "RATEGAIN.NS", "TEJASNET.NS",
+    "VGUARD.NS", "POLYMED.NS", "FINEORG.NS", "CLEAN.NS", "SUPRAJIT.NS",
+    "CERA.NS", "VIPIND.NS", "CAMPUS.NS", "SAPPHIRE.NS", "DEVYANI.NS",
+    "WESTLIFE.NS", "GOCOLORS.NS", "ETHOSLTD.NS", "JYOTHYLAB.NS", "EMAMILTD.NS",
+    "GRINDWELL.NS",
 ]
 
 # Metrics available per the filter UI: (label, key, unit).
@@ -40,7 +50,7 @@ FILTER_METRICS = [
     ("Sales growth (%)", "sales_growth", "%"),
     ("PEG ratio", "peg", ""),
     ("Debt / Equity", "de", ""),
-    ("ROCE/ROE (%)", "roce", "%"),
+    ("ROCE (%)", "roce", "%"),
     ("Promoter/insider holding (%)", "promoter", "%"),
     ("P/E", "pe", ""),
     ("ROE (%)", "roe", "%"),
@@ -72,9 +82,12 @@ def _build_metrics(ticker: str, f: dict | None) -> dict | None:
     mcap_cr = f["market_cap"] / 1e7  # INR -> crore
     eps_g = (f.get("earnings_growth") or 0) * 100 if f.get("earnings_growth") is not None else None
     sales_g = (f.get("revenue_growth") or 0) * 100 if f.get("revenue_growth") is not None else None
+    # ROCE only when a provider actually supplies it (FMP key-metrics). The
+    # old ROE fallback made the ROCE column an exact ROE duplicate for every
+    # row — worse than showing "—", since they differ materially (banks vs
+    # manufacturers) and screens filtered on the wrong metric.
     roce = f.get("roce")
-    roce = roce * 100 if roce is not None else (
-        (f.get("roe") or 0) * 100 if f.get("roe") is not None else None)
+    roce = roce * 100 if roce is not None else None
     roe = (f.get("roe") or 0) * 100 if f.get("roe") is not None else None
     de = f.get("debt_to_equity")
     de = de / 100 if de is not None else None  # percentage -> ratio

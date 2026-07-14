@@ -50,7 +50,23 @@ def indicators(country: str = "US",
 
 @router.get("/yield-curve")
 @cached(ttl=3600)
-def yield_curve(_user: dict = Depends(auth.current_user)):
+def yield_curve(country: str = "US",
+                _user: dict = Depends(auth.current_user)):
+    """Country-aware sovereign yield curve.
+
+    Only the US has a full free constant-maturity curve (FRED DGS*). Other
+    markets return an explicit empty state — never the US curve silently
+    substituted under a foreign label."""
     if not get_fred_key():
         raise HTTPException(503, "No FRED_API_KEY configured on the backend.")
-    return records(_with_deadline(get_yield_curve))
+    if country not in COUNTRIES:
+        raise HTTPException(400, f"Unknown country '{country}'. Use one of: {COUNTRIES}")
+    if country == "US":
+        pts = records(_with_deadline(get_yield_curve))
+        return {"country": country, "points": pts, "note": None}
+    return {
+        "country": country, "points": [],
+        "note": (f"A sovereign yield curve for {country} isn't available from "
+                 f"the free data sources wired in yet (FRED only carries the "
+                 f"full constant-maturity curve for US Treasuries)."),
+    }

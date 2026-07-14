@@ -478,7 +478,9 @@ def fmp_snapshot(symbol: str) -> dict | None:
         if dy is not None:
             out["dividend_yield"] = dy * 100      # percent
 
-    # ROE is exposed via key-metrics-ttm (not ratios-ttm) on FMP's stable API.
+    # ROE/ROCE are exposed via key-metrics-ttm (not ratios-ttm) on FMP's
+    # stable API. ROCE here is FMP's real Return on Capital Employed — never
+    # alias ROE into it (they differ materially, esp. banks vs manufacturers).
     km = _fmp_get("key-metrics-ttm", {"symbol": symbol})
     if isinstance(km, list) and km:
         km = km[0]
@@ -486,6 +488,9 @@ def fmp_snapshot(symbol: str) -> dict | None:
         roe = _pick(km, ["returnOnEquityTTM"])
         if roe is not None:
             out["roe"] = roe                      # fraction; frontend x100
+        roce = _pick(km, ["returnOnCapitalEmployedTTM"])
+        if roce is not None:
+            out["roce"] = roce                    # fraction; consumers x100
 
     clean = {k: v for k, v in out.items() if v is not None}
     return clean or None

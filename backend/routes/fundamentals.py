@@ -37,11 +37,12 @@ router = APIRouter(prefix="/fundamentals", tags=["fundamentals"])
 _KINDS = {"income": INCOME_ROWS, "balance": BALANCE_ROWS, "cashflow": CASHFLOW_ROWS}
 
 
-_UNAVAIL_NOTE = ("Financial statements are unavailable for this ticker on "
-                 "free data here. yfinance is IP-blocked on cloud hosts and "
-                 "Twelve Data's free tier excludes fundamentals. US tickers "
-                 "populate when FMP_API_KEY is set (Financial Modeling Prep, "
-                 "free); Indian (NSE) statements aren't on free APIs.")
+_UNAVAIL_NOTE = ("Financial statements are unavailable for this ticker from "
+                 "the configured providers (FMP first, then yfinance). "
+                 "FMP's free tier covers US listings; Indian (NSE) statements "
+                 "aren't exposed by any free statements API. If FMP_API_KEY "
+                 "isn't set on the backend, US coverage is limited to what "
+                 "yfinance allows from this host.")
 
 
 def _df_colmajor(df: pd.DataFrame) -> dict:
@@ -53,24 +54,29 @@ def _df_colmajor(df: pd.DataFrame) -> dict:
 
 
 @router.get("/{ticker}/statement/{kind}")
-@cached(ttl=3600)
+@cached(ttl=21600)
 def statement(ticker: str, kind: str, quarterly: bool = False,
               _user: dict = Depends(auth.current_user)):
+    """Statements: FMP first (deterministic REST API, works on cloud IPs),
+    yfinance scrape as fallback. Response carries `source` so the UI can say
+    where the numbers came from, and `note` explains any empty result."""
     if kind not in _KINDS:
         raise HTTPException(400, "kind must be one of income|balance|cashflow")
     empty = {"ticker": ticker, "kind": kind, "rows": [], "columns": [],
-             "note": _UNAVAIL_NOTE}
+             "source": None, "note": _UNAVAIL_NOTE}
+
+    if providers.has_fmp():
+        fmp = providers.fmp_statement(ticker, kind, quarterly=quarterly)
+        if fmp and fmp.get("rows"):
+            return {"ticker": ticker, "kind": kind, "quarterly": quarterly,
+                    "columns": fmp["columns"], "rows": fmp["rows"],
+                    "source": "FMP"}
+
     try:
         df = select_rows(get_statement(ticker, kind, quarterly), _KINDS[kind])
     except Exception:
         df = None
     if df is None or getattr(df, "empty", True):
-        # yfinance blocked / empty -> try FMP (free, US coverage).
-        fmp = (providers.fmp_statement(ticker, kind, quarterly=quarterly)
-               if providers.has_fmp() else None)
-        if fmp and fmp.get("rows"):
-            return {"ticker": ticker, "kind": kind, "quarterly": quarterly,
-                    "columns": fmp["columns"], "rows": fmp["rows"]}
         return empty
     try:
         rows = [{"line": str(idx),
@@ -82,6 +88,7 @@ def statement(ticker: str, kind: str, quarterly: bool = False,
             "ticker": ticker, "kind": kind, "quarterly": quarterly,
             "columns": [str(c) for c in df.columns],
             "rows": rows,
+            "source": "yfinance",
         }
     except Exception:
         return empty
