@@ -5,6 +5,7 @@ import { Suspense, useCallback, useEffect, useState } from "react";
 
 import { AIPanel } from "@/components/AIPanel";
 import { DataAge } from "@/components/DataAge";
+import { ErrorBoundary } from "@/components/ErrorBoundary";
 import { CapitalStructureView } from "@/components/CapitalStructure";
 import { Comparables } from "@/components/Comparables";
 import { DebtProfile } from "@/components/DebtProfile";
@@ -147,6 +148,9 @@ function TerminalInner() {
       {loading && <div className="text-mut text-xs">Loading…</div>}
       {err && !loading && <div className="text-red text-sm">{err}</div>}
 
+      {/* One failing widget must not take down the whole terminal —
+          boundary resets when the function or ticker changes. */}
+      <ErrorBoundary label={fn} resetKey={`${fn}:${ticker}`}>
       {!loading && !err && fn === "Snapshot" && (
         <>
           <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-5">
@@ -199,6 +203,7 @@ function TerminalInner() {
       {!loading && !err && fn === "Options & Greeks" && <OptionsChain ticker={ticker} />}
       {!loading && !err && fn === "AI deep-dive" && <AIPanel ticker={ticker} />}
       {!loading && !err && fn === "Recent news" && <News ticker={ticker} />}
+      </ErrorBoundary>
     </Shell>
   );
 }

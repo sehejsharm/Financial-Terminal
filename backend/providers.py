@@ -12,6 +12,7 @@ https://twelvedata.com — set TWELVE_DATA_API_KEY in your env.
 from __future__ import annotations
 
 import os
+import time
 from concurrent.futures import ThreadPoolExecutor
 
 import requests
@@ -347,21 +348,31 @@ def has_fmp() -> bool:
     return _FMP_KEY is not None
 
 
-def _fmp_get(path: str, params: dict):
+def _fmp_get(path: str, params: dict, attempts: int = 3):
+    """FMP GET with short backoff on transient failures (5xx / network).
+
+    4xx (bad symbol, quota) is NOT retried — retrying those only burns the
+    250/day budget faster. Twelve Data deliberately has no retry layer: its
+    free tier is 8 req/min, so retrying a 429 just wastes credits."""
     if not _FMP_KEY:
         return None
-    try:
-        p = dict(params)
-        p["apikey"] = _FMP_KEY
-        r = _TD_SESSION.get(f"{_FMP_BASE}/{path}", params=p, timeout=10)
-        if r.status_code != 200:
-            return None
-        body = r.json()
-        if isinstance(body, dict) and (body.get("Error Message") or body.get("error")):
-            return None
-        return body
-    except Exception:
-        return None
+    p = dict(params)
+    p["apikey"] = _FMP_KEY
+    for attempt in range(attempts):
+        try:
+            r = _TD_SESSION.get(f"{_FMP_BASE}/{path}", params=p, timeout=10)
+            if r.status_code >= 500:
+                raise RuntimeError(f"FMP {r.status_code}")
+            if r.status_code != 200:
+                return None
+            body = r.json()
+            if isinstance(body, dict) and (body.get("Error Message") or body.get("error")):
+                return None
+            return body
+        except Exception:
+            if attempt < attempts - 1:
+                time.sleep(0.4 * (attempt + 1))
+    return None
 
 
 def _pick(d: dict, keys: list[str]):

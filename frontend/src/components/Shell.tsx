@@ -102,7 +102,10 @@ export function Shell({ children }: { children: React.ReactNode }) {
         </div>
       </aside>
 
-      <div className="flex flex-col">
+      {/* min-w-0: grid children default to min-width auto and refuse to
+          shrink, so wide tables clipped past the viewport at 1080-1280px
+          instead of scrolling inside their own panels. */}
+      <div className="flex flex-col min-w-0">
         {/* Top bar */}
         <header className="border-b border-line bg-bg/80 backdrop-blur sticky top-0 z-30">
           <div className="flex items-center gap-3 px-5 py-2.5">
@@ -127,7 +130,7 @@ export function Shell({ children }: { children: React.ReactNode }) {
           </div>
         </header>
 
-        <main className="p-5 animate-in">{me ? children : null}</main>
+        <main className="p-5 animate-in min-w-0 max-w-full overflow-x-hidden">{me ? children : null}</main>
       </div>
 
       <CommandPalette open={paletteOpen} onOpenChange={setPaletteOpen} />

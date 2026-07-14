@@ -33,13 +33,19 @@ export function FrameTable({ frame, humanise = false, empty = "No data." }: {
   if (!frame || frame.rows.length === 0) {
     return <div className="panel-2 p-4 text-mut text-sm">{empty}</div>;
   }
+  // Numeric columns right-align (thousands separators via toLocaleString);
+  // the first column is sticky so wide frames scroll under it.
+  const numericCol = frame.columns.map((c) =>
+    frame.rows.some((r) => typeof r[c] === "number"));
+
   return (
     <div className="panel overflow-x-auto">
       <table className="w-full text-xs">
-        <thead className="text-mut uppercase tracking-wider sticky top-0 bg-panel">
+        <thead className="text-mut uppercase tracking-wider sticky top-0 bg-panel z-10">
           <tr className="border-b border-line">
-            {frame.columns.map((c) => (
-              <th key={c} className="text-left px-3 py-2 font-medium whitespace-nowrap">
+            {frame.columns.map((c, ci) => (
+              <th key={c}
+                  className={`px-3 py-2 font-medium whitespace-nowrap ${numericCol[ci] ? "text-right" : "text-left"} ${ci === 0 ? "sticky left-0 bg-panel" : ""}`}>
                 {prettyLabel(c)}
               </th>
             ))}
@@ -48,7 +54,7 @@ export function FrameTable({ frame, humanise = false, empty = "No data." }: {
         <tbody>
           {frame.rows.map((r, i) => (
             <tr key={i} className="border-b border-line/60 hover:bg-panel">
-              {frame.columns.map((c) => {
+              {frame.columns.map((c, ci) => {
                 const v = r[c];
                 let display: string;
                 if (typeof v === "number") {
@@ -63,7 +69,10 @@ export function FrameTable({ frame, humanise = false, empty = "No data." }: {
                   display = prettyValue(v);
                 }
                 return (
-                  <td key={c} className="px-3 py-2 num whitespace-nowrap text-txt/90">{display}</td>
+                  <td key={c}
+                      className={`px-3 py-2 num whitespace-nowrap text-txt/90 ${numericCol[ci] ? "text-right" : ""} ${ci === 0 ? "sticky left-0 bg-bg2" : ""}`}>
+                    {display}
+                  </td>
                 );
               })}
             </tr>
