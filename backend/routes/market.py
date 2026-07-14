@@ -68,14 +68,16 @@ def snapshot(ticker: str, _user: dict = Depends(auth.current_user)):
 def _movers(kind: str, count: int):
     """NIFTY 50 movers — NSE direct (works on cloud IPs) → yfinance fallback.
 
-    Bugfix: `if nse_rows:` treated an empty NSE list as "missing" and fell
-    through to yfinance, which hangs on Render. We only fall through when
-    NSE itself errored out (None), not when it legitimately returned 0 rows.
-    """
+    nse.movers returns None both on error AND on an empty result, so an
+    after-hours/empty NSE response falls through to the yfinance computation
+    instead of caching a blank panel for 5 minutes."""
     nse_rows = nse.movers(kind=kind, count=count)
-    if nse_rows is not None:
+    if nse_rows:
         return nse_rows
-    return md.get_movers(kind=kind, count=count)
+    try:
+        return md.get_movers(kind=kind, count=count) or []
+    except Exception:
+        return []
 
 
 @router.get("/movers")

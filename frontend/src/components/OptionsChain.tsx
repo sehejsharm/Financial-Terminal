@@ -61,11 +61,14 @@ export function OptionsChain({ ticker }: { ticker: string }) {
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
+  const [expiriesLoaded, setExpiriesLoaded] = useState(false);
+
   useEffect(() => {
-    setErr(null); setData(null); setExpiries([]); setExpiry("");
+    setErr(null); setData(null); setExpiries([]); setExpiry(""); setExpiriesLoaded(false);
     api.optionExpiries(ticker)
       .then((ex) => { setExpiries(ex); if (ex.length) setExpiry(ex[0]); })
-      .catch((e) => setErr(e?.detail || "No options for this symbol."));
+      .catch((e) => setErr(e?.detail || "No options for this symbol."))
+      .finally(() => setExpiriesLoaded(true));
   }, [ticker]);
 
   useEffect(() => {
@@ -78,6 +81,18 @@ export function OptionsChain({ ticker }: { ticker: string }) {
   }, [ticker, expiry]);
 
   if (err && !expiries.length) return <div className="panel-2 p-4 text-mut text-sm">{err}</div>;
+
+  const isIndian = /\.(NS|BO)$/i.test(ticker);
+  if (expiriesLoaded && !err && expiries.length === 0) {
+    return (
+      <div className="panel-2 p-4 text-mut text-sm">
+        No option expiries available for <span className="text-amber">{ticker}</span>.
+        {isIndian
+          ? " NSE F&O chains aren't wired into the free data layer yet — options work for US-listed tickers (e.g. AAPL, SPY)."
+          : " The data provider returned no listed expiries for this symbol — it may not have exchange-traded options."}
+      </div>
+    );
+  }
 
   return (
     <div>

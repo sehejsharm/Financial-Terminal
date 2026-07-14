@@ -273,24 +273,39 @@ def history(ticker: str, period: str = "1Y") -> list[dict] | None:
 
 # ── movers ───────────────────────────────────────────────────────────────
 def movers(kind: str = "gainers", count: int = 10) -> list[dict] | None:
-    """NIFTY 50 gainers / losers from NSE itself (no yfinance scrape)."""
-    idx = "NIFTY" if kind in ("gainers", "losers") else "NIFTY"
-    data = _get("/api/live-analysis-variations", {"index": idx})
+    """NIFTY 50 gainers / losers from NSE itself (no yfinance scrape).
+
+    Bugfix: this endpoint's `index` query param is the VARIATION TYPE
+    ("gainers" / "loosers" — NSE's spelling), not an index name, and the
+    response is keyed by universe (NIFTY / BANKNIFTY / allSec / FOSec).
+    Passing index=NIFTY and reading data["gainers"] matched nothing, so the
+    dashboard cached an empty movers list. Returns None (not []) when empty
+    so callers fall through to the yfinance computation."""
+    variation = "gainers" if kind == "gainers" else "loosers"
+    data = _get("/api/live-analysis-variations", {"index": variation})
     if not data:
         return None
-    bucket = (data.get("gainers") if kind == "gainers" else data.get("losers")) or {}
+    bucket = data.get("NIFTY") or data.get("allSec") or data.get("FOSec") or {}
     rows = bucket.get("data") or []
+    if not rows:
+        # Tolerate the other observed shape: {"gainers": {"data": [...]}, ...}
+        legacy = data.get("gainers" if kind == "gainers" else "loosers") \
+            or data.get("losers") or {}
+        rows = legacy.get("data") or [] if isinstance(legacy, dict) else []
     out = []
     for r in rows[:count]:
         out.append({
             "symbol": r.get("symbol"),
             "name": r.get("symbol"),  # NSE doesn't ship name here; use symbol
-            "price": _safe_float(r.get("ltp")),
-            "change_pct": _safe_float(r.get("perChange")),
-            "prev_close": _safe_float(r.get("previous_price")),
+            "price": _safe_float(r.get("ltp") or r.get("lastPrice")),
+            "change_pct": _safe_float(r.get("perChange") or r.get("pChange")
+                                      or r.get("net_price")),
+            "prev_close": _safe_float(r.get("previous_price")
+                                      or r.get("prev_price")
+                                      or r.get("previousClose")),
             "currency": "INR",
         })
-    return out
+    return out or None
 
 
 # ── index snapshot (NIFTY etc.) ──────────────────────────────────────────

@@ -5,7 +5,8 @@ import { useEffect, useState } from "react";
 import { ExternalLink, X } from "lucide-react";
 
 import { DataAge } from "@/components/DataAge";
-import { api, type ChainNode, type ValueChain } from "@/lib/api";
+import { api, type ChainNode, type Quote, type ValueChain } from "@/lib/api";
+import { fmtNum, fmtPct } from "@/lib/utils";
 
 /**
  * Bloomberg SPLC-style supply-chain node graph, rendered as an SVG.
@@ -34,14 +35,25 @@ const COL = {
 type Role = "supplier" | "customer" | "competitor";
 type Selected = ChainNode & { role: Role };
 
-function Node({ x, y, label, note, color, onClick, selected }: {
-  x: number; y: number; label: string; note?: string; color: string;
-  onClick: () => void; selected: boolean;
+// Materiality → edge visuals: thicker/brighter edges for relationships the
+// AI estimates as a larger share of revenue / input costs. Unweighted
+// relationships render at the old baseline.
+function edgeWidth(pct?: number | null): number {
+  return pct != null ? Math.max(1.2, Math.min(6, 1 + pct / 10)) : 1.2;
+}
+function edgeOpacity(pct?: number | null): number {
+  return pct != null ? Math.min(0.9, 0.3 + pct / 80) : 0.35;
+}
+
+function Node({ x, y, label, note, pct, color, onClick, selected }: {
+  x: number; y: number; label: string; note?: string; pct?: number | null;
+  color: string; onClick: () => void; selected: boolean;
 }) {
+  const sub = pct != null ? `≈${fmtNum(pct, 0)}% · ${note ?? ""}` : note;
   return (
     <g onClick={onClick} style={{ cursor: "pointer" }}>
       {/* Full text on hover via native SVG tooltip */}
-      <title>{note ? `${label} — ${note}` : label}</title>
+      <title>{sub ? `${label} — ${sub}` : label}</title>
       <rect x={x - 78} y={y - 16} width={156} height={32} rx={5}
             fill={selected ? "#1c2129" : "#11151b"} stroke={color}
             strokeWidth={selected ? 2.4 : 1.4} />
@@ -49,37 +61,54 @@ function Node({ x, y, label, note, color, onClick, selected }: {
             fill="#e8ecf2" fontWeight={600} fontFamily="JetBrains Mono, monospace">
         {label.length > 20 ? label.slice(0, 19) + "…" : label}
       </text>
-      {note && (
+      {sub && (
         <text x={x} y={y + 11} textAnchor="middle" fontSize={8.5}
               fill="#7d8694" fontFamily="JetBrains Mono, monospace">
-          {note.length > 26 ? note.slice(0, 25) + "…" : note}
+          {sub.length > 26 ? sub.slice(0, 25) + "…" : sub}
         </text>
       )}
     </g>
   );
 }
 
-/** Detail strip for a clicked node: full note + drill-down into the company. */
+/** Detail strip for a clicked node: full note, live quote, and drill-down.
+ *
+ *  Ticker resolution is deliberately human-in-the-loop: the AI's ticker hint
+ *  and the top search matches are shown as labeled candidates instead of
+ *  auto-navigating to the first hit (which once sent "Saudi Aramco" to
+ *  2223.SR — the Luberef subsidiary — instead of 2222.SR). */
 function NodeDetail({ node, onClose }: { node: Selected; onClose: () => void }) {
   const router = useRouter();
-  const [resolving, setResolving] = useState(false);
-  const [noMatch, setNoMatch] = useState(false);
+  const [cands, setCands] = useState<{ symbol: string; name: string; source: string }[] | null>(null);
+  const [quote, setQuote] = useState<Quote | null>(null);
 
-  async function drill() {
-    setResolving(true); setNoMatch(false);
-    try {
-      const hits = await api.search(node.name);
-      if (hits && hits.length > 0) {
-        router.push(`/terminal?t=${encodeURIComponent(hits[0].symbol)}`);
-        return;
-      }
-      setNoMatch(true);
-    } catch {
-      setNoMatch(true);
-    } finally {
-      setResolving(false);
-    }
-  }
+  useEffect(() => {
+    let alive = true;
+    setCands(null); setQuote(null);
+    (async () => {
+      const out: { symbol: string; name: string; source: string }[] = [];
+      if (node.ticker) out.push({ symbol: node.ticker.toUpperCase(), name: node.name, source: "AI-suggested" });
+      try {
+        const hits = await api.search(node.name);
+        for (const h of (hits ?? []).slice(0, 3)) {
+          if (!out.some((c) => c.symbol === h.symbol.toUpperCase())) {
+            out.push({ symbol: h.symbol.toUpperCase(), name: h.name, source: "search match" });
+          }
+        }
+      } catch { /* search down — AI hint (if any) still shown */ }
+      if (alive) setCands(out);
+    })();
+    return () => { alive = false; };
+  }, [node.name, node.ticker]);
+
+  // Live quote for the leading candidate — supply-chain context with a pulse.
+  const best = cands?.[0]?.symbol;
+  useEffect(() => {
+    if (!best) return;
+    let alive = true;
+    api.quote(best).then((q) => { if (alive) setQuote(q); }).catch(() => { if (alive) setQuote(null); });
+    return () => { alive = false; };
+  }, [best]);
 
   return (
     <div className="panel-2 p-3 mt-3 flex items-start gap-3">
@@ -87,15 +116,37 @@ function NodeDetail({ node, onClose }: { node: Selected; onClose: () => void }) 
       <div className="flex-1 min-w-0">
         <div className="text-sm font-semibold">{node.name}
           <span className="text-mut font-normal ml-2 text-[11px] uppercase tracking-wider">{node.role}</span>
+          {node.revenue_pct != null && (
+            <span className="text-amber font-normal ml-2 text-[11px]">≈{fmtNum(node.revenue_pct, 0)}% exposure (AI est.)</span>
+          )}
         </div>
         {node.note && <div className="text-xs text-mut mt-0.5">{node.note}</div>}
-        {noMatch && <div className="text-[11px] text-mut mt-1">No listed ticker found for this name.</div>}
+        {quote && quote.price != null && best && (
+          <div className="text-xs mt-1">
+            <span className="text-mut">{best}</span>{" "}
+            <span className="num">{fmtNum(quote.price, 2)}</span>{" "}
+            {quote.change_pct != null && (
+              <span className={`num ${quote.change_pct >= 0 ? "text-green" : "text-red"}`}>{fmtPct(quote.change_pct)}</span>
+            )}
+          </div>
+        )}
+        <div className="flex flex-wrap items-center gap-1.5 mt-2">
+          {cands === null && <span className="text-[11px] text-mut">Resolving ticker…</span>}
+          {cands !== null && cands.length === 0 && (
+            <span className="text-[11px] text-mut">No listed ticker found — likely private or a segment.</span>
+          )}
+          {(cands ?? []).map((c) => (
+            <button key={c.symbol}
+                    onClick={() => router.push(`/terminal?t=${encodeURIComponent(c.symbol)}`)}
+                    title={`${c.name} (${c.source})`}
+                    className="btn-ghost flex items-center gap-1.5 text-xs whitespace-nowrap">
+              <ExternalLink size={11} />
+              {c.symbol}
+              <span className="text-mut normal-case">· {c.source}</span>
+            </button>
+          ))}
+        </div>
       </div>
-      <button onClick={drill} disabled={resolving}
-              className="btn-ghost flex items-center gap-1.5 text-xs whitespace-nowrap">
-        <ExternalLink size={12} />
-        {resolving ? "Resolving…" : "Open in terminal"}
-      </button>
       <button onClick={onClose} className="text-mut hover:text-txt"><X size={14} /></button>
     </div>
   );
@@ -137,7 +188,7 @@ export function ValueChainMap({ ticker }: { ticker: string }) {
   }));
 
   const pick = (n: ChainNode, role: Role) =>
-    setSelected((cur) => (cur?.name === n.name && cur.role === role ? null : { name: n.name, note: n.note, role }));
+    setSelected((cur) => (cur?.name === n.name && cur.role === role ? null : { ...n, role }));
 
   return (
     <div>
@@ -158,15 +209,17 @@ export function ValueChainMap({ ticker }: { ticker: string }) {
             </marker>
           </defs>
 
-          {/* edges: supplier → company */}
+          {/* edges: supplier → company (width/opacity scale with AI-estimated exposure) */}
           {suppliers.map((s, i) => (
             <line key={`se${i}`} x1={s.x + 78} y1={s.y} x2={CX - 90} y2={CY}
-                  stroke={COL.supplier} strokeOpacity={0.35} strokeWidth={1.2} markerEnd="url(#arrow)" />
+                  stroke={COL.supplier} strokeOpacity={edgeOpacity(s.revenue_pct)}
+                  strokeWidth={edgeWidth(s.revenue_pct)} markerEnd="url(#arrow)" />
           ))}
           {/* edges: company → customer */}
           {customers.map((c, i) => (
             <line key={`ce${i}`} x1={CX + 90} y1={CY} x2={c.x - 78} y2={c.y}
-                  stroke={COL.customer} strokeOpacity={0.35} strokeWidth={1.2} markerEnd="url(#arrow)" />
+                  stroke={COL.customer} strokeOpacity={edgeOpacity(c.revenue_pct)}
+                  strokeWidth={edgeWidth(c.revenue_pct)} markerEnd="url(#arrow)" />
           ))}
           {/* edges: company ↔ competitor (dashed) */}
           {competitors.map((c, i) => (
@@ -187,18 +240,18 @@ export function ValueChainMap({ ticker }: { ticker: string }) {
           </g>
 
           {suppliers.map((s, i) => (
-            <Node key={`s${i}`} x={s.x} y={s.y} label={s.name} note={s.note} color={COL.supplier}
-                  onClick={() => pick(s, "supplier")}
+            <Node key={`s${i}`} x={s.x} y={s.y} label={s.name} note={s.note} pct={s.revenue_pct}
+                  color={COL.supplier} onClick={() => pick(s, "supplier")}
                   selected={selected?.name === s.name && selected.role === "supplier"} />
           ))}
           {customers.map((c, i) => (
-            <Node key={`c${i}`} x={c.x} y={c.y} label={c.name} note={c.note} color={COL.customer}
-                  onClick={() => pick(c, "customer")}
+            <Node key={`c${i}`} x={c.x} y={c.y} label={c.name} note={c.note} pct={c.revenue_pct}
+                  color={COL.customer} onClick={() => pick(c, "customer")}
                   selected={selected?.name === c.name && selected.role === "customer"} />
           ))}
           {competitors.map((c, i) => (
-            <Node key={`k${i}`} x={c.x} y={c.y} label={c.name} note={c.note} color={COL.competitor}
-                  onClick={() => pick(c, "competitor")}
+            <Node key={`k${i}`} x={c.x} y={c.y} label={c.name} note={c.note}
+                  color={COL.competitor} onClick={() => pick(c, "competitor")}
                   selected={selected?.name === c.name && selected.role === "competitor"} />
           ))}
         </svg>

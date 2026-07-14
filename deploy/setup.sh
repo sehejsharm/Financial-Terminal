@@ -58,10 +58,18 @@ if ! command -v netfilter-persistent >/dev/null 2>&1; then
 fi
 sudo netfilter-persistent save
 
-echo "→ [3/4] Building + starting containers…"
+echo "→ [3/5] Building + starting containers…"
 sudo docker compose up -d --build
 
-echo "→ [4/4] Status:"
+echo "→ [4/5] Installing health watchdog (cron, every 2 min)…"
+# Restarts the backend automatically if it hangs (Docker healthcheck goes
+# unhealthy). Crashes are already covered by restart: unless-stopped.
+sudo tee /etc/cron.d/motherboard-watchdog >/dev/null <<CRON
+*/2 * * * * root cd $(pwd) && bash watchdog.sh >> /var/log/mb-watchdog.log 2>&1
+CRON
+sudo chmod 644 /etc/cron.d/motherboard-watchdog
+
+echo "→ [5/5] Status:"
 sleep 5
 sudo docker compose ps
 echo

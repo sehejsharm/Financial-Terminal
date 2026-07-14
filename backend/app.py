@@ -11,10 +11,18 @@ Auth: POST /api/v1/auth/login → bearer token → use on every other endpoint.
 """
 from __future__ import annotations
 
+import os
+import socket
 import threading
 import time
 
 from fastapi import FastAPI
+
+# Global backstop: any library that opens a socket without an explicit timeout
+# (fredapi/urllib-style code, some yfinance paths) inherits this instead of
+# blocking forever. A single unbounded upstream call once hung enough worker
+# threads to take down /healthz and login on the 1-vCPU VM.
+socket.setdefaulttimeout(20)
 from fastapi.middleware.cors import CORSMiddleware
 
 from backend.audit import AuditMiddleware
@@ -116,12 +124,19 @@ def _prewarm() -> None:
 
     def _slow() -> None:
         from backend.routes import screens as screens_routes
+        # Delay the first scan so boot (movers + quotes + TLS issuance) isn't
+        # competing with a 70-name fetch on 1 vCPU. PREWARM_SCAN_SEC=0
+        # disables scan prewarming entirely (first screener call then pays it).
+        interval = int(os.getenv("PREWARM_SCAN_SEC", "540") or 0)
+        if interval <= 0:
+            return
+        time.sleep(90)
         while True:
             try:
                 screens_routes._scan_cached.refresh()
             except Exception:
                 pass
-            time.sleep(540)
+            time.sleep(interval)
 
     threading.Thread(target=_fast, daemon=True, name="prewarm-fast").start()
     threading.Thread(target=_slow, daemon=True, name="prewarm-slow").start()

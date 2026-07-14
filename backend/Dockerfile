@@ -21,4 +21,8 @@ COPY lib ./lib
 
 EXPOSE 8000
 
-CMD ["uvicorn", "backend.app:app", "--host", "0.0.0.0", "--port", "8000"]
+# --limit-concurrency: shed load with an immediate 503 instead of queueing
+# forever once the box is saturated — keeps /healthz and login answering
+# even if some data endpoint goes pathological.
+CMD ["uvicorn", "backend.app:app", "--host", "0.0.0.0", "--port", "8000", \
+     "--limit-concurrency", "48"]

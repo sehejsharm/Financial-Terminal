@@ -32,10 +32,16 @@ export function Wacc({ ticker, snap }: { ticker: string; snap: Snapshot | null }
   const wacc = we != null && wd != null ? we * re + wd * costDebt * (1 - tax / 100) : null;
   const cur = curSymbol((snap?.currency as string) || "USD");
 
+  // <input type="number"> can't render thousands separators, so large inputs
+  // (equity/debt) get a humanised readout under the field instead of leaving
+  // the user to count digits in a raw integer.
   const Num = ({ label, value, set, step = 1 }: { label: string; value: number; set: (n: number) => void; step?: number }) => (
     <label className="flex flex-col gap-1">
       <span className="label-xs">{label}</span>
       <input type="number" value={value} step={step} onChange={(e) => set(parseFloat(e.target.value) || 0)} className="input-bare" />
+      {Math.abs(value) >= 1e6 && (
+        <span className="text-[10.5px] text-mut num">= {humanNumber(value, cur)}</span>
+      )}
     </label>
   );
 

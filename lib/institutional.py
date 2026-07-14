@@ -87,6 +87,23 @@ def wacc(equity_value: float, debt_value: float, cost_equity_pct: float,
     return {"wacc": val, "we": we * 100, "wd": wd * 100}
 
 
+def _sane_ps(f: dict) -> float | None:
+    """P/S with a sanity cross-check.
+
+    yfinance's priceToSalesTrailing12Months is unreliable for some NSE names
+    (e.g. INFY.NS reported 221 — apparently ratioed against a partial-period
+    or unconsolidated revenue figure). When we can compute market_cap /
+    trailing revenue ourselves, prefer the reported ratio only if it agrees
+    within 3x; otherwise use the computed value."""
+    reported = f.get("price_to_sales")
+    mcap, rev = f.get("market_cap"), f.get("revenue")
+    computed = (mcap / rev) if (mcap and rev) else None
+    if computed is not None and computed > 0:
+        if reported is None or reported <= 0 or not (1 / 3 <= reported / computed <= 3):
+            return computed
+    return reported
+
+
 def _comps_row(t: str) -> dict | None:
     f = get_stock_fundamentals(t)
     if not f:
@@ -95,13 +112,14 @@ def _comps_row(t: str) -> dict | None:
     if f.get("market_cap") and f.get("ebitda"):
         ev = f["market_cap"]  # market cap as a simple EV proxy (no debt data layer)
         ev_ebitda = ev / f["ebitda"] if f["ebitda"] else None
+    ps = _sane_ps(f)
     return {
         "Ticker": t.replace(".NS", ""),
         "Name": f.get("name", t),
         "P/E": round(f["trailing_pe"], 1) if f.get("trailing_pe") else None,
         "Fwd P/E": round(f["forward_pe"], 1) if f.get("forward_pe") else None,
         "P/B": round(f["price_to_book"], 2) if f.get("price_to_book") else None,
-        "P/S": round(f["price_to_sales"], 2) if f.get("price_to_sales") else None,
+        "P/S": round(ps, 2) if ps else None,
         "EV/EBITDA*": round(ev_ebitda, 1) if ev_ebitda else None,
         "ROE%": round(f["roe"] * 100, 1) if f.get("roe") is not None else None,
     }

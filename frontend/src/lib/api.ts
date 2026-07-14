@@ -175,7 +175,15 @@ export type CapStructure = {
   total_debt: number | null; cash: number | null; market_cap: number | null;
   shares: number | null; currency: string;
 };
-export type ChainNode = { name: string; note?: string };
+export type ChainNode = {
+  name: string;
+  note?: string;
+  /** AI-estimated share (0-100) of the subject's revenue (customers) or
+   *  input costs (suppliers) — an estimate, not filing-sourced. */
+  revenue_pct?: number | null;
+  /** AI-suggested primary ticker for this partner — must be verified. */
+  ticker?: string | null;
+};
 export type ValueChain = {
   ticker: string; name: string;
   suppliers?: ChainNode[]; customers?: ChainNode[]; competitors?: ChainNode[];

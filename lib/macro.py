@@ -1,7 +1,18 @@
-"""FRED macro indicator helpers."""
+"""FRED macro indicator helpers.
+
+Outage note: this module previously used `fredapi`, whose get_series() calls
+urllib with NO timeout. A stalled FRED connection would hang a request thread
+forever; the macro page fires ~19 of these in parallel, which exhausted the
+whole FastAPI threadpool and took down every endpoint (incl. /healthz and
+login) on the single-worker VM. We now call FRED's REST API directly with
+requests + hard connect/read timeouts.
+"""
 from __future__ import annotations
 
+import time
+
 import pandas as pd
+import requests
 import streamlit as st
 
 from lib.config import get_fred_key
@@ -68,33 +79,35 @@ COUNTRY_INDICATORS: dict[str, dict[str, dict]] = {
 COUNTRIES = list(COUNTRY_INDICATORS.keys())
 
 
-@st.cache_resource(show_spinner=False)
-def _fred():
-    key = get_fred_key()
-    if not key:
-        return None
-    try:
-        from fredapi import Fred
-        return Fred(api_key=key)
-    except Exception:
-        return None
+_FRED_OBS_URL = "https://api.stlouisfed.org/fred/series/observations"
 
 
 @st.cache_data(ttl=3600, show_spinner=False)
 def get_series(series_id: str, observations: int = 400) -> pd.Series:
     """Return a FRED series (most recent observations), or empty on failure.
 
-    Retries transient FRED failures with a short backoff before giving up.
+    Direct REST call with (connect=5s, read=15s) timeouts — a slow upstream
+    can never hang a worker thread. Retries transient failures with a short
+    backoff before giving up.
     """
-    import time
-
-    fred = _fred()
-    if fred is None:
+    key = get_fred_key()
+    if not key:
         return pd.Series(dtype=float)
     for attempt in range(3):
         try:
-            s = fred.get_series(series_id)
-            return s.dropna().tail(observations)
+            r = requests.get(_FRED_OBS_URL, params={
+                "series_id": series_id, "api_key": key, "file_type": "json",
+                "sort_order": "desc", "limit": observations,
+            }, timeout=(5, 15))
+            r.raise_for_status()
+            obs = r.json().get("observations", [])
+            idx, vals = [], []
+            for o in reversed(obs):  # desc from API -> ascending series
+                v = o.get("value")
+                if v not in (None, "", "."):
+                    idx.append(pd.Timestamp(o["date"]))
+                    vals.append(float(v))
+            return pd.Series(vals, index=idx)
         except Exception:
             if attempt < 2:
                 time.sleep(0.5 * (attempt + 1))

@@ -50,7 +50,12 @@ def _scan_cached() -> dict:
     market-cap/P-E presets on cloud hosts; growth metrics fill in where
     yfinance is reachable.
     """
+    import os
+    # Low default parallelism: the deploy target is a 1-vCPU/1-GB VM, and 12
+    # workers x (NSE + yfinance-with-pandas) per name caused CPU/memory thrash.
+    workers = int(os.getenv("SCAN_WORKERS", "4") or 4)
     rows = screens.scan_universe(
+        max_workers=workers,
         fundamentals_fn=lambda t: providers.snapshot(t, quota_safe=True))
     return {"rows": rows,
             "as_of": datetime.now(timezone.utc).isoformat(timespec="seconds")}

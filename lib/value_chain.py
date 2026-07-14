@@ -39,15 +39,24 @@ object — no prose, no markdown fences — in exactly this schema:
 
 {{
   "suppliers": [
-    {{"name": "Specific named company or product (max 22 chars)", "note": "Concrete input supplied + scale if known (max 60 chars)"}},
+    {{"name": "Specific named company or product (max 22 chars)",
+      "note": "Concrete input supplied + scale if known (max 60 chars)",
+      "revenue_pct": <number 0-100: est. share of the SUBJECT's input costs this supplier represents, or null>,
+      "ticker": "<supplier's own primary exchange ticker (e.g. 2222.SR, TSM, RELIANCE.NS) or null>"}},
     ...
   ],
   "customers": [
-    {{"name": "Specific named customer or segment (max 22 chars)", "note": "What they buy + approx revenue share if known (max 60 chars)"}},
+    {{"name": "Specific named customer or segment (max 22 chars)",
+      "note": "What they buy + approx revenue share if known (max 60 chars)",
+      "revenue_pct": <number 0-100: est. share of the SUBJECT's revenue from this customer, or null>,
+      "ticker": "<customer's own primary exchange ticker or null>"}},
     ...
   ],
   "competitors": [
-    {{"name": "Named competitor company (max 22 chars)", "note": "Which segment they compete in + relative position (max 60 chars)"}},
+    {{"name": "Named competitor company (max 22 chars)",
+      "note": "Which segment they compete in + relative position (max 60 chars)",
+      "revenue_pct": null,
+      "ticker": "<competitor's own primary exchange ticker or null>"}},
     ...
   ]
 }}
@@ -61,6 +70,8 @@ Hard rules (the model that ignores these will be rejected):
 - Spread across geographies and business lines — don't list 8 customers all from one segment.
 - Mark uncertainty inline ("est.", "pre-2023", "publicly disclosed") rather than padding with vague entries.
 - Names must fit in chart nodes (≤22 chars). If a real name is too long, abbreviate (e.g. "Saudi Aramco").
+- "revenue_pct" is an ESTIMATE — a plain number, no % sign. null when you have no basis. Never invent precision.
+- "ticker" must be the partner's OWN primary listing, exact symbol with exchange suffix for non-US listings. Do NOT guess: a subsidiary's or similarly-named company's ticker is WORSE than null (e.g. Saudi Aramco is 2222.SR — 2223.SR is its Luberef subsidiary, wrong). Private/state entities and segments: null.
 - The subject company is: {name} ({ticker})
 """
 

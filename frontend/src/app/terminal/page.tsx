@@ -52,6 +52,15 @@ function TerminalInner() {
 
   const [ticker, setTicker] = useState(initialTicker);
   const [fn, setFn] = useState<Fn>("Snapshot");
+
+  // Keep state in sync with the URL: in-app navigations (value-chain
+  // drill-down, movers links) router.push a new ?t= — without this effect the
+  // query param changed but the page kept showing the old ticker.
+  useEffect(() => {
+    const t = (sp.get("t") || "").toUpperCase();
+    if (t && t !== ticker) setTicker(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sp]);
   const [period, setPeriod] = useState<(typeof PERIODS)[number]>("1Y");
   const [snap, setSnap] = useState<Snapshot | null>(null);
   const [snapAt, setSnapAt] = useState<number | null>(null);

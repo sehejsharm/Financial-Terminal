@@ -18,10 +18,34 @@ services:
     env_file: .env
     environment:
       - APP_VERSION=oracle-1
+      - REDIS_URL=redis://redis:6379/0   # shared cache; survives backend restarts
+    depends_on:
+      - redis
+    # Cap memory so a runaway scan OOMs THIS container (Docker restarts it via
+    # the restart policy) instead of the kernel killing random VM processes.
+    mem_limit: 768m
+    # Mark the container unhealthy when /healthz stops answering — the host
+    # watchdog cron (deploy/watchdog.sh, installed by setup.sh) restarts it.
+    healthcheck:
+      test: ["CMD", "python", "-c",
+             "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8000/healthz', timeout=6).status==200 else 1)"]
+      interval: 30s
+      timeout: 8s
+      retries: 3
+      start_period: 60s
     volumes:
       - ./data:/app/data        # persists users / watchlists / audit / jwt secret
     expose:
       - "8000"                  # internal only — reachable by Caddy, not the world
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: ["redis-server", "--maxmemory", "48mb", "--maxmemory-policy", "allkeys-lru",
+              "--save", ""]     # pure cache: no persistence, LRU eviction
+    mem_limit: 80m
+    expose:
+      - "6379"
 
   caddy:
     image: caddy:2
