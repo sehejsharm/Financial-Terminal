@@ -1,4 +1,10 @@
-FROM python:3.12-slim
+# Pinned to the stable "bookworm" base, not the floating "3.12-slim" tag.
+# That tag moved upstream to a "trixie" (Debian 13, still-testing) base at
+# some point; trixie's package mirrors are far less globally cached than
+# bookworm's, and a routine apt-get on this VM's limited bandwidth went
+# from ~5s to over an hour pulling packages from it — looked exactly like a
+# hung build. Bookworm is stable and well-mirrored everywhere.
+FROM python:3.12-slim-bookworm
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
@@ -6,14 +12,13 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 
 WORKDIR /app
 
-# Build deps (curl_cffi needs gcc; remove after pip install to keep image small).
-RUN apt-get update && apt-get install -y --no-install-recommends \
-        build-essential ca-certificates \
-    && rm -rf /var/lib/apt/lists/*
-
+# No apt-get / build-essential: every dependency (curl_cffi, pandas, numpy,
+# etc.) ships a prebuilt manylinux wheel for this platform — verified with
+# `pip install --only-binary=:all:`. Skipping the apt layer entirely removes
+# both the trixie-mirror risk above and several minutes of compile time,
+# and ca-certificates already ships in the base python image.
 COPY requirements.txt requirements-backend.txt ./
-RUN pip install -r requirements.txt -r requirements-backend.txt \
-    && apt-get purge -y build-essential && apt-get autoremove -y
+RUN pip install --only-binary=:all: -r requirements.txt -r requirements-backend.txt
 
 # Source comes last so dep installs stay cached on code changes.
 COPY backend ./backend
