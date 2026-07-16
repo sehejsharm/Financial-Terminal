@@ -1,0 +1,24 @@
+# Uptime monitor: green run = app healthy, red run = something's wrong.
+# Runs from GitHub's servers every 15 minutes, so the app's health is
+# observable from the Actions tab (and by Claude via the GitHub API) without
+# anyone touching the VM.
+name: healthcheck
+
+on:
+  schedule:
+    - cron: "*/15 * * * *"
+  workflow_dispatch: {}
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Backend /healthz
+        run: |
+          curl -fsS --max-time 20 https://sehejmotherboard.duckdns.org/healthz
+          echo
+
+      - name: Backend /diag (provider status)
+        run: |
+          curl -fsS --max-time 30 https://sehejmotherboard.duckdns.org/diag | head -c 2000
+          echo

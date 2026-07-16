@@ -1,32 +1,18 @@
-# Auto-deploys the backend to the Oracle VM on every push to the deploy
-# branch — no manual SSH required after this is set up once.
+# RETIRED as the primary deploy path — the VM now deploys ITSELF.
 #
-# One-time setup (do this in the GitHub web UI, NOT in chat with Claude —
-# never paste a private key into a conversation):
-#   Repo -> Settings -> Secrets and variables -> Actions -> New repository secret
-#     SSH_HOST        = 137.23.53.32   (the Oracle VM's public IP)
-#     SSH_USER         = ubuntu
-#     SSH_PRIVATE_KEY  = contents of ~/.ssh/oracle_vm (the private key file,
-#                        NOT the .pub file — paste the whole thing incl.
-#                        the BEGIN/END lines)
+# A systemd timer on the VM (deploy/autodeploy.sh, installed by
+# deploy/install-autodeploy.sh) checks origin every 4 minutes and rebuilds
+# on new commits. No SSH from CI, no secrets to corrupt, nothing to wedge:
+# just push to the branch and the VM picks it up within ~4 minutes.
 #
-# After that, every push to claude/stock-market-dashboard-2BBMA (or
-# whichever branch you set below) automatically SSHes into the VM, pulls,
-# and rebuilds the containers — same commands you were running by hand.
-name: deploy-backend
+# This workflow is kept ONLY as a manual fallback (Actions tab -> Run
+# workflow) for the rare case where the timer itself is broken. It requires
+# the SSH_HOST / SSH_USER / SSH_PRIVATE_KEY repo secrets to be valid.
+name: deploy-backend-manual-fallback
 
 on:
-  push:
-    branches: ["claude/stock-market-dashboard-2BBMA"]
-    paths:
-      - "backend/**"
-      - "lib/**"
-      - "deploy/**"
-      - "requirements*.txt"
-  workflow_dispatch: {}   # lets you trigger it manually from the Actions tab
+  workflow_dispatch: {}
 
-# One deploy at a time; a newer push cancels a wedged/stale run instead of
-# queueing behind it.
 concurrency:
   group: deploy-backend
   cancel-in-progress: true
@@ -42,7 +28,7 @@ jobs:
           username: ${{ secrets.SSH_USER }}
           key: ${{ secrets.SSH_PRIVATE_KEY }}
           timeout: 60s
-          command_timeout: 15m
+          command_timeout: 20m
           script: |
             set -e
             cd ~/Financial-Terminal
