@@ -24,7 +24,7 @@ import { TickerInput } from "@/components/TickerInput";
 import { StreetRatings } from "@/components/StreetRatings";
 import { ValueChainMap } from "@/components/ValueChainMap";
 import { Wacc } from "@/components/Wacc";
-import { api, type Quote, type Snapshot } from "@/lib/api";
+import { api, type Quote, type ResolveRec, type Snapshot } from "@/lib/api";
 import { FN_CODES } from "@/lib/commands";
 import { useLive } from "@/lib/useLive";
 import { curForTicker, fmtNum, fmtPct, formatPercent, humanNumber, inferCurrency } from "@/lib/utils";
@@ -77,6 +77,28 @@ function TerminalInner() {
   }, [sp]);
 
   const peers = (sp.get("peers") || "").split(",").map((s) => s.trim().toUpperCase()).filter(Boolean);
+
+  // ── canonical resolution (Phase 0) ────────────────────────────────────
+  // Bare inputs ("SUZLON", "TCS") resolve to exchange-qualified symbols
+  // BEFORE any data loads. Ambiguous names show a picker; nothing guesses.
+  const [disamb, setDisamb] = useState<ResolveRec[] | null>(null);
+  const isBare = !ticker.includes(".") && !ticker.startsWith("^");
+  useEffect(() => {
+    setDisamb(null);
+    if (!isBare) return;
+    let alive = true;
+    api.resolve(ticker).then((r) => {
+      if (!alive) return;
+      if (r.status === "resolved" && r.match) {
+        commitTicker(r.match.symbol);       // e.g. SUZLON -> SUZLON.NS
+      } else if (r.status === "ambiguous") {
+        setDisamb(r.candidates);
+      }
+      // status "none": the existing not-found state (below) handles it.
+    }).catch(() => {});
+    return () => { alive = false; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ticker]);
   const [period, setPeriod] = useState<(typeof PERIODS)[number]>("1Y");
   const [snap, setSnap] = useState<Snapshot | null>(null);
   const [snapAt, setSnapAt] = useState<number | null>(null);
@@ -130,6 +152,14 @@ function TerminalInner() {
     if (!t || t === ticker) return;
     setTicker(t);
     router.replace(`/terminal?t=${encodeURIComponent(t)}`);
+    // Feed the ⌘K "Recent" group (qualified symbols only).
+    if (t.includes(".") || t.startsWith("^")) {
+      try {
+        const r: string[] = JSON.parse(localStorage.getItem("mb_recent_tickers") || "[]");
+        localStorage.setItem("mb_recent_tickers",
+          JSON.stringify([t, ...r.filter((x) => x !== t)].slice(0, 10)));
+      } catch { /* noop */ }
+    }
   }
 
   return (
@@ -173,8 +203,24 @@ function TerminalInner() {
         />
       </div>
 
-      {loading && <TerminalSkeleton />}
-      {err && !loading && (
+      {disamb && disamb.length > 0 && (
+        <div className="panel-2 p-4 mb-5">
+          <div className="text-sm mb-1">
+            <span className="text-amber">{ticker}</span> matches more than one listing — pick one:
+          </div>
+          <div className="flex flex-wrap gap-2 mt-2">
+            {disamb.map((c) => (
+              <button key={c.symbol} onClick={() => commitTicker(c.symbol)} className="btn-ghost text-xs">
+                {c.symbol}
+                <span className="text-mut normal-case"> · {c.name}{c.exchange ? ` (${c.exchange})` : ""}</span>
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {loading && !disamb && <TerminalSkeleton />}
+      {err && !loading && !disamb && (
         <div className="panel-2 p-4">
           <div className="text-red text-sm mb-1">Symbol not found: <span className="text-amber">{ticker}</span></div>
           <div className="text-mut text-xs mb-3">
@@ -219,6 +265,17 @@ function TerminalInner() {
             <MetricCard label="Debt / Equity"
                         value={snap?.debt_to_equity != null ? `${fmtNum((snap.debt_to_equity as number) / 100, 2)}x` : "—"} />
           </div>
+          {/* Screeners-style honesty: explain empty fields instead of bare
+              dashes (free-provider coverage gaps are per-listing). */}
+          {snap && [snap.dividend_yield, snap.roe, snap.profit_margin,
+                    snap.debt_to_equity, snap.trailing_pe, snap.beta]
+            .filter((v) => v == null).length >= 2 && (
+            <div className="text-[10.5px] text-amber/90 mb-4">
+              Some fields show “—” because free data providers don&apos;t cover them
+              for this listing (coverage varies by exchange; FMP fills most US
+              names, NSE covers Indian price/valuation but not every ratio).
+            </div>
+          )}
           <div className="mb-2 heading">1-Year Chart</div>
           <PriceChart data={candles} height={380} />
         </>

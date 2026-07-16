@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { Trash2 } from "lucide-react";
 
 import { DataAge } from "@/components/DataAge";
+import { TickerInput } from "@/components/TickerInput";
 import { Shell } from "@/components/Shell";
 import { api, type Alert, type AlertEvent } from "@/lib/api";
 import { useLive } from "@/lib/useLive";
@@ -13,6 +14,8 @@ const KIND_LABELS: Record<string, string> = {
   price: "Price",
   pe: "Trailing P/E",
   spread_10y2y: "US 10Y–2Y spread",
+  move: "Abs day move %",
+  volume_spike: "Volume vs 30d avg (x)",
 };
 
 function urlBase64ToUint8Array(base64: string): Uint8Array {
@@ -97,7 +100,7 @@ function DeliveryPanel() {
  *  Conditions are evaluated server-side every ~60s; triggered alerts
  *  deactivate and land in the feed (and the header bell). */
 export default function AlertsPage() {
-  const [kind, setKind] = useState<"price" | "pe" | "spread_10y2y">("price");
+  const [kind, setKind] = useState<"price" | "pe" | "spread_10y2y" | "move" | "volume_spike">("price");
   const [ticker, setTicker] = useState("");
   const [op, setOp] = useState<">" | "<">("<");
   const [value, setValue] = useState("");
@@ -146,13 +149,15 @@ export default function AlertsPage() {
           <select value={kind} onChange={(e) => setKind(e.target.value as any)} className="input-bare cursor-pointer">
             <option value="price">Price</option>
             <option value="pe">Trailing P/E</option>
+            <option value="move">Abs day move %</option>
+            <option value="volume_spike">Volume spike (x avg)</option>
             <option value="spread_10y2y">US 10Y–2Y spread</option>
           </select>
         </label>
         {kind !== "spread_10y2y" && (
           <label className="flex flex-col gap-1 flex-1 min-w-[150px]">
             <span className="label-xs">Ticker</span>
-            <input value={ticker} onChange={(e) => setTicker(e.target.value)} placeholder="RELIANCE.NS" className="input-bare" />
+            <TickerInput value={ticker} onCommit={setTicker} placeholder="RELIANCE.NS" />
           </label>
         )}
         <label className="flex flex-col gap-1 w-20">

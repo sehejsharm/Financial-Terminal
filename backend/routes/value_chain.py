@@ -25,22 +25,182 @@ class ChainReport(BaseModel):
     reason: str = Field("", max_length=500)
 
 
+OVERRIDES_PATH = DATA_DIR / "vc_overrides.json"
+HISTORY_PATH = DATA_DIR / "vc_history.jsonl"
+
+
+def _load_overrides() -> dict:
+    try:
+        return json.loads(OVERRIDES_PATH.read_text() or "{}") if OVERRIDES_PATH.exists() else {}
+    except Exception:
+        return {}
+
+
+def _apply_overrides(ticker: str, data: dict) -> dict:
+    """Merge admin-verified corrections into the AI output. Locked edges
+    always win — a future AI regeneration cannot silently overwrite them.
+    Every edge carries a confidence tier in the data model itself:
+    'estimated' (AI) or 'verified' (admin-published correction)."""
+    ov = _load_overrides().get(ticker.upper(), {})
+    for role in ("suppliers", "customers", "competitors"):
+        for node in data.get(role) or []:
+            node.setdefault("confidence", "estimated")
+            key = f"{role[:-1]}|{(node.get('name') or '').upper()}"
+            o = ov.get(key)
+            if o:
+                if o.get("revenue_pct") is not None:
+                    node["revenue_pct"] = o["revenue_pct"]
+                if o.get("note"):
+                    node["note"] = o["note"]
+                node["confidence"] = "verified"
+                node["verified_at"] = o.get("ts")
+                node["locked"] = bool(o.get("locked", True))
+    return data
+
+
+def _append_history(ticker: str, data: dict) -> None:
+    try:
+        DATA_DIR.mkdir(parents=True, exist_ok=True)
+        with open(HISTORY_PATH, "a", encoding="utf-8") as fh:
+            fh.write(json.dumps({"ticker": ticker.upper(),
+                                 "generated_at": data.get("generated_at"),
+                                 "data": data}, ensure_ascii=False) + "\n")
+    except Exception:
+        pass
+
+
 @router.get("/{ticker}")
-def chain(ticker: str, _user: dict = Depends(auth.current_user)):
+def chain(ticker: str, refresh: bool = False,
+          _user: dict = Depends(auth.current_user)):
+    """Generate (or serve cached) value-chain map — GROUNDED.
+
+    The raw ticker is canonicalized first, then the company's identity
+    (name + sector/industry) must be verifiable from our own market data
+    before the AI is allowed to generate. Without verified identity we
+    refuse with a clear error instead of letting the model hallucinate a
+    chain for whatever company the ticker letters suggest."""
     if not ai_analyst.is_available():
         raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE,
                             "No AI provider configured (GROQ_API_KEY or "
                             "GEMINI_API_KEY)")
-    f = get_stock_fundamentals(ticker)
-    company_name = (f or {}).get("name") or ticker
+
+    from lib.resolve import resolve
+    r = resolve(ticker)
+    if r["status"] == "none":
+        raise HTTPException(422, f"'{ticker}' is not a recognized ticker — "
+                                 "no value-chain map can be generated.")
+    if r["status"] == "ambiguous":
+        opts = ", ".join(c["symbol"] for c in r["candidates"][:4])
+        raise HTTPException(422, f"'{ticker}' is ambiguous ({opts}) — open the "
+                                 "specific listing first.")
+    canonical = r["match"]["symbol"]
+
+    # Identity grounding from OUR data, not the model's memory.
+    from backend import providers
+    snap = {}
     try:
-        data = vc.get_chain_data(ticker, company_name)
+        snap = providers.snapshot(canonical, quota_safe=True) or {}
+    except Exception:
+        pass
+    company_name = snap.get("name") or r["match"].get("name")
+    sector = snap.get("sector")
+    industry = snap.get("industry")
+    if not company_name or company_name == canonical:
+        f = get_stock_fundamentals(canonical) or {}
+        company_name = f.get("name") or company_name
+        sector = sector or f.get("sector")
+        industry = industry or f.get("industry")
+    if not company_name or company_name == canonical:
+        raise HTTPException(422, f"Cannot verify the identity of '{canonical}' "
+                                 "from market data — refusing to generate an "
+                                 "unattributable AI map.")
+
+    nonce = int(datetime.now(timezone.utc).timestamp()) if refresh else 0
+    try:
+        data = vc.get_chain_data(canonical, company_name, sector=sector,
+                                 industry=industry, nonce=nonce)
     except ai_analyst.AnalystError as e:
         raise HTTPException(status.HTTP_502_BAD_GATEWAY, str(e))
     if not data:
         raise HTTPException(status.HTTP_502_BAD_GATEWAY,
-                            "Could not parse a structured response.")
-    return {"ticker": ticker, "name": company_name, **data}
+                            "The AI did not return a valid structured map "
+                            "after a retry — use Regenerate to try again.")
+    data = _apply_overrides(canonical, dict(data))
+    out = {"ticker": canonical, "name": company_name, "sector": sector, **data}
+    if nonce or refresh:
+        _append_history(canonical, out)
+    elif not _history_has(canonical, data.get("generated_at")):
+        _append_history(canonical, out)
+    return out
+
+
+def _history_has(ticker: str, generated_at) -> bool:
+    if not HISTORY_PATH.exists() or not generated_at:
+        return False
+    try:
+        with open(HISTORY_PATH, "r", encoding="utf-8") as fh:
+            for ln in fh:
+                try:
+                    rec = json.loads(ln)
+                except Exception:
+                    continue
+                if rec.get("ticker") == ticker.upper() and \
+                        rec.get("generated_at") == generated_at:
+                    return True
+    except Exception:
+        pass
+    return False
+
+
+@router.get("/{ticker}/history")
+def history(ticker: str, _user: dict = Depends(auth.current_user)):
+    """Prior generated snapshots (timestamps), newest first."""
+    if not HISTORY_PATH.exists():
+        return []
+    out = []
+    try:
+        with open(HISTORY_PATH, "r", encoding="utf-8") as fh:
+            for ln in fh:
+                try:
+                    rec = json.loads(ln)
+                except Exception:
+                    continue
+                if rec.get("ticker") == ticker.upper():
+                    out.append(rec)
+    except Exception:
+        return []
+    return list(reversed(out))[:20]
+
+
+class OverrideBody(BaseModel):
+    role: str = Field(..., max_length=20)          # supplier|customer|competitor
+    node_name: str = Field(..., max_length=120)
+    revenue_pct: float | None = None
+    note: str = Field("", max_length=300)
+    locked: bool = True
+
+
+@router.put("/{ticker}/override")
+def put_override(ticker: str, body: OverrideBody,
+                 user: dict = Depends(auth.require_master_admin)):
+    """Admin-published correction for one relationship. Merged into every
+    future serve of this map as a 'verified' edge; locked entries survive
+    AI regeneration by design (merge happens at serve time)."""
+    ov = _load_overrides()
+    key = f"{body.role}|{body.node_name.upper()}"
+    ov.setdefault(ticker.upper(), {})[key] = {
+        "revenue_pct": body.revenue_pct,
+        "note": body.note,
+        "locked": body.locked,
+        "verified_by": user["username"],
+        "ts": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+    }
+    try:
+        DATA_DIR.mkdir(parents=True, exist_ok=True)
+        OVERRIDES_PATH.write_text(json.dumps(ov, indent=2, ensure_ascii=False))
+    except Exception:
+        raise HTTPException(500, "Could not save the override.")
+    return {"ok": True}
 
 
 @router.post("/{ticker}/report")

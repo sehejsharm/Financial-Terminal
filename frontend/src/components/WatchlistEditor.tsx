@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useEffect, useState } from "react";
 import { Plus, Trash2 } from "lucide-react";
 
+import { TickerInput } from "@/components/TickerInput";
 import { api, type Watchlist } from "@/lib/api";
 
 /** Create / list / delete watchlists. Writes go straight to the backend store. */
@@ -45,6 +46,8 @@ export function WatchlistEditor() {
         <div className="grid grid-cols-1 md:grid-cols-[1fr_2fr_auto] gap-2">
           <input value={name} onChange={(e) => setName(e.target.value)} placeholder="Watchlist name" className="input-bare" />
           <input value={tickers} onChange={(e) => setTickers(e.target.value)} placeholder="Tickers (RELIANCE.NS, TCS.NS, AAPL)" className="input-bare" />
+          <TickerInput value="" onCommit={(t) => setTickers((prev) => (prev.trim() ? `${prev.trim().replace(/,\s*$/, "")}, ${t}` : t))}
+                       placeholder="Search companies to add…" className="input-bare text-xs w-full" />
           <button onClick={create} disabled={busy} className="btn-primary">
             <Plus size={14} /> {busy ? "Saving…" : "Create"}
           </button>

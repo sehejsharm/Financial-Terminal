@@ -12,6 +12,8 @@ data/notes.json
 data/workspaces.json
 data/audit.jsonl
 data/vc_reports.jsonl
+data/vc_overrides.json
+data/vc_history.jsonl
 data/sentiment.jsonl
 data/.jwt_secret
 data/INITIAL_ADMIN_PASSWORD.txt

@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 
 import { Shell } from "@/components/Shell";
 import { QuantSkeleton } from "@/components/Skeleton";
+import { TickerInput } from "@/components/TickerInput";
 import { api, type Watchlist } from "@/lib/api";
 import { fmtNum } from "@/lib/utils";
 
@@ -149,6 +150,8 @@ export default function QuantPage() {
         <label className="flex flex-col gap-1 flex-1 min-w-[280px]">
           <span className="label-xs">Tickers (max 12; include the benchmark)</span>
           <input value={input} onChange={(e) => setInput(e.target.value)} className="input-bare" />
+          <TickerInput value="" onCommit={(t) => setInput((prev) => (prev.trim() ? `${prev.trim().replace(/,\s*$/, "")}, ${t}` : t))}
+                       placeholder="Search to add a ticker…" className="input-bare !py-1 text-xs w-full" />
         </label>
         <label className="flex flex-col gap-1 w-32">
           <span className="label-xs">Benchmark</span>

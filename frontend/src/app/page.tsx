@@ -55,9 +55,9 @@ function MoversPanel() {
           const cp = Number(m.change_pct ?? m.percent_change ?? 0);
           return (
             <Link key={i} href={`/terminal?t=${encodeURIComponent(sym)}`}
-                  className="flex items-center justify-between px-2 py-1.5 rounded hover:bg-panel border border-transparent hover:border-line">
-              <span className="text-sm truncate">{String(m.name ?? sym)}</span>
-              <span className={`num text-sm ${cp >= 0 ? "text-green" : "text-red"}`}>{fmtPct(cp)}</span>
+                  className="flex items-center justify-between gap-2 px-2 py-1.5 rounded hover:bg-panel border border-transparent hover:border-line min-w-0">
+              <span className="text-sm truncate min-w-0">{String(m.name ?? sym)}</span>
+              <span className={`num text-sm shrink-0 ${cp >= 0 ? "text-green" : "text-red"}`}>{fmtPct(cp)}</span>
             </Link>
           );
         })}
@@ -104,12 +104,14 @@ export default function DashboardPage() {
         })}
       </div>
 
+      {/* min-w-0 on grid children: without it the movers column refused to
+          shrink at ~1084px and the % values clipped off the right edge. */}
       <div className="grid grid-cols-1 lg:grid-cols-[2fr_1fr] gap-6 mb-8">
-        <div>
+        <div className="min-w-0">
           <h1 className="heading mb-3">WATCHLISTS</h1>
           <WatchlistEditor />
         </div>
-        <div>
+        <div className="min-w-0">
           <h1 className="heading mb-3">MOVERS</h1>
           <MoversPanel />
         </div>

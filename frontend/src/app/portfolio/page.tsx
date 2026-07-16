@@ -5,6 +5,7 @@ import { useState } from "react";
 import { Trash2 } from "lucide-react";
 
 import { DataAge } from "@/components/DataAge";
+import { TickerInput } from "@/components/TickerInput";
 import { MetricCard } from "@/components/MetricCard";
 import { Shell } from "@/components/Shell";
 import { api, type PortfolioSummary } from "@/lib/api";
@@ -56,8 +57,7 @@ export default function PortfolioPage() {
       <div className="panel-2 p-3 mb-5 flex flex-wrap items-end gap-2">
         <label className="flex flex-col gap-1 flex-1 min-w-[160px]">
           <span className="label-xs">Ticker</span>
-          <input value={ticker} onChange={(e) => setTicker(e.target.value)}
-                 placeholder="RELIANCE.NS / AAPL" className="input-bare" />
+          <TickerInput value={ticker} onCommit={setTicker} placeholder="RELIANCE.NS / AAPL" />
         </label>
         <label className="flex flex-col gap-1 w-28">
           <span className="label-xs">Quantity</span>

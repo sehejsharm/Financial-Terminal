@@ -5,7 +5,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { ChevronRight, Download, ExternalLink, Flag, Pin, PinOff, X } from "lucide-react";
 
 import { DataAge } from "@/components/DataAge";
-import { api, type ChainNode, type Quote, type ValueChain } from "@/lib/api";
+import { api, type ChainNode, type Quote, type ValueChain, type VcHistoryEntry } from "@/lib/api";
 import { fmtNum, fmtPct } from "@/lib/utils";
 
 /**
@@ -106,10 +106,13 @@ function exportCsv(data: ValueChain) {
     const v = s == null ? "" : String(s);
     return /[,"\n]/.test(v) ? `"${v.replace(/"/g, '""')}"` : v;
   };
-  const lines = ["role,name,note,revenue_pct,ticker_hint"];
+  // confidence column: "estimated" (AI) vs "verified" (admin-published) —
+  // provenance is part of the data model, exported distinctly.
+  const lines = ["role,name,note,revenue_pct,ticker_hint,confidence,verified_at"];
   const push = (role: Role, ns?: ChainNode[]) =>
     (ns ?? []).forEach((n) => lines.push(
-      [role, esc(n.name), esc(n.note), n.revenue_pct ?? "", esc(n.ticker)].join(","),
+      [role, esc(n.name), esc(n.note), n.revenue_pct ?? "", esc(n.ticker),
+       n.confidence ?? "estimated", esc(n.verified_at ?? "")].join(","),
     ));
   push("supplier", data.suppliers);
   push("customer", data.customers);
@@ -167,20 +170,22 @@ function clearPin(ticker: string) {
 }
 
 // ── node box ────────────────────────────────────────────────────────────────
-function Node({ x, y, label, note, pct, color, onClick, selected }: {
+function Node({ x, y, label, note, pct, color, onClick, selected, verified, dimmed }: {
   x: number; y: number; label: string; note?: string; pct?: number | null;
   color: string; onClick: () => void; selected: boolean;
+  verified?: boolean; dimmed?: boolean;
 }) {
   const sub = pct != null ? `≈${fmtNum(pct, 0)}% · ${note ?? ""}` : note;
+  const shown = (verified ? "✓ " : "") + label;
   return (
-    <g onClick={onClick} style={{ cursor: "pointer" }}>
-      <title>{sub ? `${label} — ${sub}` : label}</title>
+    <g onClick={onClick} style={{ cursor: "pointer" }} opacity={dimmed ? 0.15 : 1}>
+      <title>{`${verified ? "[VERIFIED] " : "[AI-estimated] "}${label}${sub ? ` — ${sub}` : ""}`}</title>
       <rect x={x - 78} y={y - 16} width={156} height={32} rx={5}
-            fill={selected ? "#1c2129" : "#11151b"} stroke={color}
-            strokeWidth={selected ? 2.4 : 1.4} />
+            fill={selected ? "#1c2129" : "#11151b"} stroke={verified ? "#1fd286" : color}
+            strokeWidth={selected ? 2.4 : verified ? 2 : 1.4} />
       <text x={x} y={y - 1} textAnchor="middle" fontSize={12}
             fill="#e8ecf2" fontWeight={600} fontFamily="JetBrains Mono, monospace">
-        {label.length > 20 ? label.slice(0, 19) + "…" : label}
+        {shown.length > 20 ? shown.slice(0, 19) + "…" : shown}
       </text>
       {sub && (
         <text x={x} y={y + 11} textAnchor="middle" fontSize={8.5}
@@ -220,6 +225,26 @@ function NodeDetail({ node, parentTicker, chainTicker, onClose, onRecenter }: {
     api.quote(best).then((q) => { if (alive) setQuote(q); }).catch(() => { if (alive) setQuote(null); });
     return () => { alive = false; };
   }, [best]);
+
+  const [watchState, setWatchState] = useState<"idle" | "saving" | "saved">("idle");
+  const [headlines, setHeadlines] = useState<{ title: string; link: string }[]>([]);
+
+  useEffect(() => {
+    if (!best) { setHeadlines([]); return; }
+    let alive = true;
+    api.news(best, 3).then((n) => { if (alive) setHeadlines((n ?? []).slice(0, 3)); }).catch(() => {});
+    return () => { alive = false; };
+  }, [best]);
+
+  async function watchCounterparty() {
+    if (!best) return;
+    setWatchState("saving");
+    try {
+      // Value-chain counterparty alert: fires on any >=5% intraday move.
+      await api.createAlert({ kind: "move", ticker: best, op: ">", value: 5 });
+      setWatchState("saved");
+    } catch { setWatchState("idle"); }
+  }
 
   async function flag() {
     setReporting(true);
@@ -272,6 +297,14 @@ function NodeDetail({ node, parentTicker, chainTicker, onClose, onRecenter }: {
             )}
           </div>
         )}
+        {headlines.length > 0 && (
+          <div className="mt-1.5">
+            {headlines.map((h, i) => (
+              <a key={i} href={h.link} target="_blank" rel="noopener noreferrer"
+                 className="block text-[11px] text-mut hover:text-amber truncate">› {h.title}</a>
+            ))}
+          </div>
+        )}
         <div className="flex flex-wrap items-center gap-1.5 mt-2">
           {/* Immediate skeleton — no more staring at stale content while search runs. */}
           {cands === null && (
@@ -291,6 +324,21 @@ function NodeDetail({ node, parentTicker, chainTicker, onClose, onRecenter }: {
           )}
           {split && showOther && <CandBtns list={split.other} />}
         </div>
+      </div>
+      <div className="flex flex-col gap-1 shrink-0">
+        {best && (
+          <>
+            <button onClick={() => router.push(`/terminal?t=${encodeURIComponent(best)}&fn=SPLC`)}
+                    className="btn-ghost text-[11px] whitespace-nowrap" title="Open this counterparty's own value-chain map">
+              Their value chain
+            </button>
+            <button onClick={watchCounterparty} disabled={watchState !== "idle"}
+                    className={`btn-ghost text-[11px] whitespace-nowrap ${watchState === "saved" ? "!text-green" : ""}`}
+                    title="Create an alert: notify me when this counterparty moves >=5% in a day">
+              {watchState === "saved" ? "Watching ✓" : watchState === "saving" ? "…" : "Watch ≥5% move"}
+            </button>
+          </>
+        )}
       </div>
       <button onClick={flag} disabled={reported || reporting}
               title="Flag this relationship as wrong — goes to the admin review queue"
@@ -320,20 +368,61 @@ export function ValueChainMap({ ticker }: { ticker: string }) {
   // New seed ticker (from the terminal search) resets the trail.
   useEffect(() => { setTrail([]); }, [ticker]);
 
-  const load = useCallback((t: string) => {
+  // History snapshots + zoom/pan + in-graph filter (flagship upgrades).
+  const [history, setHistory] = useState<VcHistoryEntry[]>([]);
+  const [snapshotTs, setSnapshotTs] = useState<string | null>(null); // viewing a prior version
+  const [graphFilter, setGraphFilter] = useState("");
+  const [view, setView] = useState({ x: 0, y: 0, w: W, h: H });
+  const panRef = useRef<{ sx: number; sy: number; vx: number; vy: number } | null>(null);
+
+  const load = useCallback((t: string, refresh = false) => {
     setBusy(true); setErr(null); setData(null); setSelected(null); setPinnedAt(null);
-    const pin = loadPin(t);
+    setSnapshotTs(null); setView({ x: 0, y: 0, w: W, h: H });
+    const pin = !refresh && loadPin(t);
     if (pin) {
       setData(pin.data); setFetchedAt(pin.pinnedAt); setPinnedAt(pin.pinnedAt); setBusy(false);
       return;
     }
-    api.valueChain(t)
+    api.valueChain(t, refresh)
       .then((m) => { setData(m.data); setFetchedAt(m.fetchedAt); })
       .catch((e) => setErr(e?.detail || "Value-chain mapping failed."))
       .finally(() => setBusy(false));
+    api.vcHistory(t).then(setHistory).catch(() => setHistory([]));
   }, []);
 
   useEffect(() => { load(current); }, [current, load]);
+
+  function viewSnapshot(entry: VcHistoryEntry) {
+    setData(entry.data); setSnapshotTs(entry.generated_at); setSelected(null);
+  }
+
+  // Zoom (wheel) + pan (drag) on the SVG viewBox.
+  function onWheel(e: React.WheelEvent) {
+    e.preventDefault();
+    const factor = e.deltaY > 0 ? 1.15 : 1 / 1.15;
+    setView((v) => {
+      const w = Math.min(W * 2, Math.max(W / 6, v.w * factor));
+      const h = w * (H / W);
+      return { x: v.x + (v.w - w) / 2, y: v.y + (v.h - h) / 2, w, h };
+    });
+  }
+  function onPointerDown(e: React.PointerEvent) {
+    panRef.current = { sx: e.clientX, sy: e.clientY, vx: view.x, vy: view.y };
+    (e.target as Element).setPointerCapture?.(e.pointerId);
+  }
+  function onPointerMove(e: React.PointerEvent) {
+    const p = panRef.current;
+    if (!p || !svgRef.current) return;
+    const scale = view.w / svgRef.current.clientWidth;
+    setView((v) => ({ ...v, x: p.vx - (e.clientX - p.sx) * scale, y: p.vy - (e.clientY - p.sy) * scale }));
+  }
+  function onPointerUp() { panRef.current = null; }
+
+  const matchesFilter = (n: ChainNode) => {
+    const f = graphFilter.trim().toLowerCase();
+    if (!f) return true;
+    return n.name.toLowerCase().includes(f) || (n.note ?? "").toLowerCase().includes(f);
+  };
 
   function recenter(symbol: string, name: string) {
     setTrail((tr) => [...tr, { t: symbol, name }]);
@@ -385,12 +474,53 @@ export function ValueChainMap({ ticker }: { ticker: string }) {
         </div>
       )}
 
+      {/* PROMINENT provenance banner (was small footer text — promoted given
+          the hallucination risk of ungrounded generations). */}
+      <div className="border border-amber/60 bg-amber/10 rounded-md px-3 py-2 mb-3 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs">
+        <span className="text-amber font-bold uppercase tracking-wider">AI-generated map</span>
+        <span className="text-mut">{data.source || "LLM"}{data.generated_at ? ` · generated ${new Date(data.generated_at).toLocaleString()}` : ""}</span>
+        <span className="text-mut">Not sourced from filings unless marked <span className="text-green">✓ verified</span> — verify independently.</span>
+        <div className="flex-1" />
+        {snapshotTs && (
+          <span className="text-amber">Viewing snapshot from {new Date(snapshotTs).toLocaleString()}
+            <button onClick={() => load(current)} className="ml-2 underline">back to live</button>
+          </span>
+        )}
+        {!snapshotTs && (
+          <button onClick={() => load(current, true)} disabled={busy}
+                  className="btn-ghost !py-1 text-xs" title="Discard the cached map and regenerate now">
+            Regenerate
+          </button>
+        )}
+      </div>
+
       <div className="flex flex-wrap items-center gap-4 mb-3 text-[11px] text-mut">
         <span><span style={{ color: COL.supplier }}>●</span> Suppliers</span>
         <span><span style={{ color: COL.company }}>●</span> {data.name}</span>
         <span><span style={{ color: COL.customer }}>●</span> Customers</span>
         <span><span style={{ color: COL.competitor }}>●</span> Competitors</span>
-        <span className="opacity-80">edge weight = AI-estimated exposure</span>
+        <span className="opacity-80">solid ✓ = admin-verified · others = AI-estimated (weight = est. exposure)</span>
+        <input value={graphFilter} onChange={(e) => setGraphFilter(e.target.value)}
+               placeholder="Find in graph…" className="input-bare !py-1 !px-2 text-[11px] w-32" />
+        {history.length > 1 && (
+          <select value={snapshotTs ?? ""} className="input-bare !py-1 !px-2 text-[11px] cursor-pointer w-44"
+                  onChange={(e) => {
+                    const ts = e.target.value;
+                    if (!ts) { load(current); return; }
+                    const entry = history.find((h) => h.generated_at === ts);
+                    if (entry) viewSnapshot(entry);
+                  }}>
+            <option value="">Latest (live)</option>
+            {history.map((h) => (
+              <option key={h.generated_at ?? ""} value={h.generated_at ?? ""}>
+                {h.generated_at ? new Date(h.generated_at).toLocaleString() : "unknown"}
+              </option>
+            ))}
+          </select>
+        )}
+        <button onClick={() => setView({ x: 0, y: 0, w: W, h: H })} className="hover:text-amber" title="Reset zoom/pan">
+          Reset view
+        </button>
         <div className="flex-1" />
         {pinnedAt && (
           <span className="text-amber border border-amber/50 rounded px-1.5 py-0.5 text-[9px] uppercase tracking-wider">
@@ -409,8 +539,11 @@ export function ValueChainMap({ ticker }: { ticker: string }) {
         <button onClick={() => svgRef.current && exportPng(svgRef.current, current)} title="Export as PNG" className="hover:text-amber">PNG</button>
       </div>
 
-      <div className="panel overflow-x-auto">
-        <svg ref={svgRef} viewBox={`0 0 ${W} ${H}`} className="w-full" style={{ minWidth: 700 }}>
+      <div className="panel overflow-hidden touch-none" onWheel={onWheel}
+           onPointerDown={onPointerDown} onPointerMove={onPointerMove}
+           onPointerUp={onPointerUp} style={{ cursor: "grab" }}>
+        <svg ref={svgRef} viewBox={`${view.x} ${view.y} ${view.w} ${view.h}`}
+             className="w-full" style={{ minWidth: 320, maxHeight: "72vh" }}>
           <defs>
             <marker id="arrow" markerWidth="8" markerHeight="8" refX="7" refY="3"
                     orient="auto" markerUnits="strokeWidth">
@@ -418,15 +551,25 @@ export function ValueChainMap({ ticker }: { ticker: string }) {
             </marker>
           </defs>
 
+          {/* Edge styling encodes BOTH exposure (width/opacity) and
+              provenance tier: verified = solid, AI-estimated = dashed. */}
           {suppliers.map((s, i) => (
             <line key={`se${i}`} x1={s.x + 78} y1={s.y} x2={CX - 90} y2={CY}
-                  stroke={COL.supplier} strokeOpacity={edgeOpacity(s.revenue_pct)}
-                  strokeWidth={edgeWidth(s.revenue_pct)} markerEnd="url(#arrow)" />
+                  stroke={s.confidence === "verified" ? "#1fd286" : COL.supplier}
+                  strokeOpacity={s.confidence === "verified" ? 0.9 : edgeOpacity(s.revenue_pct)}
+                  strokeWidth={s.confidence === "verified" ? Math.max(2, edgeWidth(s.revenue_pct)) : edgeWidth(s.revenue_pct)}
+                  strokeDasharray={s.confidence === "verified" ? undefined : "6 4"}
+                  opacity={matchesFilter(s) ? 1 : 0.12}
+                  markerEnd="url(#arrow)" />
           ))}
           {customers.map((c, i) => (
             <line key={`ce${i}`} x1={CX + 90} y1={CY} x2={c.x - 78} y2={c.y}
-                  stroke={COL.customer} strokeOpacity={edgeOpacity(c.revenue_pct)}
-                  strokeWidth={edgeWidth(c.revenue_pct)} markerEnd="url(#arrow)" />
+                  stroke={c.confidence === "verified" ? "#1fd286" : COL.customer}
+                  strokeOpacity={c.confidence === "verified" ? 0.9 : edgeOpacity(c.revenue_pct)}
+                  strokeWidth={c.confidence === "verified" ? Math.max(2, edgeWidth(c.revenue_pct)) : edgeWidth(c.revenue_pct)}
+                  strokeDasharray={c.confidence === "verified" ? undefined : "6 4"}
+                  opacity={matchesFilter(c) ? 1 : 0.12}
+                  markerEnd="url(#arrow)" />
           ))}
           {competitors.map((c, i) => (
             <line key={`ke${i}`} x1={CX} y1={CY + 26} x2={c.x} y2={c.y - 18}
@@ -447,16 +590,19 @@ export function ValueChainMap({ ticker }: { ticker: string }) {
           {suppliers.map((s, i) => (
             <Node key={`s${i}`} x={s.x} y={s.y} label={s.name} note={s.note} pct={s.revenue_pct}
                   color={COL.supplier} onClick={() => pick(s, "supplier")}
+                  verified={s.confidence === "verified"} dimmed={!matchesFilter(s)}
                   selected={selected?.name === s.name && selected.role === "supplier"} />
           ))}
           {customers.map((c, i) => (
             <Node key={`c${i}`} x={c.x} y={c.y} label={c.name} note={c.note} pct={c.revenue_pct}
                   color={COL.customer} onClick={() => pick(c, "customer")}
+                  verified={c.confidence === "verified"} dimmed={!matchesFilter(c)}
                   selected={selected?.name === c.name && selected.role === "customer"} />
           ))}
           {competitors.map((c, i) => (
             <Node key={`k${i}`} x={c.x} y={c.y} label={c.name} note={c.note}
                   color={COL.competitor} onClick={() => pick(c, "competitor")}
+                  verified={c.confidence === "verified"} dimmed={!matchesFilter(c)}
                   selected={selected?.name === c.name && selected.role === "competitor"} />
           ))}
         </svg>

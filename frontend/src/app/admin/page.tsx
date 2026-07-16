@@ -83,6 +83,7 @@ export default function AdminPage() {
                     <th className="text-left px-3 py-2 font-medium">Node</th>
                     <th className="text-left px-3 py-2 font-medium">Role</th>
                     <th className="text-left px-3 py-2 font-medium">Reason</th>
+                    <th className="px-3 py-2"></th>
                   </tr>
                 </thead>
                 <tbody>
@@ -94,6 +95,21 @@ export default function AdminPage() {
                       <td className="px-3 py-2">{r.node_name}</td>
                       <td className="px-3 py-2 uppercase text-mut">{r.role}</td>
                       <td className="px-3 py-2 text-mut">{r.reason || "—"}</td>
+                      <td className="px-3 py-2">
+                        <button className="btn-ghost text-[11px]"
+                          onClick={async () => {
+                            const pctRaw = window.prompt(`Corrected exposure %% for ${r.node_name} (blank = keep)`, "");
+                            const note = window.prompt("Corrected description (blank = keep)", "") || "";
+                            const pct = pctRaw ? parseFloat(pctRaw) : null;
+                            try {
+                              await api.vcOverride(r.ticker, { role: r.role, node_name: r.node_name,
+                                revenue_pct: pct != null && !Number.isNaN(pct) ? pct : null, note, locked: true });
+                              alert("Correction published — the edge is now verified + locked (AI regenerations cannot overwrite it).");
+                            } catch { alert("Failed to publish correction."); }
+                          }}>
+                          Fix &amp; publish
+                        </button>
+                      </td>
                     </tr>
                   ))}
                 </tbody>

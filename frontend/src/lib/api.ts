@@ -187,7 +187,19 @@ export type ChainNode = {
   revenue_pct?: number | null;
   /** AI-suggested primary ticker for this partner — must be verified. */
   ticker?: string | null;
+  /** Provenance tier: "estimated" (AI) or "verified" (admin-published). */
+  confidence?: "estimated" | "verified";
+  verified_at?: string | null;
+  locked?: boolean;
 };
+export type ResolveRec = { symbol: string; name: string; exchange: string; isin?: string };
+export type ResolveResult = {
+  status: "resolved" | "ambiguous" | "none";
+  input: string;
+  match: ResolveRec | null;
+  candidates: ResolveRec[];
+};
+export type VcHistoryEntry = { ticker: string; generated_at: string | null; data: ValueChain };
 export type ValueChain = {
   ticker: string; name: string;
   suppliers?: ChainNode[]; customers?: ChainNode[]; competitors?: ChainNode[];
@@ -392,9 +404,21 @@ export const api = {
       `/api/v1/options/${encodeURIComponent(ticker)}/chain?expiry=${encodeURIComponent(expiry)}`,
     ),
 
+  // resolution
+  resolve: (q: string) =>
+    apiFetch<ResolveResult>(`/api/v1/market/resolve?q=${encodeURIComponent(q)}`),
+
   // value chain
-  valueChain: (ticker: string) =>
-    apiFetchMeta<ValueChain>(`/api/v1/value-chain/${encodeURIComponent(ticker)}`),
+  valueChain: (ticker: string, refresh = false) =>
+    apiFetchMeta<ValueChain>(
+      `/api/v1/value-chain/${encodeURIComponent(ticker)}${refresh ? "?refresh=1" : ""}`,
+      {}, { fresh: refresh }),
+  vcHistory: (ticker: string) =>
+    apiFetch<VcHistoryEntry[]>(`/api/v1/value-chain/${encodeURIComponent(ticker)}/history`),
+  vcOverride: (ticker: string, o: { role: string; node_name: string; revenue_pct?: number | null; note?: string; locked?: boolean }) =>
+    apiFetch<{ ok: boolean }>(`/api/v1/value-chain/${encodeURIComponent(ticker)}/override`, {
+      method: "PUT", body: JSON.stringify(o),
+    }),
   reportValueChain: (ticker: string, payload: { node_name: string; role: string; reason?: string }) =>
     apiFetch<{ ok: boolean }>(`/api/v1/value-chain/${encodeURIComponent(ticker)}/report`, {
       method: "POST", body: JSON.stringify({ reason: "", ...payload }),

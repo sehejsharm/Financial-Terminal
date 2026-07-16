@@ -25,7 +25,8 @@ router = APIRouter(prefix="/alerts", tags=["alerts"])
 log = logging.getLogger("motherboard.alerts")
 _MAX_PUSH_SUBS = 5
 
-KINDS = {"price", "pe", "spread_10y2y"}
+KINDS = {"price", "pe", "spread_10y2y", "move", "volume_spike"}
+_TICKER_KINDS = {"price", "pe", "move", "volume_spike"}
 _MAX_EVENTS = 50
 _MAX_ALERTS = 40
 
@@ -53,14 +54,16 @@ def create(body: AlertCreate, user: dict = Depends(auth.current_user)):
         raise HTTPException(400, f"kind must be one of {sorted(KINDS)}")
     if body.op not in (">", "<"):
         raise HTTPException(400, "op must be '>' or '<'")
-    if body.kind in ("price", "pe") and not (body.ticker or "").strip():
+    if body.kind in _TICKER_KINDS and not (body.ticker or "").strip():
         raise HTTPException(400, f"'{body.kind}' alerts need a ticker")
     doc = _doc(user["username"])
     if len(doc["alerts"]) >= _MAX_ALERTS:
         raise HTTPException(400, f"Alert limit reached ({_MAX_ALERTS}).")
+    from lib.resolve import canonicalize
+    raw_ticker = body.ticker.strip().upper() if body.ticker else None
     alert = {
         "id": str(uuid.uuid4()), "kind": body.kind,
-        "ticker": body.ticker.strip().upper() if body.ticker else None,
+        "ticker": (canonicalize(raw_ticker) or raw_ticker) if raw_ticker else None,
         "op": body.op, "value": body.value, "active": True,
         "created_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
         "triggered_at": None,
@@ -153,9 +156,19 @@ def _current_value(alert: dict) -> float | None:
         if alert["kind"] == "price":
             q = providers.quote(alert["ticker"])
             return q.get("price") if q else None
+        if alert["kind"] == "move":
+            # Absolute intraday % move — used for "big move on this name"
+            # alerts (incl. value-chain counterparty watches).
+            q = providers.quote(alert["ticker"])
+            cp = q.get("change_pct") if q else None
+            return abs(cp) if cp is not None else None
         if alert["kind"] == "pe":
             s = providers.snapshot(alert["ticker"], quota_safe=True)
             return s.get("trailing_pe") if s else None
+        if alert["kind"] == "volume_spike":
+            s = providers.snapshot(alert["ticker"], quota_safe=True) or {}
+            vol, avg = s.get("volume"), s.get("avg_volume")
+            return (vol / avg) if (vol and avg) else None
         if alert["kind"] == "spread_10y2y":
             from lib.macro import get_indicator
             ind = get_indicator("10Y-2Y spread", "US")
@@ -167,7 +180,8 @@ def _current_value(alert: dict) -> float | None:
 
 def _describe(alert: dict, val: float) -> str:
     subject = alert["ticker"] or "10Y-2Y spread"
-    metric = {"price": "price", "pe": "P/E", "spread_10y2y": "spread"}[alert["kind"]]
+    metric = {"price": "price", "pe": "P/E", "spread_10y2y": "spread",
+              "move": "abs day move %", "volume_spike": "volume vs avg"}[alert["kind"]]
     return (f"{subject} {metric} is {val:.2f} — crossed {alert['op']} "
             f"{alert['value']:g}")
 

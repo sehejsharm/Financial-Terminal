@@ -37,8 +37,10 @@ def get_portfolio(user: dict = Depends(auth.current_user)):
 
 @router.post("/positions", status_code=201)
 def add_position(body: PositionCreate, user: dict = Depends(auth.current_user)):
+    from lib.resolve import canonicalize
+    raw = body.ticker.strip().upper()
     doc = _doc(user["username"])
-    pos = {"id": str(uuid.uuid4()), "ticker": body.ticker.strip().upper(),
+    pos = {"id": str(uuid.uuid4()), "ticker": canonicalize(raw) or raw,
            "qty": body.qty, "cost": body.cost}
     doc["positions"].append(pos)
     get_storage().save_user_doc("portfolios", user["username"], doc)

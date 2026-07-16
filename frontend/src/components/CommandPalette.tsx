@@ -22,6 +22,12 @@ export function CommandPalette({
   const [q, setQ] = useState("");
   const [hits, setHits] = useState<SearchHit[]>([]);
   const [showHelp, setShowHelp] = useState(false);
+  const [recents, setRecents] = useState<string[]>([]);
+  useEffect(() => {
+    if (!open) return;
+    try { setRecents(JSON.parse(localStorage.getItem("mb_recent_tickers") || "[]").slice(0, 6)); }
+    catch { setRecents([]); }
+  }, [open]);
 
   // Debounce ticker search via the API.
   useEffect(() => {
@@ -51,6 +57,17 @@ export function CommandPalette({
             className="w-full bg-transparent border-0 border-b border-line px-4 py-3.5 text-txt placeholder:text-mut/70 focus:outline-none"
           />
           <Command.List className="max-h-[60vh] overflow-y-auto py-1">
+            {q.trim().length === 0 && recents.length > 0 && (
+              <Command.Group heading="Recent" className="px-2 py-1 text-mut">
+                {recents.map((t) => (
+                  <Command.Item key={`r-${t}`} onSelect={() => go(`/terminal?t=${encodeURIComponent(t)}`)}
+                    className="flex items-center gap-3 px-3 py-2 rounded cursor-pointer data-[selected=true]:bg-panel data-[selected=true]:text-amber">
+                    <span className="text-mut text-[10px] uppercase tracking-wider">Recent</span>
+                    <span className="text-amber font-bold">{t}</span>
+                  </Command.Item>
+                ))}
+              </Command.Group>
+            )}
             {/* Bloomberg-style command line: "RELIANCE.NS DES", "AAPL OMON",
                 "RELIANCE TCS INFY CF" — parsed live and shown first so Enter
                 executes the function jump. */}
@@ -74,6 +91,23 @@ export function CommandPalette({
                 </Command.Group>
               );
             })()}
+
+            {hits.length > 0 && (
+              <Command.Group heading="Securities" className="px-2 py-1 text-mut">
+                {hits.map((h) => (
+                  <Command.Item
+                    key={h.symbol}
+                    onSelect={() => go(`/terminal?t=${encodeURIComponent(h.symbol)}`)}
+                    className="flex items-center gap-3 px-3 py-2 rounded cursor-pointer
+                               data-[selected=true]:bg-panel data-[selected=true]:text-amber"
+                  >
+                    <span className="text-amber font-bold tracking-wider w-24 truncate">{h.symbol}</span>
+                    <span className="flex-1 truncate text-txt">{h.name}</span>
+                    {h.exchange && <span className="text-mut text-xs">{h.exchange}</span>}
+                  </Command.Item>
+                ))}
+              </Command.Group>
+            )}
 
             {/* Synthetic "open raw query" row — cmdk's own keyboard handler
                 selects it on Enter, which fixes the earlier bug where the
@@ -114,22 +148,7 @@ export function CommandPalette({
               ))}
             </Command.Group>
 
-            {hits.length > 0 && (
-              <Command.Group heading="Securities" className="px-2 py-1 text-mut">
-                {hits.map((h) => (
-                  <Command.Item
-                    key={h.symbol}
-                    onSelect={() => go(`/terminal?t=${encodeURIComponent(h.symbol)}`)}
-                    className="flex items-center gap-3 px-3 py-2 rounded cursor-pointer
-                               data-[selected=true]:bg-panel data-[selected=true]:text-amber"
-                  >
-                    <span className="text-amber font-bold tracking-wider w-24 truncate">{h.symbol}</span>
-                    <span className="flex-1 truncate text-txt">{h.name}</span>
-                    {h.exchange && <span className="text-mut text-xs">{h.exchange}</span>}
-                  </Command.Item>
-                ))}
-              </Command.Group>
-            )}
+
           </Command.List>
         </Command>
 

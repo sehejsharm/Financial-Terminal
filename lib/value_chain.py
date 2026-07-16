@@ -72,27 +72,50 @@ Hard rules (the model that ignores these will be rejected):
 - Names must fit in chart nodes (≤22 chars). If a real name is too long, abbreviate (e.g. "Saudi Aramco").
 - "revenue_pct" is an ESTIMATE — a plain number, no % sign. null when you have no basis. Never invent precision.
 - "ticker" must be the partner's OWN primary listing, exact symbol with exchange suffix for non-US listings. Do NOT guess: a subsidiary's or similarly-named company's ticker is WORSE than null (e.g. Saudi Aramco is 2222.SR — 2223.SR is its Luberef subsidiary, wrong). Private/state entities and segments: null.
-- The subject company is: {name} ({ticker})
+- The subject company is: {name} ({ticker}){grounding}
+- GROUNDING RULE: map the company NAMED ABOVE with the sector/industry given.
+  If your knowledge of this ticker conflicts with the name/sector above, the
+  name/sector above wins — do NOT map a different company that shares the
+  ticker letters.
 """
 
 
-@st.cache_data(ttl=43200, show_spinner=False)   # 12-hour cache per ticker
-def get_chain_data(ticker: str, company_name: str) -> dict | None:
-    """Call Gemini for structured value-chain JSON.  Cached 12 h."""
-    prompt = _JSON_PROMPT.format(name=company_name, ticker=ticker)
-    try:
-        raw = ai_analyst._call(prompt, max_tokens=2200)
-    except ai_analyst.AnalystError:
-        raise
-    # Strip any accidental markdown fences
+def _parse_chain_json(raw: str) -> dict | None:
     raw = re.sub(r"```[a-z]*", "", raw).strip().strip("`").strip()
-    # Find the outermost { … }
     m = re.search(r"\{.*\}", raw, re.DOTALL)
     if not m:
         return None
     try:
-        data = json.loads(m.group())
+        return json.loads(m.group())
     except json.JSONDecodeError:
+        return None
+
+
+@st.cache_data(ttl=43200, show_spinner=False)   # 12-hour cache per ticker
+def get_chain_data(ticker: str, company_name: str, sector: str | None = None,
+                   industry: str | None = None, nonce: int = 0) -> dict | None:
+    """Structured value-chain JSON, grounded in the RESOLVED company's
+    verified sector/industry. `nonce` busts the cache for user-requested
+    regeneration. One stricter retry on parse failure."""
+    grounding = ""
+    if sector or industry:
+        grounding = (f"\n- VERIFIED DATA: sector = {sector or 'n/a'}, "
+                     f"industry = {industry or 'n/a'}.")
+    prompt = _JSON_PROMPT.format(name=company_name, ticker=ticker,
+                                 grounding=grounding)
+    data = None
+    for attempt in range(2):
+        try:
+            raw = ai_analyst._call(prompt, max_tokens=2200)
+        except ai_analyst.AnalystError:
+            raise
+        data = _parse_chain_json(raw)
+        if data is not None:
+            break
+        # Stricter re-prompt: parse failures are usually prose leakage.
+        prompt = (prompt + "\n\nIMPORTANT: your previous answer was not valid "
+                  "JSON. Return ONLY the JSON object — no prose, no fences.")
+    if data is None:
         return None
     # Provenance: this is generated content, not filing-sourced data. Stamped
     # inside the cached payload so the timestamp reflects actual generation

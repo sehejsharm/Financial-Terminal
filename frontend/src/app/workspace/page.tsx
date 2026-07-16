@@ -6,6 +6,7 @@ import { Plus, Save, Trash2, X } from "lucide-react";
 import { News } from "@/components/News";
 import { PriceChart } from "@/components/PriceChart";
 import { Shell } from "@/components/Shell";
+import { TickerInput } from "@/components/TickerInput";
 import { ValueChainMap } from "@/components/ValueChainMap";
 import { api, type Mover, type Snapshot, type WorkspaceLayout, type WorkspacePane } from "@/lib/api";
 import { fmtNum, fmtPct, formatPercent, humanNumber } from "@/lib/utils";
@@ -203,10 +204,10 @@ export default function WorkspacePage() {
                   {WIDGETS.map((w) => <option key={w} value={w}>{WIDGET_LABELS[w]}</option>)}
                 </select>
                 {NEEDS_TICKER[pane.widget as WidgetKind] && (
-                  <input defaultValue={pane.ticker ?? ""} key={`${i}:${pane.ticker}`}
-                         onBlur={(e) => setPane(i, { ticker: e.target.value.trim().toUpperCase() })}
-                         onKeyDown={(e) => { if (e.key === "Enter") setPane(i, { ticker: (e.target as HTMLInputElement).value.trim().toUpperCase() }); }}
-                         className="input-bare !py-1 text-xs flex-1 min-w-0" placeholder="Ticker" />
+                  <div className="flex-1 min-w-0">
+                    <TickerInput value={pane.ticker ?? ""} onCommit={(t) => setPane(i, { ticker: t })}
+                                 placeholder="Ticker" className="input-bare !py-1 text-xs w-full" />
+                  </div>
                 )}
                 <button onClick={() => removePane(i)} className="text-mut hover:text-red" title="Close pane">
                   <X size={13} />

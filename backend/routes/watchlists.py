@@ -12,6 +12,20 @@ from backend.storage import get_storage
 router = APIRouter(prefix="/watchlists", tags=["watchlists"])
 
 
+def _norm_tickers(tickers: list[str]) -> list[str]:
+    """Canonicalize bare symbols on save ("TCS" -> "TCS.NS"); qualified
+    input passes through; unresolvable input is kept as typed (the UI
+    already resolves interactively — this is the server-side backstop)."""
+    from lib.resolve import canonicalize
+    out = []
+    for t in tickers:
+        t = t.strip().upper()
+        if not t:
+            continue
+        out.append(canonicalize(t) or t)
+    return out
+
+
 @router.get("", response_model=list[Watchlist])
 def list_all(user: dict = Depends(auth.current_user)):
     return get_storage().watchlists_for(user["username"])
@@ -21,7 +35,7 @@ def list_all(user: dict = Depends(auth.current_user)):
 def create(body: WatchlistCreate, user: dict = Depends(auth.current_user)):
     wl = {"id": str(uuid.uuid4()),
           "name": body.name.strip() or "Untitled",
-          "tickers": [t.strip().upper() for t in body.tickers if t.strip()]}
+          "tickers": _norm_tickers(body.tickers)}
     return get_storage().upsert_watchlist(user["username"], wl)
 
 
@@ -33,7 +47,7 @@ def update(wl_id: str, body: WatchlistCreate,
     if not existing:
         raise HTTPException(404, "Watchlist not found")
     wl = {"id": wl_id, "name": body.name.strip() or existing["name"],
-          "tickers": [t.strip().upper() for t in body.tickers if t.strip()]}
+          "tickers": _norm_tickers(body.tickers)}
     return get_storage().upsert_watchlist(user["username"], wl)
 
 
