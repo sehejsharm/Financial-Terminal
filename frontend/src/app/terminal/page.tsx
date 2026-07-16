@@ -19,6 +19,7 @@ import { OptionsChain } from "@/components/OptionsChain";
 import { Ownership } from "@/components/Ownership";
 import { PriceChart } from "@/components/PriceChart";
 import { Shell } from "@/components/Shell";
+import { TerminalSkeleton } from "@/components/Skeleton";
 import { StreetRatings } from "@/components/StreetRatings";
 import { ValueChainMap } from "@/components/ValueChainMap";
 import { Wacc } from "@/components/Wacc";
@@ -102,6 +103,17 @@ function TerminalInner() {
   const err = quoteLive.error && !quote && !snap
     ? `Could not load data for ${ticker}.` : null;
 
+  // Symbol didn't resolve — offer close matches instead of a blank page.
+  const [suggestions, setSuggestions] = useState<{ symbol: string; name: string }[]>([]);
+  useEffect(() => {
+    if (!err) { setSuggestions([]); return; }
+    let alive = true;
+    api.search(ticker)
+      .then((hits) => { if (alive) setSuggestions((hits ?? []).slice(0, 5)); })
+      .catch(() => {});
+    return () => { alive = false; };
+  }, [err, ticker]);
+
   // History reloads on ticker OR period change.
   useEffect(() => {
     api.history(ticker, period).then((h) => setCandles(h?.candles ?? [])).catch(() => setCandles([]));
@@ -163,8 +175,26 @@ function TerminalInner() {
         />
       </div>
 
-      {loading && <div className="text-mut text-xs">Loading…</div>}
-      {err && !loading && <div className="text-red text-sm">{err}</div>}
+      {loading && <TerminalSkeleton />}
+      {err && !loading && (
+        <div className="panel-2 p-4">
+          <div className="text-red text-sm mb-1">Symbol not found: <span className="text-amber">{ticker}</span></div>
+          <div className="text-mut text-xs mb-3">
+            No data provider recognizes this ticker. NSE listings need the
+            <code className="text-amber"> .NS</code> suffix (RELIANCE.NS); US listings take none (AAPL).
+          </div>
+          {suggestions.length > 0 && (
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="label-xs">Did you mean</span>
+              {suggestions.map((s) => (
+                <button key={s.symbol} onClick={() => commitTicker(s.symbol)} className="btn-ghost text-xs">
+                  {s.symbol} <span className="text-mut normal-case">· {s.name}</span>
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
 
       {/* One failing widget must not take down the whole terminal —
           boundary resets when the function or ticker changes. */}

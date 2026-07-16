@@ -374,6 +374,9 @@ export const api = {
     apiFetch<CapStructure>(`/api/v1/fundamentals/${encodeURIComponent(ticker)}/capital-structure`),
   comps: (tickers: string[]) =>
     apiFetch<CompRow[]>(`/api/v1/fundamentals/comps?tickers=${encodeURIComponent(tickers.join(","))}`),
+  peers: (ticker: string) =>
+    apiFetch<{ peers: string[]; sector: string | null; basis: string; market: string }>(
+      `/api/v1/fundamentals/${encodeURIComponent(ticker)}/peers`),
   ownership: (ticker: string) =>
     apiFetch<Ownership>(`/api/v1/fundamentals/${encodeURIComponent(ticker)}/ownership`),
   earningsHistory: (ticker: string) =>

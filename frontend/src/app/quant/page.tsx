@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 
 import { Shell } from "@/components/Shell";
+import { QuantSkeleton } from "@/components/Skeleton";
 import { api, type Watchlist } from "@/lib/api";
 import { fmtNum } from "@/lib/utils";
 
@@ -165,7 +166,7 @@ export default function QuantPage() {
       </div>
 
       {err && <div className="text-red text-sm mb-3">{err}</div>}
-      {busy && <div className="text-mut text-xs">Fetching histories + computing…</div>}
+      {busy && <QuantSkeleton />}
 
       {res && (
         <div className="grid grid-cols-1 xl:grid-cols-[2fr_1fr] gap-6">

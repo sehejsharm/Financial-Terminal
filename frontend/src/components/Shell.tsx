@@ -145,15 +145,20 @@ export function Shell({ children }: { children: React.ReactNode }) {
       {menuOpen && (
         <div className="fixed inset-0 z-40 md:hidden" onClick={() => setMenuOpen(false)}>
           <div className="absolute inset-0 bg-black/60" />
+          {/* w-[82vw] capped at 288px: at 375-414px viewports the fixed
+              width clipped the wordmark and sign-out row. min-w-0 +
+              truncate keep long usernames from overflowing. */}
           <div onClick={(e) => e.stopPropagation()}
-               className="absolute left-0 top-0 bottom-0 w-64 bg-bg2 border-r border-line p-3 flex flex-col gap-1 overflow-y-auto">
-            <div className="flex items-center justify-between px-1 pb-3 border-b border-line mb-2">
-              <span className="text-amber font-bold tracking-[0.18em]">MOTHERBOARD</span>
-              <button onClick={() => setMenuOpen(false)} className="text-mut"><X size={16} /></button>
+               className="absolute left-0 top-0 bottom-0 w-[82vw] max-w-72 bg-bg2 border-r border-line p-3 flex flex-col gap-1 overflow-y-auto overflow-x-hidden">
+            <div className="flex items-center justify-between gap-2 px-1 pb-3 border-b border-line mb-2 min-w-0">
+              <span className="text-amber font-bold tracking-[0.14em] text-sm truncate">MOTHERBOARD</span>
+              <button onClick={() => setMenuOpen(false)} className="text-mut shrink-0"><X size={16} /></button>
             </div>
             {navLinks}
-            <button onClick={logout} className="mt-auto flex items-center gap-2 px-3 py-2 text-mut text-sm">
-              <LogOut size={13} /> Sign out ({me?.username ?? "—"})
+            <button onClick={logout}
+                    className="mt-auto flex items-center gap-2 px-3 py-2 text-mut text-sm min-w-0">
+              <LogOut size={13} className="shrink-0" />
+              <span className="truncate">Sign out ({me?.username ?? "—"})</span>
             </button>
           </div>
         </div>

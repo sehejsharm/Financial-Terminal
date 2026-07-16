@@ -5,6 +5,7 @@ import { useState } from "react";
 
 import { DataAge } from "@/components/DataAge";
 import { MetricCard } from "@/components/MetricCard";
+import { RowsSkeleton } from "@/components/Skeleton";
 import { Shell } from "@/components/Shell";
 import { WatchlistEditor } from "@/components/WatchlistEditor";
 import { api, type Mover, type Quote } from "@/lib/api";
@@ -46,7 +47,7 @@ function MoversPanel() {
         <div className="flex-1" />
         <DataAge at={updatedAt} onRefresh={refresh} busy={busy} />
       </div>
-      {busy && rows.length === 0 && <div className="text-mut text-xs">Loading…</div>}
+      {busy && rows.length === 0 && <RowsSkeleton rows={8} />}
       {!busy && rows.length === 0 && <div className="text-mut text-xs">No data.</div>}
       <div className="flex flex-col gap-1">
         {rows.map((m, i) => {

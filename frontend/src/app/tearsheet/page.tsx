@@ -18,17 +18,57 @@ function TearSheetInner() {
   const [note, setNote] = useState<Note | null>(null);
   const [ready, setReady] = useState(false);
 
+  const [notFound, setNotFound] = useState(false);
+  const [suggestions, setSuggestions] = useState<{ symbol: string; name: string }[]>([]);
+
   useEffect(() => {
     let alive = true;
+    setNotFound(false); setSuggestions([]);
     Promise.allSettled([
       api.snapshot(ticker).then((s) => alive && setSnap(s)),
       api.quote(ticker).then((q) => alive && setQuote(q)),
-      api.comps([ticker, "TCS.NS", "INFY.NS", "WIPRO.NS"].filter((v, i, a) => a.indexOf(v) === i))
+      // Peers by sector+exchange (same source as the terminal Comparables).
+      api.peers(ticker)
+        .then((p) => api.comps(p.peers))
+        .catch(() => api.comps([ticker]))
         .then((c) => alive && setComps(c)),
       api.note(ticker).then((n) => alive && setNote(n)),
-    ]).then(() => alive && setReady(true));
+    ]).then((results) => {
+      if (!alive) return;
+      setReady(true);
+      // Both quote AND snapshot failed -> the symbol doesn't resolve.
+      const [s, q] = results;
+      if (s.status === "rejected" && q.status === "rejected") {
+        setNotFound(true);
+        api.search(ticker).then((hits) => alive && setSuggestions((hits ?? []).slice(0, 5))).catch(() => {});
+      }
+    });
     return () => { alive = false; };
   }, [ticker]);
+
+  if (notFound) {
+    return (
+      <div className="max-w-[820px] mx-auto p-8 bg-bg text-txt min-h-screen">
+        <h1 className="text-xl font-bold mb-2">Symbol not found: <span className="text-amber">{ticker}</span></h1>
+        <p className="text-mut text-sm mb-4">
+          No data provider recognizes this ticker. Check the suffix — NSE listings need
+          <code className="text-amber"> .NS</code> (e.g. RELIANCE.NS); US listings take none (e.g. AAPL).
+        </p>
+        {suggestions.length > 0 && (
+          <>
+            <div className="label-xs mb-2">Did you mean</div>
+            <div className="flex flex-wrap gap-2">
+              {suggestions.map((s) => (
+                <a key={s.symbol} href={`/tearsheet?t=${encodeURIComponent(s.symbol)}`} className="btn-ghost">
+                  {s.symbol} <span className="text-mut normal-case">· {s.name}</span>
+                </a>
+              ))}
+            </div>
+          </>
+        )}
+      </div>
+    );
+  }
 
   const cur = curForTicker(ticker, (snap?.currency as string) || quote?.currency);
   const price = (snap?.price ?? quote?.price) ?? null;

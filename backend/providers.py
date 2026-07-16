@@ -154,6 +154,16 @@ def _td_time_series(symbol: str, period: str = "1Y") -> list[dict] | None:
         return None
 
 
+# Yahoo uses different symbols than our internal ^CNX* codes for a few NSE
+# indices — without this remap the yfinance fallback 404s and the tile stays
+# "—" whenever NSE itself misses.
+_YF_INDEX_ALIASES = {
+    "^CNXMIDCAP": "NIFTY_MIDCAP_100.NS",
+    "^CNXSMALLCAP": "NIFTY_SMLCAP_100.NS",
+    "^CNX500": "^CRSLDX",
+}
+
+
 def quote(ticker: str) -> dict | None:
     """Fast path: NSE direct (for .NS / .BO / Indian indices) → Twelve Data → yfinance."""
     # Indian equities: hit NSE directly. They publish the data; Yahoo blocks
@@ -166,7 +176,10 @@ def quote(ticker: str) -> dict | None:
         q = _td_quote(ticker)
         if q and q.get("price") is not None:
             return q
-    return yf_md.get_quote(ticker)
+    q = yf_md.get_quote(_YF_INDEX_ALIASES.get(ticker, ticker))
+    if q and ticker in _YF_INDEX_ALIASES:
+        q["symbol"] = ticker  # report under the symbol the caller asked for
+    return q
 
 
 def quotes_bulk(tickers: list[str], max_workers: int = 8) -> dict[str, dict | None]:

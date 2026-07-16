@@ -134,6 +134,19 @@ def cap_structure(ticker: str, _user: dict = Depends(auth.current_user)):
     return cs or empty
 
 
+@router.get("/{ticker}/peers")
+@cached(ttl=3600)
+def peers(ticker: str, _user: dict = Depends(auth.current_user)):
+    """Comparable-company suggestions by sector + exchange (curated map —
+    no free API offers real comparables selection). Never mixes exchanges."""
+    from lib.peers import get_peers
+    try:
+        snap = providers.snapshot(ticker, quota_safe=True) or {}
+    except Exception:
+        snap = {}
+    return get_peers(ticker, snap.get("sector") or snap.get("industry"))
+
+
 @router.get("/comps")
 @cached(ttl=900)
 def comps(tickers: str = Query(..., description="Comma-separated peer tickers"),

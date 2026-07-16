@@ -79,6 +79,11 @@ export function inferCurrency(ticker: string | undefined, fallback?: string | nu
 export const curSymbol = (code?: string | null) =>
   code ? CUR_SYMBOLS[code.toUpperCase()] ?? code : "";
 
-/** One-step helper: ticker → symbol. Use this everywhere user-facing. */
-export const curForTicker = (ticker: string | undefined, providerCcy?: string | null) =>
-  curSymbol(inferCurrency(ticker, providerCcy));
+/** One-step helper: ticker → symbol. Use this everywhere user-facing.
+ *  Index tickers (^NSEI, ^CNX500, …) return "" — index levels are POINTS,
+ *  not money; a ₹ / $ prefix on them is simply wrong. Currency symbols are
+ *  reserved for actual price / market-cap fields on tradable instruments. */
+export const curForTicker = (ticker: string | undefined, providerCcy?: string | null) => {
+  if (ticker?.startsWith("^")) return "";
+  return curSymbol(inferCurrency(ticker, providerCcy));
+};

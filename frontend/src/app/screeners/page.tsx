@@ -137,6 +137,17 @@ export default function ScreenersPage() {
         </div>
       )}
 
+      {/* ROCE availability note on EVERY preset, not just empty states:
+          free providers only supply real ROCE for FMP-covered names, so the
+          column is often all "—" — say so instead of looking broken. */}
+      {rows && rows.length > 0 && cols.includes("roce") && rows.every((r) => r.roce == null) && (
+        <div className="text-[10.5px] text-amber/90 mb-2">
+          ROCE is unavailable for these names on free data (FMP key-metrics covers
+          mostly US listings; NSE names lack a free ROCE source) — the column shows
+          “—” rather than an ROE substitute.
+        </div>
+      )}
+
       {rows && rows.length > 0 && (
         <div className="panel overflow-auto">
           <table className="w-full text-xs">

@@ -104,9 +104,12 @@ export default function MacroPage() {
 
   return (
     <Shell>
-      <div className="flex items-end justify-between mb-4">
-        <h1 className="heading">MACRO</h1>
-        <div className="flex flex-wrap gap-1.5">
+      {/* flex-wrap + gap (not justify-between with items-end): at mid
+          viewports the button row used to wrap ONTO the heading. Now the
+          heading takes its own space and buttons flow below it cleanly. */}
+      <div className="flex flex-wrap items-center gap-x-6 gap-y-3 mb-4">
+        <h1 className="heading shrink-0">MACRO</h1>
+        <div className="flex flex-wrap gap-1.5 min-w-0">
           {countries.map((c) => (
             <button key={c} onClick={() => setCountry(c)}
                     className={`btn ${country === c ? "btn-primary" : "btn-ghost"}`}>
