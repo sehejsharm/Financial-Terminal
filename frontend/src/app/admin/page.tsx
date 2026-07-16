@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { Trash2 } from "lucide-react";
 
 import { Shell } from "@/components/Shell";
+import { Pager, SortableTh, TableToolbar, useTableControls } from "@/components/tableControls";
 import { api, type AdminUser, type AuditEvent, type VcReport } from "@/lib/api";
 
 export default function AdminPage() {
@@ -11,6 +12,7 @@ export default function AdminPage() {
   const [audit, setAudit] = useState<AuditEvent[] | null>(null);
   const [vcReports, setVcReports] = useState<VcReport[] | null>(null);
   const [tab, setTab] = useState<"users" | "audit" | "vc">("users");
+  const auditCtl = useTableControls(audit ?? [], 50);
   const [forbidden, setForbidden] = useState(false);
 
   // New-user form
@@ -160,32 +162,36 @@ export default function AdminPage() {
           {audit === null && <div className="text-mut text-xs">Loading audit log…</div>}
           {audit && audit.length === 0 && <div className="panel-2 p-4 text-mut text-sm">No events.</div>}
           {audit && audit.length > 0 && (
-            <div className="panel overflow-auto max-h-[70vh]">
-              <table className="w-full text-[11px]">
-                <thead className="text-mut uppercase tracking-wider sticky top-0 bg-panel">
-                  <tr className="border-b border-line">
-                    <th className="text-left px-3 py-2 font-medium">Timestamp</th>
-                    <th className="text-left px-3 py-2 font-medium">User</th>
-                    <th className="text-left px-3 py-2 font-medium">Method</th>
-                    <th className="text-left px-3 py-2 font-medium">Path</th>
-                    <th className="text-right px-3 py-2 font-medium">Status</th>
-                    <th className="text-right px-3 py-2 font-medium">ms</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {audit.map((e, i) => (
-                    <tr key={i} className="border-b border-line/40">
-                      <td className="px-3 py-1.5 num text-mut whitespace-nowrap">{e.ts.replace("T", " ").slice(0, 19)}</td>
-                      <td className="px-3 py-1.5">{e.user ?? "—"}</td>
-                      <td className="px-3 py-1.5 text-amber">{e.method}</td>
-                      <td className="px-3 py-1.5 truncate max-w-[280px]">{e.path}</td>
-                      <td className={`px-3 py-1.5 num text-right ${e.status >= 400 ? "text-red" : "text-green"}`}>{e.status}</td>
-                      <td className="px-3 py-1.5 num text-right">{e.latency_ms}</td>
+            <>
+              <TableToolbar ctl={auditCtl} placeholder="Filter by user / path / status…" />
+              <div className="panel overflow-auto max-h-[70vh]">
+                <table className="w-full text-[11px]">
+                  <thead className="text-mut uppercase tracking-wider sticky top-0 bg-panel">
+                    <tr className="border-b border-line">
+                      <SortableTh label="Timestamp" k="ts" ctl={auditCtl} />
+                      <SortableTh label="User" k="user" ctl={auditCtl} />
+                      <SortableTh label="Method" k="method" ctl={auditCtl} />
+                      <SortableTh label="Path" k="path" ctl={auditCtl} />
+                      <SortableTh label="Status" k="status" ctl={auditCtl} align="right" />
+                      <SortableTh label="ms" k="latency_ms" ctl={auditCtl} align="right" />
                     </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
+                  </thead>
+                  <tbody>
+                    {auditCtl.pageRows.map((e, i) => (
+                      <tr key={i} className="border-b border-line/40">
+                        <td className="px-3 py-1.5 num text-mut whitespace-nowrap">{e.ts.replace("T", " ").slice(0, 19)}</td>
+                        <td className="px-3 py-1.5">{e.user ?? "—"}</td>
+                        <td className="px-3 py-1.5 text-amber">{e.method}</td>
+                        <td className="px-3 py-1.5 truncate max-w-[280px]">{e.path}</td>
+                        <td className={`px-3 py-1.5 num text-right ${e.status >= 400 ? "text-red" : "text-green"}`}>{e.status}</td>
+                        <td className="px-3 py-1.5 num text-right">{e.latency_ms}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+              <Pager ctl={auditCtl} />
+            </>
           )}
         </>
       )}

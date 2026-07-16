@@ -4,3 +4,7 @@ uvicorn[standard]>=0.27
 pyjwt>=2.8
 redis>=5.0
 httpx>=0.27   # used by FastAPI's TestClient in tests
+# Web-push alert delivery. NOTE: its dep `http-ece` ships sdist-only (pure
+# Python — builds fine without a compiler), so the Dockerfile installs this
+# in a separate pip line WITHOUT --only-binary.
+pywebpush>=2.0

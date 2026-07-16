@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Trash2 } from "lucide-react";
 
 import { DataAge } from "@/components/DataAge";
@@ -14,6 +14,84 @@ const KIND_LABELS: Record<string, string> = {
   pe: "Trailing P/E",
   spread_10y2y: "US 10Y–2Y spread",
 };
+
+function urlBase64ToUint8Array(base64: string): Uint8Array {
+  const padding = "=".repeat((4 - (base64.length % 4)) % 4);
+  const b64 = (base64 + padding).replace(/-/g, "+").replace(/_/g, "/");
+  const raw = window.atob(b64);
+  return Uint8Array.from([...raw].map((c) => c.charCodeAt(0)));
+}
+
+/** Delivery channels: email (server-side SMTP) + web push (per-device). */
+function DeliveryPanel() {
+  const [cfg, setCfg] = useState<{ email: boolean; push: boolean; vapid_public_key: string | null } | null>(null);
+  const [pushState, setPushState] = useState<"idle" | "enabling" | "enabled" | "denied" | "error">("idle");
+  const [testMsg, setTestMsg] = useState<string | null>(null);
+
+  useEffect(() => {
+    api.pushConfig().then(setCfg).catch(() => setCfg(null));
+  }, []);
+
+  async function enablePush() {
+    if (!cfg?.vapid_public_key) return;
+    setPushState("enabling");
+    try {
+      const perm = await Notification.requestPermission();
+      if (perm !== "granted") { setPushState("denied"); return; }
+      const reg = await navigator.serviceWorker.register("/sw.js");
+      const sub = await reg.pushManager.subscribe({
+        userVisibleOnly: true,
+        applicationServerKey: urlBase64ToUint8Array(cfg.vapid_public_key) as BufferSource,
+      });
+      await api.pushSubscribe(sub.toJSON());
+      setPushState("enabled");
+    } catch {
+      setPushState("error");
+    }
+  }
+
+  async function test() {
+    setTestMsg("Sending…");
+    try {
+      const r = await api.alertTest();
+      const parts = [];
+      if (r.results.email !== null) parts.push(`email ${r.results.email ? "sent ✓" : "failed"}`);
+      if (r.results.push !== null) parts.push(`push ${r.results.push ? "sent ✓" : "failed"} (${r.devices} device${r.devices === 1 ? "" : "s"})`);
+      setTestMsg(parts.length ? parts.join(" · ") : "No delivery channels configured yet.");
+    } catch { setTestMsg("Test failed."); }
+  }
+
+  return (
+    <div className="panel-2 p-3 mb-6">
+      <div className="label-xs mb-2">Delivery channels</div>
+      <div className="flex flex-wrap items-center gap-3 text-xs">
+        <span className={`chip ${cfg?.email ? "!text-green !border-green/50" : ""}`}>
+          Email {cfg === null ? "…" : cfg.email ? "configured" : "off"}
+        </span>
+        <span className={`chip ${cfg?.push ? "!text-green !border-green/50" : ""}`}>
+          Push {cfg === null ? "…" : cfg.push ? "available" : "off"}
+        </span>
+        {cfg?.push && pushState !== "enabled" && (
+          <button onClick={enablePush} disabled={pushState === "enabling"} className="btn-ghost text-xs">
+            {pushState === "enabling" ? "Enabling…" : "Enable push on this device"}
+          </button>
+        )}
+        {pushState === "enabled" && <span className="text-green">This device will receive push alerts ✓</span>}
+        {pushState === "denied" && <span className="text-red">Notifications blocked in browser settings.</span>}
+        {pushState === "error" && <span className="text-red">Could not subscribe — try again.</span>}
+        <button onClick={test} className="btn-ghost text-xs">Send test alert</button>
+        {testMsg && <span className="text-mut">{testMsg}</span>}
+      </div>
+      {cfg !== null && !cfg.email && !cfg.push && (
+        <div className="text-[10.5px] text-mut mt-2">
+          To activate: set SMTP_* (email) and/or VAPID_* (push) in the server&apos;s
+          deploy/.env — see .env.example for the exact variables — then restart.
+          Alerts always appear in-app regardless.
+        </div>
+      )}
+    </div>
+  );
+}
 
 /** Alert center: create/delete conditions + triggered-event feed.
  *  Conditions are evaluated server-side every ~60s; triggered alerts
@@ -57,9 +135,10 @@ export default function AlertsPage() {
       </div>
       <div className="text-mut text-xs mb-4">
         Evaluated server-side every ~60s against live provider data. Triggered
-        alerts deactivate and appear in the feed + header bell. (Email/browser
-        push delivery needs SMTP/VAPID configuration — on the roadmap.)
+        alerts deactivate and appear in the feed + header bell.
       </div>
+
+      <DeliveryPanel />
 
       <div className="panel-2 p-3 mb-6 flex flex-wrap items-end gap-2">
         <label className="flex flex-col gap-1 w-44">

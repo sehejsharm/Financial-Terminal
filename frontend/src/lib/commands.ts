@@ -21,6 +21,26 @@ export const FN_CODES: Record<string, string> = {
   NT: "Notes",
 };
 
+/** One-liners for the ⌘K help panel. */
+export const FN_DESCRIPTIONS: Record<string, string> = {
+  DES: "Company snapshot — price, valuation, key ratios, 1Y chart",
+  GIP: "Interactive price chart with period switching",
+  FA: "Income statement / balance sheet / cash flow (annual + quarterly)",
+  EE: "Analyst estimates and price targets",
+  CS: "Capital structure — debt, cash, market cap, share count",
+  CF: "Comparables matrix vs sector + exchange peers (multi-ticker: T1 T2 T3 CF)",
+  DDIS: "Debt profile and leverage metrics",
+  OWN: "Ownership — insiders, institutions, mutual funds, officers",
+  ERN: "Quarterly earnings history vs estimates",
+  ANR: "Street analyst ratings and recommendation trend",
+  WACC: "Interactive weighted-average-cost-of-capital model",
+  SPLC: "AI value-chain map — suppliers, customers, competitors",
+  OMON: "Options chain with Black-Scholes Greeks and max pain",
+  AI: "AI deep-dive research note (Groq)",
+  CN: "Recent news with optional AI sentiment tagging",
+  NT: "Your private research notes for the ticker",
+};
+
 export type ParsedCommand = {
   tickers: string[];
   code: string;

@@ -18,7 +18,12 @@ WORKDIR /app
 # both the trixie-mirror risk above and several minutes of compile time,
 # and ca-certificates already ships in the base python image.
 COPY requirements.txt requirements-backend.txt ./
-RUN pip install --only-binary=:all: -r requirements.txt -r requirements-backend.txt
+# Wheels-only for the heavy tree (keeps the build compiler-free and fast);
+# pywebpush separately because its pure-Python dep http-ece is sdist-only —
+# no compiler needed, it just can't pass --only-binary.
+RUN grep -v "^pywebpush" requirements-backend.txt > /tmp/req-backend-wheels.txt \
+    && pip install --only-binary=:all: -r requirements.txt -r /tmp/req-backend-wheels.txt \
+    && pip install "pywebpush>=2.0"
 
 # Source comes last so dep installs stay cached on code changes.
 COPY backend ./backend

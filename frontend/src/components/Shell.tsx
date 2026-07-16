@@ -4,13 +4,13 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import {
-  Activity, BarChart3, Bell, Briefcase, Filter, Globe, Home, LayoutGrid,
-  LogOut, Menu, Newspaper, Search, Shield, Sigma, Terminal, Waves, X,
+  Activity, Bell, Briefcase, Eye, Filter, Globe, Home, LayoutGrid,
+  LogOut, Menu, Moon, Newspaper, Search, Shield, Sigma, Sun, Terminal, Waves, X,
 } from "lucide-react";
 
-import { api, token } from "@/lib/api";
+import { api, token, type AlertEvent, type Quote } from "@/lib/api";
 import { useLiveStatus } from "@/lib/useLive";
-import { cn } from "@/lib/utils";
+import { cn, fmtPct } from "@/lib/utils";
 
 import { CommandPalette } from "./CommandPalette";
 
@@ -42,6 +42,32 @@ export function Shell({ children }: { children: React.ReactNode }) {
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
   const [unseenAlerts, setUnseenAlerts] = useState(0);
+  const [bellOpen, setBellOpen] = useState(false);
+  const [bellEvents, setBellEvents] = useState<AlertEvent[]>([]);
+  const [bellMoves, setBellMoves] = useState<{ ticker: string; chg: number }[]>([]);
+
+  // Theme + colorblind-palette toggles (persisted; applied to <html> class).
+  const [lightTheme, setLightTheme] = useState(false);
+  const [cbPalette, setCbPalette] = useState(false);
+  useEffect(() => {
+    const light = localStorage.getItem("mb_theme") === "light";
+    const cb = localStorage.getItem("mb_cb") === "1";
+    setLightTheme(light); setCbPalette(cb);
+    document.documentElement.classList.toggle("light", light);
+    document.documentElement.classList.toggle("cb", cb);
+  }, []);
+  function toggleTheme() {
+    const next = !lightTheme;
+    setLightTheme(next);
+    localStorage.setItem("mb_theme", next ? "light" : "dark");
+    document.documentElement.classList.toggle("light", next);
+  }
+  function toggleCb() {
+    const next = !cbPalette;
+    setCbPalette(next);
+    localStorage.setItem("mb_cb", next ? "1" : "0");
+    document.documentElement.classList.toggle("cb", next);
+  }
   // Honest header badge: LIVE only when a panel on this page is actually
   // polling (useLive registry). Static pages show STATIC — no fake pulse.
   const { polling } = useLiveStatus();
@@ -71,10 +97,29 @@ export function Shell({ children }: { children: React.ReactNode }) {
     return () => { alive = false; clearInterval(id); };
   }, [me]);
 
-  function openAlerts() {
+  // Bell dropdown: recent triggered alerts + watchlist movers (|chg| >= 2%).
+  async function toggleBell() {
+    const opening = !bellOpen;
+    setBellOpen(opening);
+    if (!opening) return;
     localStorage.setItem(ALERTS_SEEN_KEY, String(Date.now()));
     setUnseenAlerts(0);
-    router.push("/alerts");
+    api.alertEvents().then((evs) => setBellEvents(evs.slice(0, 8))).catch(() => setBellEvents([]));
+    try {
+      const wls = await api.listWatchlists();
+      const tickers = (wls[0]?.tickers ?? []).slice(0, 20);
+      if (tickers.length) {
+        const quotes = await api.quoteBulk(tickers);
+        const moves = Object.entries(quotes)
+          .map(([t, q]) => ({ ticker: t, chg: (q as Quote | null)?.change_pct ?? 0 }))
+          .filter((m) => Math.abs(m.chg) >= 2)
+          .sort((a, b) => Math.abs(b.chg) - Math.abs(a.chg))
+          .slice(0, 5);
+        setBellMoves(moves);
+      } else {
+        setBellMoves([]);
+      }
+    } catch { setBellMoves([]); }
   }
 
   // Cmd/Ctrl+K → command palette
@@ -183,14 +228,52 @@ export function Shell({ children }: { children: React.ReactNode }) {
               <kbd className="hidden md:inline text-[10px] px-1.5 py-0.5 rounded border border-line2 text-mut">⌘K</kbd>
             </button>
             <div className="flex-1" />
-            <button onClick={openAlerts} className="relative text-mut hover:text-amber" title="Alerts">
-              <Bell size={15} />
-              {unseenAlerts > 0 && (
-                <span className="absolute -top-1.5 -right-1.5 min-w-[15px] h-[15px] px-0.5 rounded-full bg-red text-white text-[9px] flex items-center justify-center">
-                  {unseenAlerts > 9 ? "9+" : unseenAlerts}
-                </span>
-              )}
+            <button onClick={toggleTheme} className="text-mut hover:text-amber"
+                    title={lightTheme ? "Switch to dark theme" : "Switch to light theme"}>
+              {lightTheme ? <Moon size={15} /> : <Sun size={15} />}
             </button>
+            <button onClick={toggleCb}
+                    className={cbPalette ? "text-amber" : "text-mut hover:text-amber"}
+                    title={cbPalette ? "Colorblind-safe palette ON (blue=up, orange=down)" : "Enable colorblind-safe gain/loss colors"}>
+              <Eye size={15} />
+            </button>
+            <div className="relative">
+              <button onClick={toggleBell} className="relative text-mut hover:text-amber" title="Notifications">
+                <Bell size={15} />
+                {unseenAlerts > 0 && (
+                  <span className="absolute -top-1.5 -right-1.5 min-w-[15px] h-[15px] px-0.5 rounded-full bg-red text-white text-[9px] flex items-center justify-center">
+                    {unseenAlerts > 9 ? "9+" : unseenAlerts}
+                  </span>
+                )}
+              </button>
+              {bellOpen && (
+                <div className="absolute right-0 top-full mt-2 w-80 max-w-[90vw] panel-2 shadow-panel z-50 p-3"
+                     onMouseLeave={() => setBellOpen(false)}>
+                  <div className="label-xs mb-2">Triggered alerts</div>
+                  {bellEvents.length === 0 && <div className="text-mut text-xs mb-2">Nothing fired recently.</div>}
+                  {bellEvents.map((e, i) => (
+                    <div key={i} className="text-xs py-1 border-b border-line/50 flex gap-2">
+                      <span className="text-amber shrink-0">▲</span>
+                      <span className="flex-1">{e.message}</span>
+                    </div>
+                  ))}
+                  <div className="label-xs mt-3 mb-2">Watchlist moves (≥2%)</div>
+                  {bellMoves.length === 0 && <div className="text-mut text-xs">No big moves in your watchlist.</div>}
+                  {bellMoves.map((m) => (
+                    <button key={m.ticker}
+                            onClick={() => { setBellOpen(false); router.push(`/terminal?t=${encodeURIComponent(m.ticker)}`); }}
+                            className="w-full flex justify-between text-xs py-1 hover:text-amber">
+                      <span>{m.ticker}</span>
+                      <span className={`num ${m.chg >= 0 ? "text-green" : "text-red"}`}>{fmtPct(m.chg)}</span>
+                    </button>
+                  ))}
+                  <button onClick={() => { setBellOpen(false); router.push("/alerts"); }}
+                          className="mt-3 w-full btn-ghost text-xs">
+                    Open alert center →
+                  </button>
+                </div>
+              )}
+            </div>
             <div
               className="hidden sm:flex items-center gap-2 text-[11px] text-mut"
               title={polling

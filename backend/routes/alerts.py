@@ -4,8 +4,9 @@ Conditions are evaluated server-side every ~60 s (backend/app.py starts the
 loop) against the same cached provider layer the UI uses. Triggered alerts
 deactivate and land in the user's event feed, surfaced by the header bell.
 
-Delivery is in-app for v1 — browser push needs VAPID keys and email needs
-SMTP credentials; both slot into _fire() when configured (see roadmap).
+Delivery: in-app always; email (SMTP_* env) and browser push (VAPID_* env +
+per-device subscriptions stored via /alerts/push/subscribe) when configured
+— see lib/notify.py and deploy/.env.example.
 """
 from __future__ import annotations
 
@@ -18,9 +19,11 @@ from pydantic import BaseModel, Field
 
 from backend import auth, providers
 from backend.storage import get_storage
+from lib import notify
 
 router = APIRouter(prefix="/alerts", tags=["alerts"])
 log = logging.getLogger("motherboard.alerts")
+_MAX_PUSH_SUBS = 5
 
 KINDS = {"price", "pe", "spread_10y2y"}
 _MAX_EVENTS = 50
@@ -83,6 +86,66 @@ def events(user: dict = Depends(auth.current_user)):
     return list(reversed(_doc(user["username"])["events"]))
 
 
+# ── delivery channels (email + web push) ─────────────────────────────────
+
+class PushSubscription(BaseModel):
+    endpoint: str = Field(..., max_length=1000)
+    keys: dict = Field(default_factory=dict)
+
+
+@router.get("/push/config")
+def push_config(_user: dict = Depends(auth.current_user)):
+    """Which delivery channels are configured server-side (+ the VAPID
+    public key the browser needs to subscribe)."""
+    ch = notify.channels()
+    return {**ch, "vapid_public_key": notify.public_key()}
+
+
+@router.post("/push/subscribe", status_code=201)
+def push_subscribe(body: PushSubscription,
+                   user: dict = Depends(auth.current_user)):
+    """Register this browser for push delivery (per-device, capped)."""
+    doc = _doc(user["username"])
+    subs = doc.setdefault("push_subs", [])
+    subs[:] = [s for s in subs if s.get("endpoint") != body.endpoint]
+    subs.append({"endpoint": body.endpoint, "keys": body.keys})
+    doc["push_subs"] = subs[-_MAX_PUSH_SUBS:]
+    get_storage().save_user_doc("alerts", user["username"], doc)
+    return {"ok": True, "devices": len(doc["push_subs"])}
+
+
+@router.post("/test")
+def test_delivery(user: dict = Depends(auth.current_user)):
+    """Fire a test notification through every configured channel."""
+    msg = "Test alert from Motherboard Terminal — delivery is working."
+    doc = _doc(user["username"])
+    results = {"email": None, "push": None}
+    if notify.email_configured():
+        results["email"] = notify.send_email("Motherboard test alert", msg)
+    subs = doc.get("push_subs", [])
+    if notify.push_configured() and subs:
+        ok = [notify.send_push(s, "Motherboard Terminal", msg) for s in subs]
+        results["push"] = any(ok)
+    return {"channels": notify.channels(),
+            "devices": len(subs), "results": results}
+
+
+def _deliver(username: str, doc: dict, message: str) -> None:
+    """Fan a triggered alert out to every configured channel. Dead push
+    subscriptions are pruned in place (caller saves the doc)."""
+    try:
+        if notify.email_configured():
+            notify.send_email(f"Motherboard alert: {message}", message)
+        subs = doc.get("push_subs", [])
+        if notify.push_configured() and subs:
+            doc["push_subs"] = [
+                s for s in subs
+                if notify.send_push(s, "Motherboard alert", message)
+            ]
+    except Exception:
+        log.exception("alert delivery failed for %s", username)
+
+
 # ── evaluator (called from the background loop in backend/app.py) ───────────
 
 def _current_value(alert: dict) -> float | None:
@@ -129,14 +192,16 @@ def evaluate_all() -> int:
                 continue
             a["active"] = False
             a["triggered_at"] = datetime.now(timezone.utc).isoformat(timespec="seconds")
+            message = _describe(a, val)
             doc.setdefault("events", []).append({
                 "ts": a["triggered_at"], "alert_id": a["id"],
-                "message": _describe(a, val), "value": val,
+                "message": message, "value": val,
             })
             doc["events"] = doc["events"][-_MAX_EVENTS:]
+            _deliver(username, doc, message)
             dirty = True
             fired += 1
-            log.info("alert fired for %s: %s", username, _describe(a, val))
+            log.info("alert fired for %s: %s", username, message)
         if dirty:
             store.save_user_doc("alerts", username, doc)
     return fired

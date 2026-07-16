@@ -4,10 +4,12 @@ import Link from "next/link";
 import { useEffect, useState } from "react";
 
 import { Shell } from "@/components/Shell";
+import { Pager, SortableTh, TableToolbar, useTableControls } from "@/components/tableControls";
 import { api, type DealRow, type FlowRow, type InsiderRow } from "@/lib/api";
 import { fmtNum, humanNumber } from "@/lib/utils";
 
 function DealTable({ rows, label }: { rows: DealRow[] | null; label: string }) {
+  const ctl = useTableControls(rows ?? [], 50);
   if (!rows) return <div className="text-mut text-xs">Loading {label}…</div>;
   if (rows.length === 0) {
     return (
@@ -19,29 +21,34 @@ function DealTable({ rows, label }: { rows: DealRow[] | null; label: string }) {
   }
   const cols = Object.keys(rows[0]);
   return (
-    <div className="panel overflow-x-auto">
-      <table className="w-full text-xs">
-        <thead className="text-mut uppercase tracking-wider sticky top-0 bg-panel">
-          <tr className="border-b border-line">
-            {cols.map((c) => (
-              <th key={c} className="text-left px-3 py-2 font-medium whitespace-nowrap">{c.replace(/_/g, " ")}</th>
-            ))}
-          </tr>
-        </thead>
-        <tbody>
-          {rows.map((r, i) => (
-            <tr key={i} className="border-b border-line/60 hover:bg-panel">
-              {cols.map((c) => {
-                const v = r[c];
-                const display = typeof v === "number"
-                  ? v.toLocaleString(undefined, { maximumFractionDigits: 2 })
-                  : (v ?? "—");
-                return <td key={c} className="px-3 py-2 num whitespace-nowrap text-txt/90">{display}</td>;
-              })}
+    <div>
+      <TableToolbar ctl={ctl} placeholder="Filter by symbol / client…" />
+      <div className="panel overflow-x-auto">
+        <table className="w-full text-xs">
+          <thead className="text-mut uppercase tracking-wider sticky top-0 bg-panel">
+            <tr className="border-b border-line">
+              {cols.map((c) => (
+                <SortableTh key={c} label={c.replace(/_/g, " ")} k={c} ctl={ctl}
+                            align={typeof rows[0]?.[c] === "number" ? "right" : "left"} />
+              ))}
             </tr>
-          ))}
-        </tbody>
-      </table>
+          </thead>
+          <tbody>
+            {ctl.pageRows.map((r, i) => (
+              <tr key={i} className="border-b border-line/60 hover:bg-panel">
+                {cols.map((c) => {
+                  const v = r[c];
+                  const display = typeof v === "number"
+                    ? v.toLocaleString(undefined, { maximumFractionDigits: 2 })
+                    : (v ?? "—");
+                  return <td key={c} className={`px-3 py-2 num whitespace-nowrap text-txt/90 ${typeof v === "number" ? "text-right" : ""}`}>{display}</td>;
+                })}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      <Pager ctl={ctl} />
     </div>
   );
 }

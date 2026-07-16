@@ -444,6 +444,17 @@ export const api = {
   deleteAlert: (id: string) =>
     apiFetch<void>(`/api/v1/alerts/${encodeURIComponent(id)}`, { method: "DELETE" }),
   alertEvents: () => apiFetch<AlertEvent[]>("/api/v1/alerts/events"),
+  pushConfig: () =>
+    apiFetch<{ email: boolean; push: boolean; vapid_public_key: string | null }>(
+      "/api/v1/alerts/push/config"),
+  pushSubscribe: (sub: PushSubscriptionJSON) =>
+    apiFetch<{ ok: boolean; devices: number }>("/api/v1/alerts/push/subscribe", {
+      method: "POST", body: JSON.stringify(sub),
+    }),
+  alertTest: () =>
+    apiFetch<{ channels: { email: boolean; push: boolean }; devices: number;
+               results: { email: boolean | null; push: boolean | null } }>(
+      "/api/v1/alerts/test", { method: "POST", body: "{}" }),
 
   // notes
   note: (ticker: string) => apiFetch<Note>(`/api/v1/notes/${encodeURIComponent(ticker)}`),

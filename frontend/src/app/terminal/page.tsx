@@ -20,6 +20,7 @@ import { Ownership } from "@/components/Ownership";
 import { PriceChart } from "@/components/PriceChart";
 import { Shell } from "@/components/Shell";
 import { TerminalSkeleton } from "@/components/Skeleton";
+import { TickerInput } from "@/components/TickerInput";
 import { StreetRatings } from "@/components/StreetRatings";
 import { ValueChainMap } from "@/components/ValueChainMap";
 import { Wacc } from "@/components/Wacc";
@@ -134,14 +135,11 @@ function TerminalInner() {
   return (
     <Shell>
       {/* Ticker + Function */}
-      <div className="grid grid-cols-[1fr_280px] gap-3 mb-5">
-        <input
-          defaultValue={ticker}
-          key={ticker}
-          onBlur={(e) => commitTicker(e.target.value)}
-          onKeyDown={(e) => { if (e.key === "Enter") commitTicker((e.target as HTMLInputElement).value); }}
+      <div className="grid grid-cols-1 sm:grid-cols-[1fr_280px] gap-3 mb-5">
+        <TickerInput
+          value={ticker}
+          onCommit={commitTicker}
           placeholder="Ticker (RELIANCE.NS, AAPL, ^NSEI)…"
-          className="input-bare"
         />
         <select value={fn} onChange={(e) => setFn(e.target.value as Fn)} className="input-bare cursor-pointer">
           {FUNCTIONS.map((f) => <option key={f}>{f}</option>)}

@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 
 import { api } from "@/lib/api";
-import { FN_CODES, parseCommand } from "@/lib/commands";
+import { FN_CODES, FN_DESCRIPTIONS, parseCommand } from "@/lib/commands";
 
 type SearchHit = { symbol: string; name: string; exchange?: string };
 
@@ -21,6 +21,7 @@ export function CommandPalette({
   const router = useRouter();
   const [q, setQ] = useState("");
   const [hits, setHits] = useState<SearchHit[]>([]);
+  const [showHelp, setShowHelp] = useState(false);
 
   // Debounce ticker search via the API.
   useEffect(() => {
@@ -132,11 +133,36 @@ export function CommandPalette({
           </Command.List>
         </Command>
 
+        {showHelp && (
+          <div className="border-t border-line max-h-[40vh] overflow-y-auto px-4 py-3">
+            <div className="label-xs mb-2">Command reference — type TICKER + CODE, e.g. “RELIANCE.NS DES” or “AAPL OMON”</div>
+            <table className="w-full text-xs">
+              <tbody>
+                {Object.entries(FN_CODES).map(([code, label]) => (
+                  <tr key={code} className="border-b border-line/40">
+                    <td className="py-1.5 pr-3 text-green font-bold whitespace-nowrap align-top w-14">{code}</td>
+                    <td className="py-1.5 pr-3 text-amber whitespace-nowrap align-top">{label}</td>
+                    <td className="py-1.5 text-mut">{FN_DESCRIPTIONS[code] ?? ""}</td>
+                  </tr>
+                ))}
+                <tr>
+                  <td className="py-1.5 pr-3 text-green font-bold align-top w-14">CF+</td>
+                  <td className="py-1.5 pr-3 text-amber whitespace-nowrap align-top">Multi-compare</td>
+                  <td className="py-1.5 text-mut">Several tickers then CF — “RELIANCE TCS INFY CF” → side-by-side comparables (bare NSE names get .NS automatically)</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        )}
+
         <div className="border-t border-line px-4 py-2 flex items-center gap-3 text-[10px] text-mut flex-wrap">
           <span><kbd className="px-1 border border-line2 rounded">↑↓</kbd> navigate</span>
           <span><kbd className="px-1 border border-line2 rounded">↵</kbd> select</span>
           <span><kbd className="px-1 border border-line2 rounded">esc</kbd> close</span>
-          <span className="opacity-70">commands: TICKER + {Object.keys(FN_CODES).slice(0, 8).join("/")}… · multi-ticker + CF compares</span>
+          <button onClick={() => setShowHelp((v) => !v)}
+                  className="ml-auto text-amber hover:underline">
+            {showHelp ? "hide commands" : "? all commands"}
+          </button>
         </div>
       </div>
     </div>

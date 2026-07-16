@@ -2,6 +2,48 @@
 @tailwind components;
 @tailwind utilities;
 
+/* ── theme palette (RGB triplets; consumed by tailwind.config.ts) ─────────
+   Default = dark terminal. html.light swaps to the light palette.
+   html.cb swaps gain/loss to a colorblind-safe blue/orange pair (works on
+   top of either theme). Toggled from the header; persisted in localStorage. */
+:root {
+  --c-bg:      7 8 9;
+  --c-bg2:     12 14 18;
+  --c-panel:   15 18 24;
+  --c-panel2:  18 22 29;
+  --c-line:    28 33 41;
+  --c-line2:   38 44 54;
+  --c-txt:     223 227 234;
+  --c-mut:     118 124 136;
+  --c-amber:   255 176 0;
+  --c-green:   31 210 134;
+  --c-red:     255 77 79;
+}
+
+html.light {
+  --c-bg:      245 246 248;
+  --c-bg2:     236 238 242;
+  --c-panel:   255 255 255;
+  --c-panel2:  241 243 247;
+  --c-line:    216 220 227;
+  --c-line2:   194 200 210;
+  --c-txt:     26 30 38;
+  --c-mut:     92 100 112;
+  --c-amber:   154 107 0;   /* darkened for contrast on white */
+  --c-green:   13 138 95;
+  --c-red:     205 32 40;
+}
+
+/* Colorblind-safe gain/loss: blue = up, orange = down (Okabe-Ito pair). */
+html.cb {
+  --c-green:   47 126 216;
+  --c-red:     230 159 0;
+}
+html.light.cb {
+  --c-green:   21 96 189;
+  --c-red:     176 116 0;
+}
+
 @layer base {
   html, body { @apply bg-bg text-txt font-mono antialiased; }
   body {

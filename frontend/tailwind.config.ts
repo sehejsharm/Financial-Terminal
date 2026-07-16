@@ -6,19 +6,21 @@ const config: Config = {
   theme: {
     extend: {
       colors: {
-        // Terminal palette — kept aligned with the Streamlit theme so users
-        // moving between the two see one product.
-        bg:       "#070809",
-        bg2:      "#0c0e12",
-        panel:    "#0f1218",
-        panel2:   "#12161d",
-        line:     "#1c2129",
-        line2:    "#262c36",
-        txt:      "#dfe3ea",
-        mut:      "#767c88",
-        amber:    "#ffb000",
-        green:    "#1fd286",
-        red:      "#ff4d4f",
+        // Palette lives in CSS variables (globals.css) so themes can swap it
+        // at runtime: html.light for the light theme, html.cb for the
+        // colorblind-safe gain/loss pair. RGB-triplet form keeps Tailwind's
+        // alpha modifiers (text-amber/90 etc.) working.
+        bg:       "rgb(var(--c-bg) / <alpha-value>)",
+        bg2:      "rgb(var(--c-bg2) / <alpha-value>)",
+        panel:    "rgb(var(--c-panel) / <alpha-value>)",
+        panel2:   "rgb(var(--c-panel2) / <alpha-value>)",
+        line:     "rgb(var(--c-line) / <alpha-value>)",
+        line2:    "rgb(var(--c-line2) / <alpha-value>)",
+        txt:      "rgb(var(--c-txt) / <alpha-value>)",
+        mut:      "rgb(var(--c-mut) / <alpha-value>)",
+        amber:    "rgb(var(--c-amber) / <alpha-value>)",
+        green:    "rgb(var(--c-green) / <alpha-value>)",
+        red:      "rgb(var(--c-red) / <alpha-value>)",
       },
       fontFamily: {
         mono: ['"JetBrains Mono"', '"SF Mono"', "Menlo", "Consolas", "monospace"],

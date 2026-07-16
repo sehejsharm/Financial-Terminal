@@ -5,6 +5,7 @@ import { useEffect, useState } from "react";
 
 import { DataAge } from "@/components/DataAge";
 import { Shell } from "@/components/Shell";
+import { Pager, SortableTh, TableToolbar, useTableControls } from "@/components/tableControls";
 import { api, type ScreenResult } from "@/lib/api";
 
 type ScreenDef = {
@@ -89,6 +90,7 @@ export default function ScreenersPage() {
   const cols = rows && rows.length
     ? Array.from(new Set(rows.flatMap((r) => Object.keys(r)))).filter((c) => c !== "symbol")
     : [];
+  const ctl = useTableControls(rows, 25);
 
   return (
     <Shell>
@@ -149,34 +151,39 @@ export default function ScreenersPage() {
       )}
 
       {rows && rows.length > 0 && (
-        <div className="panel overflow-auto">
-          <table className="w-full text-xs">
-            <thead className="text-mut uppercase tracking-wider">
-              <tr className="border-b border-line">
-                {cols.map((c) => (
-                  <th key={c} className="text-left px-3 py-2 font-medium whitespace-nowrap">{c.replace(/_/g, " ")}</th>
-                ))}
-                <th className="px-3 py-2"></th>
-              </tr>
-            </thead>
-            <tbody>
-              {rows.map((r, i) => (
-                <tr key={i} className="border-b border-line/60 hover:bg-panel">
+        <>
+          <TableToolbar ctl={ctl} placeholder="Filter by name / ticker…" />
+          <div className="panel overflow-auto">
+            <table className="w-full text-xs">
+              <thead className="text-mut uppercase tracking-wider">
+                <tr className="border-b border-line">
                   {cols.map((c) => (
-                    <td key={c} className="px-3 py-2 num whitespace-nowrap">{fmtCell(c, r[c])}</td>
+                    <SortableTh key={c} label={c.replace(/_/g, " ")} k={c} ctl={ctl}
+                                align={typeof rows[0]?.[c] === "number" ? "right" : "left"} />
                   ))}
-                  <td className="px-3 py-2">
-                    {tickerOf(r) && (
-                      <Link href={`/terminal?t=${encodeURIComponent(tickerOf(r))}`} className="text-amber hover:underline">
-                        Open →
-                      </Link>
-                    )}
-                  </td>
+                  <th className="px-3 py-2"></th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+              </thead>
+              <tbody>
+                {ctl.pageRows.map((r, i) => (
+                  <tr key={i} className="border-b border-line/60 hover:bg-panel">
+                    {cols.map((c) => (
+                      <td key={c} className={`px-3 py-2 num whitespace-nowrap ${typeof r[c] === "number" ? "text-right" : ""}`}>{fmtCell(c, r[c])}</td>
+                    ))}
+                    <td className="px-3 py-2">
+                      {tickerOf(r) && (
+                        <Link href={`/terminal?t=${encodeURIComponent(tickerOf(r))}`} className="text-amber hover:underline">
+                          Open →
+                        </Link>
+                      )}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          <Pager ctl={ctl} />
+        </>
       )}
     </Shell>
   );
