@@ -242,11 +242,21 @@ export type PortfolioRow = Position & {
   pnl?: number | null; pnl_pct?: number | null; day_pnl?: number | null;
   weight?: number | null; currency?: string | null;
 };
+export type RealizedEvent = {
+  ts: string; ticker: string; qty: number; cost: number;
+  sell_price: number; pnl: number;
+};
 export type PortfolioSummary = {
+  portfolio?: { id: string; name: string };
+  realized?: { total: number; events: RealizedEvent[] };
   positions: PortfolioRow[];
   totals: { value: number; cost: number; pnl: number; pnl_pct: number | null; day_pnl: number } | null;
   sectors: { sector: string; value: number; weight: number }[];
   factors: { beta: number | null; dividend_yield: number | null; top_weight: number | null } | null;
+};
+export type PortfolioInfo = { id: string; name: string; positions: number };
+export type PortfolioHistoryPoint = {
+  date: string; value: number; cost: number; unrealized: number; realized_cum: number;
 };
 export type Alert = {
   id: string; kind: "price" | "pe" | "spread_10y2y"; ticker: string | null;
@@ -473,10 +483,34 @@ export const api = {
 
   // portfolio
   portfolio: () => apiFetch<{ positions: Position[] }>("/api/v1/portfolio"),
-  portfolioSummary: () => apiFetch<PortfolioSummary>("/api/v1/portfolio/summary"),
-  addPosition: (ticker: string, qty: number, cost: number) =>
+  portfolioSummary: (pid?: string) =>
+    apiFetch<PortfolioSummary>(`/api/v1/portfolio/summary${pid ? `?pid=${encodeURIComponent(pid)}` : ""}`),
+  portfolioList: () => apiFetch<PortfolioInfo[]>("/api/v1/portfolio/list"),
+  portfolioCreate: (name: string) =>
+    apiFetch<PortfolioInfo>("/api/v1/portfolio/create", {
+      method: "POST", body: JSON.stringify({ name }),
+    }),
+  portfolioDelete: (pid: string) =>
+    apiFetch<void>(`/api/v1/portfolio/${encodeURIComponent(pid)}`, { method: "DELETE" }),
+  portfolioHistory: (pid?: string) =>
+    apiFetch<{ portfolio: { id: string; name: string }; points: PortfolioHistoryPoint[] }>(
+      `/api/v1/portfolio/history${pid ? `?pid=${encodeURIComponent(pid)}` : ""}`),
+  portfolioImport: (positions: { ticker: string; qty: number; cost: number }[], pid?: string) =>
+    apiFetch<{ added: number; skipped: string[] }>("/api/v1/portfolio/import", {
+      method: "POST", body: JSON.stringify({ positions, pid: pid ?? null }),
+    }),
+  closePosition: (id: string, opts?: { pid?: string; sellPrice?: number }) => {
+    const params = new URLSearchParams();
+    if (opts?.pid) params.set("pid", opts.pid);
+    if (opts?.sellPrice != null) params.set("sell_price", String(opts.sellPrice));
+    const qs = params.toString();
+    return apiFetch<{ ok: boolean; realized: RealizedEvent | null }>(
+      `/api/v1/portfolio/positions/${encodeURIComponent(id)}${qs ? `?${qs}` : ""}`,
+      { method: "DELETE" });
+  },
+  addPosition: (ticker: string, qty: number, cost: number, pid?: string) =>
     apiFetch<Position>("/api/v1/portfolio/positions", {
-      method: "POST", body: JSON.stringify({ ticker, qty, cost }),
+      method: "POST", body: JSON.stringify({ ticker, qty, cost, pid: pid ?? null }),
     }),
   deletePosition: (id: string) =>
     apiFetch<void>(`/api/v1/portfolio/positions/${encodeURIComponent(id)}`, { method: "DELETE" }),
