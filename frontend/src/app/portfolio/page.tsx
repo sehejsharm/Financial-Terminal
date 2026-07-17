@@ -5,6 +5,7 @@ import { useState } from "react";
 import { Trash2 } from "lucide-react";
 
 import { DataAge } from "@/components/DataAge";
+import { ScrollX } from "@/components/ScrollX";
 import { TickerInput } from "@/components/TickerInput";
 import { MetricCard } from "@/components/MetricCard";
 import { Shell } from "@/components/Shell";
@@ -93,11 +94,11 @@ export default function PortfolioPage() {
 
       {data && data.positions.length > 0 && (
         <div className="grid grid-cols-1 lg:grid-cols-[2fr_1fr] gap-6">
-          <div className="panel overflow-x-auto">
+          <ScrollX className="panel">
             <table className="w-full text-xs">
               <thead className="text-mut uppercase tracking-wider">
                 <tr className="border-b border-line">
-                  {["Ticker", "Qty", "Cost", "Price", "Value", "P&L", "P&L %", "Day", "Weight", ""].map((h) => (
+                  {["Ticker", "Qty", "Cost", "Price", "Value", "P&L", "P&L %", "Day P&L", "Weight", ""].map((h) => (
                     <th key={h} className={`px-3 py-2 font-medium whitespace-nowrap ${h === "Ticker" ? "text-left" : "text-right"}`}>{h}</th>
                   ))}
                 </tr>
@@ -114,15 +115,15 @@ export default function PortfolioPage() {
                       <td className="px-3 py-2 num text-right">{fmtNum(p.qty, 0)}</td>
                       <td className="px-3 py-2 num text-right">{fmtNum(p.cost, 2)}</td>
                       <td className="px-3 py-2 num text-right">{p.price != null ? `${c}${fmtNum(p.price, 2)}` : "—"}</td>
-                      <td className="px-3 py-2 num text-right">{p.value != null ? humanNumber(p.value) : "—"}</td>
+                      <td className="px-3 py-2 num text-right">{p.value != null ? humanNumber(p.value, c) : "—"}</td>
                       <td className={`px-3 py-2 num text-right ${p.pnl != null && p.pnl < 0 ? "text-red" : "text-green"}`}>
-                        {p.pnl != null ? humanNumber(p.pnl) : "—"}
+                        {p.pnl != null ? humanNumber(p.pnl, c) : "—"}
                       </td>
                       <td className={`px-3 py-2 num text-right ${p.pnl_pct != null && p.pnl_pct < 0 ? "text-red" : "text-green"}`}>
                         {p.pnl_pct != null ? fmtPct(p.pnl_pct) : "—"}
                       </td>
                       <td className={`px-3 py-2 num text-right ${p.day_pnl != null && p.day_pnl < 0 ? "text-red" : "text-green"}`}>
-                        {p.day_pnl != null ? humanNumber(p.day_pnl) : "—"}
+                        {p.day_pnl != null ? humanNumber(p.day_pnl, c) : "—"}
                       </td>
                       <td className="px-3 py-2 num text-right">{p.weight != null ? `${fmtNum(p.weight, 1)}%` : "—"}</td>
                       <td className="px-3 py-2 text-right">
@@ -135,7 +136,7 @@ export default function PortfolioPage() {
                 })}
               </tbody>
             </table>
-          </div>
+          </ScrollX>
 
           <div>
             <div className="heading mb-2">Sector allocation</div>

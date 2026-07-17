@@ -23,8 +23,12 @@ export function humanNumber(n: number | null | undefined, prefix = ""): string {
  *  formatPercent, which never fakes a "+" direction on a static level. */
 export function fmtPct(v: number | null | undefined, digits = 2): string {
   if (v === null || v === undefined || Number.isNaN(v)) return "—";
-  const sign = v >= 0 ? "+" : "";
-  return `${sign}${v.toFixed(digits)}%`;
+  // Clamp values that ROUND to zero so tiles never show "-0.00%" (negative
+  // zero) or a misleading "+0.00%" — both render as a plain "0.00%".
+  const rounded = Number(v.toFixed(digits));
+  if (rounded === 0) return `${(0).toFixed(digits)}%`;
+  const sign = rounded > 0 ? "+" : "";
+  return `${sign}${rounded.toFixed(digits)}%`;
 }
 
 /** Canonical unsigned percent formatter for LEVEL metrics.
@@ -37,7 +41,9 @@ export function formatPercent(
   if (v === null || v === undefined || Number.isNaN(v)) return "—";
   const { fraction = false, digits = 2 } = opts;
   const pct = fraction ? v * 100 : v;
-  return `${pct.toFixed(digits)}%`;
+  const rounded = Number(pct.toFixed(digits));
+  // Number(...) normalises -0 to a comparable 0; render without the "-".
+  return `${(rounded === 0 ? 0 : rounded).toFixed(digits)}%`;
 }
 
 export function fmtNum(v: number | null | undefined, digits = 2): string {

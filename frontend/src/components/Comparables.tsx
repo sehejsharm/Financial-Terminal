@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useEffect, useState } from "react";
 
+import { ScrollX } from "@/components/ScrollX";
 import { api, type CompRow } from "@/lib/api";
 import { fmtNum } from "@/lib/utils";
 
@@ -69,7 +70,7 @@ export function Comparables({ ticker, peers }: { ticker: string; peers?: string[
       {err && <div className="text-red text-sm mb-2">{err}</div>}
       {rows && rows.length === 0 && <div className="panel-2 p-4 text-mut text-sm">No comparable data.</div>}
       {rows && rows.length > 0 && (
-        <div className="panel overflow-auto">
+        <ScrollX className="panel">
           <table className="w-full text-xs">
             <thead className="text-mut uppercase tracking-wider">
               <tr className="border-b border-line">
@@ -95,7 +96,7 @@ export function Comparables({ ticker, peers }: { ticker: string; peers?: string[
               ))}
             </tbody>
           </table>
-        </div>
+        </ScrollX>
       )}
       <div className="text-[10.5px] text-mut mt-2">EV/EBITDA* uses market cap as an EV proxy (no debt-layer feed on free data).</div>
     </div>

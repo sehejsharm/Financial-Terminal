@@ -9,12 +9,17 @@ type Hit = { symbol: string; name: string; exchange?: string };
 /** Ticker input with debounced typeahead (symbol + company name).
  *  Keyboard: ↑/↓ move, Enter commits highlighted (or raw text), Esc closes. */
 export function TickerInput({
-  value, onCommit, placeholder, className,
+  value, onCommit, placeholder, className, commitOnBlur = true,
 }: {
   value: string;
   onCommit: (ticker: string) => void;
   placeholder?: string;
   className?: string;
+  /** Commit the typed text when focus leaves the field (default). Forms rely
+   *  on this — typing "MSFT" and tabbing to the next field must count as a
+   *  selection, not silently leave the form's ticker state empty. Set false
+   *  where commit triggers navigation/loads (e.g. the Terminal header). */
+  commitOnBlur?: boolean;
 }) {
   const [text, setText] = useState(value);
   const [hits, setHits] = useState<Hit[]>([]);
@@ -72,7 +77,12 @@ export function TickerInput({
         value={text}
         onChange={(e) => setText(e.target.value)}
         onKeyDown={onKey}
-        onBlur={() => { /* commit stays explicit (Enter/click) to avoid surprise loads */ }}
+        onBlur={() => {
+          if (!commitOnBlur) return;
+          const t = text.trim();
+          if (t && t.toUpperCase() !== value.toUpperCase()) commit(t);
+          else setOpen(false);
+        }}
         placeholder={placeholder}
         className={className ?? "input-bare w-full"}
         autoComplete="off"

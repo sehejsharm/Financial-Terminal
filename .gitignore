@@ -17,6 +17,7 @@ data/vc_history.jsonl
 data/sentiment.jsonl
 data/.jwt_secret
 data/INITIAL_ADMIN_PASSWORD.txt
+data/notify_settings.json
 
 # Deploy-time secrets + runtime data (Oracle/Docker VM)
 deploy/.env

@@ -93,6 +93,16 @@ export function PriceChart({
   const chartRef = useRef<IChartApi | null>(null);
   const paneChartRef = useRef<IChartApi | null>(null);
 
+  // Colors are read from CSS variables when the chart is (re)built, so a
+  // theme or colorblind-palette toggle mid-session must trigger a rebuild —
+  // otherwise the chart keeps the old palette until a full page reload.
+  const [themeEpoch, setThemeEpoch] = useState(0);
+  useEffect(() => {
+    const obs = new MutationObserver(() => setThemeEpoch((n) => n + 1));
+    obs.observe(document.documentElement, { attributes: true, attributeFilter: ["class"] });
+    return () => obs.disconnect();
+  }, []);
+
   const points = useMemo(() => parseCandles(data), [data]);
   const intraday = useMemo(() => {
     if (points.length < 2) return false;
@@ -253,7 +263,7 @@ export function PriceChart({
     };
     // Rebuild wholesale on any config/data change — series counts and types
     // vary too much for incremental updates to be worth the bookkeeping.
-  }, [points, intraday, config.type, config.volume, config.log, config.pane,
+  }, [points, intraday, themeEpoch, config.type, config.volume, config.log, config.pane,
       config.overlays.join(",")]); // eslint-disable-line react-hooks/exhaustive-deps
 
   return (

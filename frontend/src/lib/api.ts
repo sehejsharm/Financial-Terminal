@@ -469,16 +469,37 @@ export const api = {
     apiFetch<void>(`/api/v1/alerts/${encodeURIComponent(id)}`, { method: "DELETE" }),
   alertEvents: () => apiFetch<AlertEvent[]>("/api/v1/alerts/events"),
   pushConfig: () =>
-    apiFetch<{ email: boolean; push: boolean; vapid_public_key: string | null }>(
+    apiFetch<{ email: boolean; push: boolean; telegram: boolean;
+               vapid_public_key: string | null;
+               my_email: string | null; telegram_linked: boolean }>(
       "/api/v1/alerts/push/config"),
   pushSubscribe: (sub: PushSubscriptionJSON) =>
     apiFetch<{ ok: boolean; devices: number }>("/api/v1/alerts/push/subscribe", {
       method: "POST", body: JSON.stringify(sub),
     }),
   alertTest: () =>
-    apiFetch<{ channels: { email: boolean; push: boolean }; devices: number;
-               results: { email: boolean | null; push: boolean | null } }>(
+    apiFetch<{ channels: { email: boolean; push: boolean; telegram: boolean }; devices: number;
+               results: { email: boolean | null; push: boolean | null; telegram: boolean | null } }>(
       "/api/v1/alerts/test", { method: "POST", body: "{}" }),
+  setDeliveryEmail: (email: string) =>
+    apiFetch<{ ok: boolean; email: string | null }>("/api/v1/alerts/delivery", {
+      method: "PUT", body: JSON.stringify({ email }),
+    }),
+  telegramStart: () =>
+    apiFetch<{ bot: string | null; code: string }>("/api/v1/alerts/telegram/start",
+      { method: "POST", body: "{}" }),
+  telegramVerify: () =>
+    apiFetch<{ ok: boolean }>("/api/v1/alerts/telegram/verify",
+      { method: "POST", body: "{}" }),
+  telegramUnlink: () =>
+    apiFetch<void>("/api/v1/alerts/telegram", { method: "DELETE" }),
+  deliveryServerConfig: () =>
+    apiFetch<{ settings: Record<string, string>;
+               channels: { email: boolean; push: boolean; telegram: boolean };
+               telegram_bot: string | null }>("/api/v1/alerts/delivery/server"),
+  saveDeliveryServerConfig: (settings: Record<string, string>) =>
+    apiFetch<{ ok: boolean; channels: { email: boolean; push: boolean; telegram: boolean } }>(
+      "/api/v1/alerts/delivery/server", { method: "PUT", body: JSON.stringify(settings) }),
 
   // notes
   note: (ticker: string) => apiFetch<Note>(`/api/v1/notes/${encodeURIComponent(ticker)}`),

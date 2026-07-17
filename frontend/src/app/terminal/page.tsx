@@ -1,7 +1,7 @@
 "use client";
 
 import { useRouter, useSearchParams } from "next/navigation";
-import { Suspense, useCallback, useEffect, useState } from "react";
+import { Suspense, useCallback, useEffect, useRef, useState } from "react";
 
 import { AIPanel } from "@/components/AIPanel";
 import { DataAge } from "@/components/DataAge";
@@ -82,9 +82,11 @@ function TerminalInner() {
   // Bare inputs ("SUZLON", "TCS") resolve to exchange-qualified symbols
   // BEFORE any data loads. Ambiguous names show a picker; nothing guesses.
   const [disamb, setDisamb] = useState<ResolveRec[] | null>(null);
+  const [resolvedNone, setResolvedNone] = useState(false);
   const isBare = !ticker.includes(".") && !ticker.startsWith("^");
   useEffect(() => {
     setDisamb(null);
+    setResolvedNone(false);
     if (!isBare) return;
     let alive = true;
     api.resolve(ticker).then((r) => {
@@ -93,8 +95,12 @@ function TerminalInner() {
         commitTicker(r.match.symbol);       // e.g. SUZLON -> SUZLON.NS
       } else if (r.status === "ambiguous") {
         setDisamb(r.candidates);
+      } else if (r.status === "none") {
+        // Explicit not-found: without this, junk like "ZZZZINVALID" fell
+        // through to a sparse-data view with a misleading "some fields
+        // unavailable" note instead of a clear "not found".
+        setResolvedNone(true);
       }
-      // status "none": the existing not-found state (below) handles it.
     }).catch(() => {});
     return () => { alive = false; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -123,8 +129,8 @@ function TerminalInner() {
 
   function refreshHeader() { loadSnap(true); quoteLive.refresh(); }
 
-  const loading = !quote && !snap && !quoteLive.error;
-  const err = quoteLive.error && !quote && !snap
+  const loading = !quote && !snap && !quoteLive.error && !resolvedNone;
+  const err = resolvedNone || (quoteLive.error && !quote && !snap)
     ? `Could not load data for ${ticker}.` : null;
 
   // Symbol didn't resolve — offer close matches instead of a blank page.
@@ -138,9 +144,19 @@ function TerminalInner() {
     return () => { alive = false; };
   }, [err, ticker]);
 
-  // History reloads on ticker OR period change.
+  // History reloads on ticker OR period change. A monotonic request id
+  // guards against out-of-order responses: rapid period clicks (1D → 5D →
+  // 10Y) fire overlapping fetches and the slowest one used to win, leaving
+  // the chart showing stale data under a freshly-highlighted button.
+  const [chartBusy, setChartBusy] = useState(false);
+  const historyReq = useRef(0);
   useEffect(() => {
-    api.history(ticker, period).then((h) => setCandles(h?.candles ?? [])).catch(() => setCandles([]));
+    const reqId = ++historyReq.current;
+    setChartBusy(true);
+    api.history(ticker, period)
+      .then((h) => { if (historyReq.current === reqId) setCandles(h?.candles ?? []); })
+      .catch(() => { if (historyReq.current === reqId) setCandles([]); })
+      .finally(() => { if (historyReq.current === reqId) setChartBusy(false); });
   }, [ticker, period]);
 
   const cur = curForTicker(ticker, (snap?.currency as string) || quote?.currency);
@@ -170,9 +186,21 @@ function TerminalInner() {
         <TickerInput
           value={ticker}
           onCommit={commitTicker}
+          commitOnBlur={false}  /* commit = navigation here; keep it explicit */
           placeholder="Ticker (RELIANCE.NS, AAPL, ^NSEI)…"
         />
-        <select value={fn} onChange={(e) => setFn(e.target.value as Fn)} className="input-bare cursor-pointer">
+        <select value={fn}
+          onChange={(e) => {
+            const f = e.target.value as Fn;
+            setFn(f);
+            // Reflect the view in the URL so reload/bookmarks/deep links keep
+            // the selected tab instead of resetting to Snapshot.
+            const params = new URLSearchParams(sp.toString());
+            params.set("t", ticker);
+            params.set("fn", f);
+            router.replace(`/terminal?${params.toString()}`);
+          }}
+          className="input-bare cursor-pointer">
           {FUNCTIONS.map((f) => <option key={f}>{f}</option>)}
         </select>
       </div>
@@ -249,7 +277,8 @@ function TerminalInner() {
           <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-5">
             <MetricCard label="Market cap"   value={humanNumber(snap?.market_cap as number, cur)} />
             <MetricCard label="Trailing P/E" value={fmtNum(snap?.trailing_pe as number, 1)} />
-            <MetricCard label="Beta"         value={fmtNum(snap?.beta as number, 2)} />
+            <MetricCard label="Beta"         value={fmtNum(snap?.beta as number, 2)}
+              title="Provider-published beta (typically ~5Y monthly returns vs the listing exchange's main index). The Quant page computes its own 60-day / 1-year daily-returns beta vs a benchmark you choose, so the two figures can differ — different lookback, frequency, and benchmark, not a data bug." />
             <MetricCard
               label="52-w range"
               value={`${fmtNum(snap?.fifty_two_low as number, 2)} – ${fmtNum(snap?.fifty_two_high as number, 2)}`}
@@ -287,7 +316,16 @@ function TerminalInner() {
             ))}
           </div>
           <ChartToolbar config={chartCfg} onChange={setChartCfg} />
-          <PriceChart data={candles} height={400} config={chartCfg} />
+          <div className="relative">
+            {chartBusy && (
+              <div className="absolute top-2 right-2 z-10 px-2 py-0.5 rounded bg-panel2 border border-line text-[10px] text-amber animate-pulse">
+                Loading {period}…
+              </div>
+            )}
+            <div className={chartBusy ? "opacity-60 transition-opacity" : "transition-opacity"}>
+              <PriceChart data={candles} height={400} config={chartCfg} />
+            </div>
+          </div>
         </>
       )}
 
@@ -303,7 +341,16 @@ function TerminalInner() {
             ))}
           </div>
           <ChartToolbar config={chartCfg} onChange={setChartCfg} />
-          <PriceChart data={candles} height={520} config={chartCfg} />
+          <div className="relative">
+            {chartBusy && (
+              <div className="absolute top-2 right-2 z-10 px-2 py-0.5 rounded bg-panel2 border border-line text-[10px] text-amber animate-pulse">
+                Loading {period}…
+              </div>
+            )}
+            <div className={chartBusy ? "opacity-60 transition-opacity" : "transition-opacity"}>
+              <PriceChart data={candles} height={520} config={chartCfg} />
+            </div>
+          </div>
         </>
       )}
 

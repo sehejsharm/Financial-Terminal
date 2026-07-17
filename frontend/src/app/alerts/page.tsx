@@ -25,15 +25,53 @@ function urlBase64ToUint8Array(base64: string): Uint8Array {
   return Uint8Array.from([...raw].map((c) => c.charCodeAt(0)));
 }
 
-/** Delivery channels: email (server-side SMTP) + web push (per-device). */
+/** Delivery channels: email (your address), Telegram (free "text"), and
+ *  web push (per-device). Server-side credentials are configured by the
+ *  master admin right here in the UI — no shell access needed. */
 function DeliveryPanel() {
-  const [cfg, setCfg] = useState<{ email: boolean; push: boolean; vapid_public_key: string | null } | null>(null);
+  const [cfg, setCfg] = useState<{
+    email: boolean; push: boolean; telegram: boolean;
+    vapid_public_key: string | null; my_email: string | null; telegram_linked: boolean;
+  } | null>(null);
   const [pushState, setPushState] = useState<"idle" | "enabling" | "enabled" | "denied" | "error">("idle");
   const [testMsg, setTestMsg] = useState<string | null>(null);
+  const [myEmail, setMyEmail] = useState("");
+  const [emailMsg, setEmailMsg] = useState<string | null>(null);
+  const [tg, setTg] = useState<{ bot: string | null; code: string } | null>(null);
+  const [tgMsg, setTgMsg] = useState<string | null>(null);
+  const [me, setMe] = useState<{ username: string; role: string } | null>(null);
 
+  function loadCfg() {
+    api.pushConfig().then((c) => { setCfg(c); setMyEmail(c.my_email ?? ""); }).catch(() => setCfg(null));
+  }
   useEffect(() => {
-    api.pushConfig().then(setCfg).catch(() => setCfg(null));
+    loadCfg();
+    api.me().then(setMe).catch(() => {});
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  async function saveEmail() {
+    setEmailMsg("Saving…");
+    try {
+      await api.setDeliveryEmail(myEmail.trim());
+      setEmailMsg(myEmail.trim() ? "Saved — alerts will email this address ✓" : "Cleared.");
+    } catch (e: any) { setEmailMsg(e?.detail || "Save failed."); }
+  }
+
+  async function tgStart() {
+    setTgMsg(null);
+    try { setTg(await api.telegramStart()); }
+    catch (e: any) { setTgMsg(e?.detail || "Telegram isn't configured yet."); }
+  }
+
+  async function tgVerify() {
+    setTgMsg("Checking…");
+    try {
+      await api.telegramVerify();
+      setTg(null); setTgMsg("Linked ✓ — you'll get alerts on Telegram.");
+      loadCfg();
+    } catch (e: any) { setTgMsg(e?.detail || "Not found yet — send the code first."); }
+  }
 
   async function enablePush() {
     if (!cfg?.vapid_public_key) return;
@@ -59,37 +97,173 @@ function DeliveryPanel() {
       const r = await api.alertTest();
       const parts = [];
       if (r.results.email !== null) parts.push(`email ${r.results.email ? "sent ✓" : "failed"}`);
+      if (r.results.telegram !== null) parts.push(`Telegram ${r.results.telegram ? "sent ✓" : "failed"}`);
       if (r.results.push !== null) parts.push(`push ${r.results.push ? "sent ✓" : "failed"} (${r.devices} device${r.devices === 1 ? "" : "s"})`);
-      setTestMsg(parts.length ? parts.join(" · ") : "No delivery channels configured yet.");
+      setTestMsg(parts.length ? parts.join(" · ") : "No delivery channels active yet — set them up below.");
     } catch { setTestMsg("Test failed."); }
   }
 
   return (
     <div className="panel-2 p-3 mb-6">
-      <div className="label-xs mb-2">Delivery channels</div>
-      <div className="flex flex-wrap items-center gap-3 text-xs">
+      <div className="flex flex-wrap items-center gap-3 text-xs mb-3">
+        <span className="label-xs">Delivery channels</span>
         <span className={`chip ${cfg?.email ? "!text-green !border-green/50" : ""}`}>
-          Email {cfg === null ? "…" : cfg.email ? "configured" : "off"}
+          Email {cfg === null ? "…" : cfg.email ? "ready" : "off"}
+        </span>
+        <span className={`chip ${cfg?.telegram ? "!text-green !border-green/50" : ""}`}>
+          Telegram {cfg === null ? "…" : cfg.telegram ? (cfg.telegram_linked ? "linked ✓" : "ready") : "off"}
         </span>
         <span className={`chip ${cfg?.push ? "!text-green !border-green/50" : ""}`}>
           Push {cfg === null ? "…" : cfg.push ? "available" : "off"}
         </span>
-        {cfg?.push && pushState !== "enabled" && (
-          <button onClick={enablePush} disabled={pushState === "enabling"} className="btn-ghost text-xs">
-            {pushState === "enabling" ? "Enabling…" : "Enable push on this device"}
-          </button>
-        )}
-        {pushState === "enabled" && <span className="text-green">This device will receive push alerts ✓</span>}
-        {pushState === "denied" && <span className="text-red">Notifications blocked in browser settings.</span>}
-        {pushState === "error" && <span className="text-red">Could not subscribe — try again.</span>}
         <button onClick={test} className="btn-ghost text-xs">Send test alert</button>
         {testMsg && <span className="text-mut">{testMsg}</span>}
       </div>
-      {cfg !== null && !cfg.email && !cfg.push && (
-        <div className="text-[10.5px] text-mut mt-2">
-          To activate: set SMTP_* (email) and/or VAPID_* (push) in the server&apos;s
-          deploy/.env — see .env.example for the exact variables — then restart.
-          Alerts always appear in-app regardless.
+
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-xs">
+        {/* Email — per-user address */}
+        <div>
+          <div className="label-xs mb-1.5">Email me at</div>
+          <div className="flex gap-1.5">
+            <input value={myEmail} onChange={(e) => setMyEmail(e.target.value)}
+                   placeholder="you@example.com" className="input-bare flex-1 min-w-0 !py-1 text-xs" />
+            <button onClick={saveEmail} className="btn-ghost text-xs shrink-0">Save</button>
+          </div>
+          {emailMsg && <div className="text-mut mt-1">{emailMsg}</div>}
+          {cfg !== null && !cfg.email && (
+            <div className="text-[10px] text-mut mt-1">
+              Email sending isn&apos;t set up on the server yet
+              {me?.role === "master_admin" ? " — configure it below." : " — ask the admin."}
+            </div>
+          )}
+        </div>
+
+        {/* Telegram — free instant messages to your phone */}
+        <div>
+          <div className="label-xs mb-1.5">Telegram (free texts to your phone)</div>
+          {cfg?.telegram_linked && !tg && (
+            <div className="flex items-center gap-2">
+              <span className="text-green">Linked ✓</span>
+              <button onClick={async () => { await api.telegramUnlink().catch(() => {}); loadCfg(); }}
+                      className="btn-ghost text-xs">Unlink</button>
+            </div>
+          )}
+          {!cfg?.telegram_linked && !tg && (
+            <button onClick={tgStart} className="btn-ghost text-xs">Link my Telegram</button>
+          )}
+          {tg && (
+            <ol className="list-decimal pl-4 space-y-1 text-mut">
+              <li>Open <a className="text-amber underline" target="_blank" rel="noopener noreferrer"
+                          href={`https://t.me/${tg.bot ?? ""}`}>@{tg.bot ?? "the bot"}</a> in Telegram</li>
+              <li>Tap <strong className="text-txt">Start</strong>, then send: <code className="text-amber">{tg.code}</code></li>
+              <li><button onClick={tgVerify} className="btn-ghost text-xs">I sent it — verify</button></li>
+            </ol>
+          )}
+          {tgMsg && <div className="text-mut mt-1">{tgMsg}</div>}
+          {cfg !== null && !cfg.telegram && (
+            <div className="text-[10px] text-mut mt-1">
+              Not set up on the server yet
+              {me?.role === "master_admin" ? " — add a bot token below." : " — ask the admin."}
+            </div>
+          )}
+        </div>
+
+        {/* Browser push */}
+        <div>
+          <div className="label-xs mb-1.5">Browser push</div>
+          {cfg?.push && pushState !== "enabled" && (
+            <button onClick={enablePush} disabled={pushState === "enabling"} className="btn-ghost text-xs">
+              {pushState === "enabling" ? "Enabling…" : "Enable push on this device"}
+            </button>
+          )}
+          {pushState === "enabled" && <span className="text-green">This device will receive push alerts ✓</span>}
+          {pushState === "denied" && <span className="text-red">Notifications blocked in browser settings.</span>}
+          {pushState === "error" && <span className="text-red">Could not subscribe — try again.</span>}
+          {cfg !== null && !cfg.push && (
+            <div className="text-[10px] text-mut mt-1">Not configured on the server (VAPID keys).</div>
+          )}
+        </div>
+      </div>
+
+      {me?.role === "master_admin" && <AdminDeliverySetup onSaved={loadCfg} />}
+    </div>
+  );
+}
+
+/** Master-admin server setup for email + Telegram — edited here in the UI
+ *  and stored server-side, so enabling delivery never requires shell access. */
+function AdminDeliverySetup({ onSaved }: { onSaved: () => void }) {
+  const [open, setOpen] = useState(false);
+  const [s, setS] = useState<Record<string, string>>({});
+  const [botName, setBotName] = useState<string | null>(null);
+  const [msg, setMsg] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    api.deliveryServerConfig()
+      .then((r) => { setS(r.settings); setBotName(r.telegram_bot); })
+      .catch(() => {});
+  }, [open]);
+
+  async function save() {
+    setMsg("Saving…");
+    try {
+      const r = await api.saveDeliveryServerConfig(s);
+      setMsg(`Saved ✓ — email ${r.channels.email ? "ON" : "off"}, Telegram ${r.channels.telegram ? "ON" : "off"}.`);
+      onSaved();
+    } catch (e: any) { setMsg(e?.detail || "Save failed."); }
+  }
+
+  // Plain function returning a <SettingField> element (stable module-level
+  // type). Rendering an inline component TYPE here would remount the input
+  // on every keystroke — same bug class as the WACC panel.
+  const F = (props: { k: string; label: string; placeholder?: string; secret?: boolean }) => (
+    <SettingField key={props.k} label={props.label} placeholder={props.placeholder}
+                  secret={props.secret} value={s[props.k] ?? ""}
+                  onChange={(v) => setS((p) => ({ ...p, [props.k]: v }))} />
+  );
+
+  return (
+    <div className="mt-4 pt-3 border-t border-line">
+      <button onClick={() => setOpen((v) => !v)} className="text-amber text-xs hover:underline">
+        {open ? "▾ Hide" : "▸ Admin: delivery setup (email + Telegram)"}
+      </button>
+      {open && (
+        <div className="mt-3 space-y-4 text-xs">
+          <div>
+            <div className="label-xs mb-1">Email (free via a Gmail App Password)</div>
+            <div className="text-mut text-[10.5px] mb-2">
+              1) Turn on 2-step verification for a Gmail account · 2) create an App
+              Password at myaccount.google.com/apppasswords · 3) paste it here with
+              host <code className="text-amber">smtp.gmail.com</code>, port 587, and the
+              Gmail address as user. (Any other SMTP service works the same way.)
+            </div>
+            <div className="grid grid-cols-2 md:grid-cols-3 gap-2">
+              {F({ k: "smtp_host", label: "SMTP host", placeholder: "smtp.gmail.com" })}
+              {F({ k: "smtp_port", label: "Port", placeholder: "587" })}
+              {F({ k: "smtp_user", label: "User (email)", placeholder: "you@gmail.com" })}
+              {F({ k: "smtp_pass", label: "App password", secret: true })}
+              {F({ k: "smtp_from", label: "From (optional)" })}
+              {F({ k: "alert_email_to", label: "Fallback recipient (optional)" })}
+            </div>
+          </div>
+          <div>
+            <div className="label-xs mb-1">Telegram bot (free)</div>
+            <div className="text-mut text-[10.5px] mb-2">
+              In Telegram, message <a className="text-amber underline" target="_blank"
+              rel="noopener noreferrer" href="https://t.me/BotFather">@BotFather</a> →
+              send <code className="text-amber">/newbot</code> → pick any name → paste the
+              token it gives you here. Every user can then link their own Telegram above.
+              {botName && <span className="text-green"> Current bot: @{botName} ✓</span>}
+            </div>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+              {F({ k: "telegram_bot_token", label: "Bot token", secret: true })}
+            </div>
+          </div>
+          <div className="flex items-center gap-3">
+            <button onClick={save} className="btn-primary text-xs">Save delivery settings</button>
+            {msg && <span className="text-mut">{msg}</span>}
+          </div>
         </div>
       )}
     </div>
@@ -123,6 +297,7 @@ export default function AlertsPage() {
   }
 
   async function del(id: string) {
+    if (!confirm("Delete this alert? This cannot be undone.")) return;
     try { await api.deleteAlert(id); refresh(); } catch { /* noop */ }
   }
 
@@ -214,5 +389,22 @@ export default function AlertsPage() {
         </div>
       </div>
     </Shell>
+  );
+}
+
+/** Controlled settings input — module-level so its identity is stable and
+ *  React never remounts it mid-keystroke. */
+function SettingField({ label, value, onChange, placeholder, secret }: {
+  label: string; value: string; onChange: (v: string) => void;
+  placeholder?: string; secret?: boolean;
+}) {
+  return (
+    <label className="flex flex-col gap-1">
+      <span className="label-xs">{label}</span>
+      <input value={value} type={secret ? "password" : "text"}
+             onChange={(e) => onChange(e.target.value)}
+             placeholder={placeholder} className="input-bare !py-1 text-xs"
+             autoComplete="off" />
+    </label>
   );
 }

@@ -89,19 +89,121 @@ def events(user: dict = Depends(auth.current_user)):
     return list(reversed(_doc(user["username"])["events"]))
 
 
-# ── delivery channels (email + web push) ─────────────────────────────────
+# ── delivery channels (email + telegram + web push) ──────────────────────
 
 class PushSubscription(BaseModel):
     endpoint: str = Field(..., max_length=1000)
     keys: dict = Field(default_factory=dict)
 
 
+class DeliveryPrefs(BaseModel):
+    email: str | None = Field(None, max_length=254)
+
+
+class ServerDeliveryConfig(BaseModel):
+    smtp_host: str | None = Field(None, max_length=200)
+    smtp_port: str | None = Field(None, max_length=8)
+    smtp_user: str | None = Field(None, max_length=200)
+    smtp_pass: str | None = Field(None, max_length=200)
+    smtp_from: str | None = Field(None, max_length=200)
+    alert_email_to: str | None = Field(None, max_length=254)
+    telegram_bot_token: str | None = Field(None, max_length=100)
+
+
+def _prefs(doc: dict) -> dict:
+    return doc.setdefault("delivery", {"email": None, "telegram_chat_id": None,
+                                       "telegram_code": None})
+
+
 @router.get("/push/config")
-def push_config(_user: dict = Depends(auth.current_user)):
+def push_config(user: dict = Depends(auth.current_user)):
     """Which delivery channels are configured server-side (+ the VAPID
-    public key the browser needs to subscribe)."""
+    public key the browser needs to subscribe) + this user's prefs."""
     ch = notify.channels()
-    return {**ch, "vapid_public_key": notify.public_key()}
+    prefs = _prefs(_doc(user["username"]))
+    return {**ch, "vapid_public_key": notify.public_key(),
+            "my_email": prefs.get("email"),
+            "telegram_linked": bool(prefs.get("telegram_chat_id"))}
+
+
+@router.put("/delivery")
+def set_delivery(body: DeliveryPrefs, user: dict = Depends(auth.current_user)):
+    """Per-user delivery preferences (currently: the alert email address)."""
+    email = (body.email or "").strip()
+    if email and ("@" not in email or "." not in email.split("@")[-1]):
+        raise HTTPException(400, "That doesn't look like an email address.")
+    doc = _doc(user["username"])
+    _prefs(doc)["email"] = email or None
+    get_storage().save_user_doc("alerts", user["username"], doc)
+    return {"ok": True, "email": email or None}
+
+
+@router.post("/telegram/start")
+def telegram_start(user: dict = Depends(auth.current_user)):
+    """Begin Telegram linking: returns the bot's @username and a one-time
+    code the user sends to the bot from their phone."""
+    if not notify.telegram_configured():
+        raise HTTPException(400, "Telegram delivery is not configured yet — "
+                                 "ask the admin to add a bot token in "
+                                 "Alerts → Delivery setup.")
+    code = "MB-" + uuid.uuid4().hex[:6].upper()
+    doc = _doc(user["username"])
+    _prefs(doc)["telegram_code"] = code
+    get_storage().save_user_doc("alerts", user["username"], doc)
+    return {"bot": notify.telegram_bot_username(), "code": code}
+
+
+@router.post("/telegram/verify")
+def telegram_verify(user: dict = Depends(auth.current_user)):
+    """Complete Telegram linking: look for the code among the bot's recent
+    messages and remember the sender's chat id."""
+    doc = _doc(user["username"])
+    prefs = _prefs(doc)
+    code = prefs.get("telegram_code")
+    if not code:
+        raise HTTPException(400, "Start the linking flow first.")
+    chat_id = notify.telegram_find_chat(code)
+    if chat_id is None:
+        raise HTTPException(404, "Couldn't find your message yet — send the "
+                                 "code to the bot on Telegram, then retry.")
+    prefs["telegram_chat_id"] = chat_id
+    prefs["telegram_code"] = None
+    get_storage().save_user_doc("alerts", user["username"], doc)
+    notify.send_telegram(chat_id, "✅ Linked! Motherboard Terminal alerts "
+                                  "will arrive in this chat.")
+    return {"ok": True}
+
+
+@router.delete("/telegram", status_code=204)
+def telegram_unlink(user: dict = Depends(auth.current_user)):
+    doc = _doc(user["username"])
+    _prefs(doc)["telegram_chat_id"] = None
+    get_storage().save_user_doc("alerts", user["username"], doc)
+
+
+# ── server-side delivery config (master admin, edited from the web UI so
+#    no shell/env access is ever needed) ────────────────────────────────────
+
+def _require_admin(user: dict) -> None:
+    if user.get("role") != "master_admin":
+        raise HTTPException(403, "Master admin only.")
+
+
+@router.get("/delivery/server")
+def get_server_config(user: dict = Depends(auth.current_user)):
+    _require_admin(user)
+    return {"settings": notify.masked_settings(), "channels": notify.channels(),
+            "telegram_bot": notify.telegram_bot_username() if notify.telegram_configured() else None}
+
+
+@router.put("/delivery/server")
+def set_server_config(body: ServerDeliveryConfig,
+                      user: dict = Depends(auth.current_user)):
+    _require_admin(user)
+    updates = {k: v for k, v in body.model_dump().items()
+               if v is not None and not str(v).startswith("•••")}
+    notify.save_settings(updates)
+    return {"ok": True, "channels": notify.channels()}
 
 
 @router.post("/push/subscribe", status_code=201)
@@ -122,9 +224,13 @@ def test_delivery(user: dict = Depends(auth.current_user)):
     """Fire a test notification through every configured channel."""
     msg = "Test alert from Motherboard Terminal — delivery is working."
     doc = _doc(user["username"])
-    results = {"email": None, "push": None}
+    prefs = _prefs(doc)
+    results = {"email": None, "push": None, "telegram": None}
     if notify.email_configured():
-        results["email"] = notify.send_email("Motherboard test alert", msg)
+        results["email"] = notify.send_email("Motherboard test alert", msg,
+                                             to=prefs.get("email"))
+    if notify.telegram_configured() and prefs.get("telegram_chat_id"):
+        results["telegram"] = notify.send_telegram(prefs["telegram_chat_id"], msg)
     subs = doc.get("push_subs", [])
     if notify.push_configured() and subs:
         ok = [notify.send_push(s, "Motherboard Terminal", msg) for s in subs]
@@ -137,8 +243,13 @@ def _deliver(username: str, doc: dict, message: str) -> None:
     """Fan a triggered alert out to every configured channel. Dead push
     subscriptions are pruned in place (caller saves the doc)."""
     try:
+        prefs = doc.get("delivery") or {}
         if notify.email_configured():
-            notify.send_email(f"Motherboard alert: {message}", message)
+            notify.send_email(f"Motherboard alert: {message}", message,
+                              to=prefs.get("email"))
+        if notify.telegram_configured() and prefs.get("telegram_chat_id"):
+            notify.send_telegram(prefs["telegram_chat_id"],
+                                 f"🔔 {message}")
         subs = doc.get("push_subs", [])
         if notify.push_configured() and subs:
             doc["push_subs"] = [

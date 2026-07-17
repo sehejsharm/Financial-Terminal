@@ -95,12 +95,23 @@ export default function MacroPage() {
   }, [country]);
 
   const pts = curve?.points ?? [];
-  const inversion = pts.length >= 2 ? pts[0].yield > pts[pts.length - 1].yield : false;
+  // Badge must agree with the "10Y-2Y spread" indicator card above it: prefer
+  // that card's CURRENT value (same FRED series, same observation) and only
+  // fall back to computing from the curve points, whose constituent series
+  // can lag a day behind and made the badge show yesterday's ("prior") spread.
   const spread10y2y = (() => {
+    const ind = inds?.find((i) => i.name === "10Y-2Y spread");
+    if (ind?.value != null) return ind.value;
     const y2 = pts.find((p) => p.maturity === "2Y")?.yield;
     const y10 = pts.find((p) => p.maturity === "10Y")?.yield;
     return y2 != null && y10 != null ? y10 - y2 : null;
   })();
+  // Derive INVERTED/NORMAL from the same spread the badge displays (falling
+  // back to curve shape only when the spread is unknown) so the two labels
+  // can never contradict each other.
+  const inversion = spread10y2y != null
+    ? spread10y2y < 0
+    : (pts.length >= 2 ? pts[0].yield > pts[pts.length - 1].yield : false);
 
   return (
     <Shell>

@@ -227,7 +227,10 @@ export default function QuantPage() {
               </div>
               <div className="text-[10.5px] text-mut mt-2">
                 β 60d uses the trailing 60 trading days; drift between the two
-                columns shows regime change.
+                columns shows regime change. Computed here from daily returns
+                vs {bench} — this will differ from the Terminal&apos;s Snapshot/WACC
+                beta, which is the data provider&apos;s published figure (typically
+                ~5Y monthly returns vs the listing exchange&apos;s main index).
               </div>
             </div>
           )}

@@ -53,7 +53,11 @@ export function Shell({ children }: { children: React.ReactNode }) {
     const light = localStorage.getItem("mb_theme") === "light";
     const cb = localStorage.getItem("mb_cb") === "1";
     setLightTheme(light); setCbPalette(cb);
+    // Exclusive classes: "light" and "dark" must never coexist (the root
+    // layout ships class="dark"; only adding "light" left both applied and
+    // dark-mode CSS kept winning).
     document.documentElement.classList.toggle("light", light);
+    document.documentElement.classList.toggle("dark", !light);
     document.documentElement.classList.toggle("cb", cb);
   }, []);
   function toggleTheme() {
@@ -61,6 +65,7 @@ export function Shell({ children }: { children: React.ReactNode }) {
     setLightTheme(next);
     localStorage.setItem("mb_theme", next ? "light" : "dark");
     document.documentElement.classList.toggle("light", next);
+    document.documentElement.classList.toggle("dark", !next);
   }
   function toggleCb() {
     const next = !cbPalette;

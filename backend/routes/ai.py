@@ -19,14 +19,52 @@ def _guard():
                             "GEMINI_API_KEY)")
 
 
+# Fields stored as decimal fractions (0.0998 == 9.98%) and fields holding
+# raw magnitudes that read as digit soup in prose ("17768137097216 INR").
+_FRACTION_FIELDS = {
+    "dividend_yield", "profit_margin", "operating_margin", "gross_margin",
+    "roe", "roa", "roce", "revenue_growth", "earnings_growth",
+    "held_insiders", "held_institutions",
+}
+_MAGNITUDE_FIELDS = {
+    "market_cap", "revenue", "ebitda", "free_cashflow", "shares_outstanding",
+    "volume", "avg_volume", "enterprise_value", "total_debt", "total_cash",
+}
+
+_CCY_SIGNS = {"INR": "₹", "USD": "$", "EUR": "€", "GBP": "£", "JPY": "¥"}
+
+
+def _human_magnitude(v: float, sign: str) -> str:
+    """17768137097216 → '₹17.77T' — mirrors the UI's humanNumber()."""
+    a = abs(v)
+    for div, suf in ((1e12, "T"), (1e9, "B"), (1e6, "M"), (1e3, "K")):
+        if a >= div:
+            return f"{sign}{v / div:.2f}{suf}"
+    return f"{sign}{v:,.0f}"
+
+
 def _normalize_units(f: dict) -> dict:
-    """Convert provider quirk units before the fundamentals reach the LLM
-    prompt, so the narrative quotes the same canonical numbers the UI shows
-    (e.g. D/E as a 0.37x ratio, not yfinance's percent-scaled 36.65)."""
+    """Format fundamentals into the same human-readable forms the UI shows
+    BEFORE they reach the LLM prompt — otherwise the narrative parrots raw
+    values like '17768137097216 INR' or '0.099750005' instead of '₹17.77T'
+    and '9.98%'. Also converts provider quirk units (yfinance's percent-
+    scaled debt/equity → 0.37x ratio)."""
     f = dict(f)
     de = f.get("debt_to_equity")
     if isinstance(de, (int, float)):
-        f["debt_to_equity"] = round(de / 100, 2)
+        f["debt_to_equity"] = f"{de / 100:.2f}x"
+    sign = _CCY_SIGNS.get(str(f.get("currency") or ""), "")
+    for k, v in list(f.items()):
+        if not isinstance(v, (int, float)):
+            continue
+        if k in _FRACTION_FIELDS:
+            f[k] = f"{v * 100:.2f}%"
+        elif k in _MAGNITUDE_FIELDS:
+            # Share/volume counts aren't currency amounts.
+            unit_sign = "" if k in ("shares_outstanding", "volume", "avg_volume") else sign
+            f[k] = _human_magnitude(float(v), unit_sign)
+        elif abs(v) < 1000:
+            f[k] = round(float(v), 2)
     return f
 
 

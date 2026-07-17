@@ -75,6 +75,14 @@ function FlowTable() {
           <span className="text-[11px] text-mut">covering {data.from} → {data.to}</span>
         )}
       </div>
+      {data?.from && data.from === data.to && (
+        <div className="text-[10.5px] text-amber/90 mb-3">
+          Only the latest available end-of-day file ({data.to}) is covered right
+          now regardless of the trailing-window selected — NSE publishes
+          bulk/block deals end-of-day and older archive days aren&apos;t always
+          retrievable. The 30d/90d windows fill in as more days become available.
+        </div>
+      )}
       {!data && <div className="text-mut text-xs">Aggregating…</div>}
       {data && data.rows.length === 0 && (
         <div className="panel-2 p-4 text-mut text-sm">{data.note || "No data in the window."}</div>

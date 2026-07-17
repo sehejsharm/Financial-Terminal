@@ -72,9 +72,9 @@ def preset(name: str, _user: dict = Depends(auth.current_user)):
     note = None
     if not matched:
         note = (f"0 of {len(rows)} scanned names matched. Growth / ROCE / PEG "
-                f"metrics are often unavailable from free data on cloud hosts — "
-                f"set TWELVE_DATA_API_KEY for full fundamentals, or try the "
-                f"'Large Cap' presets (price + market-cap only).")
+                f"metrics have limited coverage on this data plan, so screens "
+                f"using them can come up empty — try the 'Large Cap' presets "
+                f"(price + market-cap only), or loosen the filter values.")
     return _envelope(matched, scanned=_UNIVERSE_SIZE, evaluable=len(rows),
                      note=note, as_of=scan["as_of"])
 

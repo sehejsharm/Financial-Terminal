@@ -28,7 +28,14 @@ const NEEDS_TICKER: Record<WidgetKind, boolean> = {
 function ChartWidget({ ticker }: { ticker: string }) {
   const [candles, setCandles] = useState<any[]>([]);
   useEffect(() => {
-    api.history(ticker, "1Y").then((h) => setCandles(h?.candles ?? [])).catch(() => setCandles([]));
+    // Stale-response guard: switching a pane's ticker quickly must not let
+    // an older, slower fetch overwrite the newer one (same race as the
+    // Terminal chart).
+    let alive = true;
+    api.history(ticker, "1Y")
+      .then((h) => { if (alive) setCandles(h?.candles ?? []); })
+      .catch(() => { if (alive) setCandles([]); });
+    return () => { alive = false; };
   }, [ticker]);
   return <PriceChart data={candles} height={320} />;
 }
@@ -175,7 +182,10 @@ export default function WorkspacePage() {
         {layouts.map((l) => (
           <span key={l.id} className="inline-flex items-center gap-1">
             <button onClick={() => applyLayout(l)} className="btn-ghost text-xs">{l.name}</button>
-            <button onClick={() => persist(layouts.filter((x) => x.id !== l.id))}
+            <button onClick={() => {
+                      if (confirm(`Delete saved layout "${l.name}"? This cannot be undone.`))
+                        persist(layouts.filter((x) => x.id !== l.id));
+                    }}
                     className="text-mut hover:text-red" title={`Delete layout "${l.name}"`}>
               <Trash2 size={11} />
             </button>

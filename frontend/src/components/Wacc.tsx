@@ -1,10 +1,45 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import { MetricCard } from "@/components/MetricCard";
 import { api, type Snapshot } from "@/lib/api";
 import { curSymbol, humanNumber } from "@/lib/utils";
+
+/** Numeric field with its own text state. Defined at module level on
+ *  purpose: when this lived inside Wacc() it was a brand-new component type
+ *  on every render, so React remounted the <input> per keystroke — fast
+ *  typing lost focus mid-word and "10" became "1". The raw text updates
+ *  instantly; the parsed number flows up and recalculates the model. */
+function NumField({ label, value, set, step = 1, readout }: {
+  label: string; value: number; set: (n: number) => void; step?: number; readout?: string | null;
+}) {
+  const [text, setText] = useState(String(value));
+  const focused = useRef(false);
+  // Adopt external updates (snapshot load fills defaults) unless the user is
+  // mid-edit in this exact field.
+  useEffect(() => {
+    if (!focused.current && parseFloat(text) !== value) setText(String(value));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [value]);
+  return (
+    <label className="flex flex-col gap-1">
+      <span className="label-xs">{label}</span>
+      <input
+        type="number" value={text} step={step}
+        onFocus={() => { focused.current = true; }}
+        onBlur={() => { focused.current = false; setText(String(value)); }}
+        onChange={(e) => {
+          setText(e.target.value);
+          const n = parseFloat(e.target.value);
+          if (Number.isFinite(n)) set(n);
+        }}
+        className="input-bare"
+      />
+      {readout && <span className="text-[10.5px] text-mut num">= {readout}</span>}
+    </label>
+  );
+}
 
 /**
  * Weighted Average Cost of Capital. Pure client-side maths (CAPM + WACC) —
@@ -35,25 +70,17 @@ export function Wacc({ ticker, snap }: { ticker: string; snap: Snapshot | null }
   // <input type="number"> can't render thousands separators, so large inputs
   // (equity/debt) get a humanised readout under the field instead of leaving
   // the user to count digits in a raw integer.
-  const Num = ({ label, value, set, step = 1 }: { label: string; value: number; set: (n: number) => void; step?: number }) => (
-    <label className="flex flex-col gap-1">
-      <span className="label-xs">{label}</span>
-      <input type="number" value={value} step={step} onChange={(e) => set(parseFloat(e.target.value) || 0)} className="input-bare" />
-      {Math.abs(value) >= 1e6 && (
-        <span className="text-[10.5px] text-mut num">= {humanNumber(value, cur)}</span>
-      )}
-    </label>
-  );
+  const big = (n: number) => (Math.abs(n) >= 1e6 ? humanNumber(n, cur) : null);
 
   return (
     <div>
       <div className="grid grid-cols-2 md:grid-cols-3 gap-3 mb-4">
-        <Num label={`Equity value (mkt cap, ${cur})`} value={equity} set={setEquity} step={1e9} />
-        <Num label={`Total debt (${cur})`} value={debt} set={setDebt} step={1e9} />
-        <Num label="Beta" value={beta} set={setBeta} step={0.05} />
-        <Num label="Risk-free rate %" value={rf} set={setRf} step={0.25} />
-        <Num label="Equity risk premium %" value={erp} set={setErp} step={0.25} />
-        <Num label="Pre-tax cost of debt %" value={costDebt} set={setCostDebt} step={0.25} />
+        <NumField label={`Equity value (mkt cap, ${cur})`} value={equity} set={setEquity} step={1e9} readout={big(equity)} />
+        <NumField label={`Total debt (${cur})`} value={debt} set={setDebt} step={1e9} readout={big(debt)} />
+        <NumField label="Beta" value={beta} set={setBeta} step={0.05} />
+        <NumField label="Risk-free rate %" value={rf} set={setRf} step={0.25} />
+        <NumField label="Equity risk premium %" value={erp} set={setErp} step={0.25} />
+        <NumField label="Pre-tax cost of debt %" value={costDebt} set={setCostDebt} step={0.25} />
       </div>
       <label className="flex flex-col gap-1 mb-5 max-w-sm">
         <span className="label-xs">Tax rate % — {tax}</span>

@@ -37,9 +37,22 @@ export const viewport: Viewport = {
   themeColor: "#0c0e12",
 };
 
+// Applied before first paint so the persisted theme wins immediately —
+// and so <html> never carries both "dark" and "light" at once (the old
+// hardcoded className="dark" was never removed by the toggle).
+const THEME_BOOT = `(function(){try{
+  var l = localStorage.getItem("mb_theme") === "light";
+  var c = document.documentElement.classList;
+  c.toggle("light", l); c.toggle("dark", !l);
+  if (localStorage.getItem("mb_cb") === "1") c.add("cb");
+}catch(e){}})();`;
+
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="en" className="dark">
+    <html lang="en" className="dark" suppressHydrationWarning>
+      <head>
+        <script dangerouslySetInnerHTML={{ __html: THEME_BOOT }} />
+      </head>
       <body>{children}</body>
     </html>
   );
