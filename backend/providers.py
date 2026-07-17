@@ -109,24 +109,34 @@ def _td_time_series(symbol: str, period: str = "1Y") -> list[dict] | None:
     """Twelve Data time series for chart data. List of candle dicts or None."""
     if not _TD_KEY:
         return None
+    # (interval, outputsize) per period label. Outputsize is the number of
+    # bars at that interval covering the window (TD free tier caps at 5000).
     period_map = {
-        "1D": ("1min", "1day"),
-        "5D": ("5min", "5day"),
-        "1M": ("1day", "1month"),
-        "3M": ("1day", "3month"),
-        "6M": ("1day", "6month"),
-        "1Y": ("1day", "1year"),
-        "3Y": ("1week", "3year"),
-        "5Y": ("1week", "5year"),
+        "1D": ("1min", 390),
+        "5D": ("5min", 500),
+        "1M": ("1day", 25),
+        "3M": ("1day", 70),
+        "6M": ("1day", 135),
+        "YTD": ("1day", 260),
+        "1Y": ("1day", 260),
+        "2Y": ("1day", 520),
+        "3Y": ("1week", 160),
+        "5Y": ("1week", 265),
+        "10Y": ("1week", 525),
     }
-    interval, _outputsize_period = period_map.get(period, ("1day", "1year"))
+    interval, outputsize = period_map.get(period, ("1day", 260))
+    if period == "YTD":
+        # Trading days since Jan 1 (≈5/7 of calendar days), not a fixed year.
+        from datetime import datetime
+        elapsed = (datetime.now() - datetime(datetime.now().year, 1, 1)).days
+        outputsize = max(5, int(elapsed * 5 / 7) + 3)
     try:
         r = _TD_SESSION.get(
             f"{_TD_BASE}/time_series",
             params={
                 "symbol": symbol,
                 "interval": interval,
-                "outputsize": 365,
+                "outputsize": outputsize,
                 "apikey": _TD_KEY,
             },
             timeout=10,
@@ -283,8 +293,14 @@ def snapshot(ticker: str, quota_safe: bool = False) -> dict | None:
 
 
 def history(ticker: str, period: str = "1Y") -> list[dict]:
-    """Price history: NSE direct (Indian) → Twelve Data → yfinance."""
-    if nse.is_indian(ticker) and not ticker.startswith("^"):
+    """Price history: NSE direct (Indian) → Twelve Data → yfinance.
+
+    Intraday periods (1D/5D) skip NSE's daily-bars API up front and try the
+    intraday-capable providers first; NSE dailies remain the last resort so
+    Indian names still render something rather than an empty chart."""
+    intraday = period in ("1D", "5D")
+    is_in = nse.is_indian(ticker) and not ticker.startswith("^")
+    if is_in and not intraday:
         candles = nse.history(ticker, period)
         if candles:
             return candles
@@ -295,6 +311,10 @@ def history(ticker: str, period: str = "1Y") -> list[dict]:
             return candles
 
     df = yf_md.get_history(ticker, period)
+    if (df is None or df.empty) and is_in and intraday:
+        daily = nse.history(ticker, period)
+        if daily:
+            return daily
     if df is None or df.empty:
         return []
     df = df.reset_index()

@@ -237,7 +237,7 @@ def corporate_info(ticker: str) -> dict | None:
 
 
 # ── history ──────────────────────────────────────────────────────────────
-_PERIOD_DAYS = {"1M": 30, "3M": 90, "6M": 180, "1Y": 365,
+_PERIOD_DAYS = {"1D": 5, "5D": 10, "1M": 30, "3M": 90, "6M": 180, "1Y": 365,
                 "2Y": 365 * 2, "3Y": 365 * 3, "5Y": 365 * 5, "10Y": 365 * 10}
 
 
@@ -246,7 +246,10 @@ def history(ticker: str, period: str = "1Y") -> list[dict] | None:
     sym = _clean_symbol(ticker)
     if not sym:
         return None
-    days = _PERIOD_DAYS.get(period, 365)
+    if period == "YTD":
+        days = max(7, (datetime.now() - datetime(datetime.now().year, 1, 1)).days)
+    else:
+        days = _PERIOD_DAYS.get(period, 365)
     to = datetime.now()
     frm = to - timedelta(days=days)
     params = {

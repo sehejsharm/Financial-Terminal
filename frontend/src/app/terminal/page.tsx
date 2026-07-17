@@ -17,7 +17,7 @@ import { News } from "@/components/News";
 import { Notes } from "@/components/Notes";
 import { OptionsChain } from "@/components/OptionsChain";
 import { Ownership } from "@/components/Ownership";
-import { PriceChart } from "@/components/PriceChart";
+import { ChartToolbar, PriceChart, useChartConfig } from "@/components/PriceChart";
 import { Shell } from "@/components/Shell";
 import { TerminalSkeleton } from "@/components/Skeleton";
 import { TickerInput } from "@/components/TickerInput";
@@ -49,7 +49,7 @@ const FUNCTIONS = [
 ] as const;
 type Fn = typeof FUNCTIONS[number];
 
-const PERIODS = ["1M", "6M", "1Y", "5Y"] as const;
+const PERIODS = ["1D", "5D", "1M", "3M", "6M", "YTD", "1Y", "3Y", "5Y", "10Y"] as const;
 
 function TerminalInner() {
   const router = useRouter();
@@ -100,6 +100,7 @@ function TerminalInner() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [ticker]);
   const [period, setPeriod] = useState<(typeof PERIODS)[number]>("1Y");
+  const [chartCfg, setChartCfg] = useChartConfig();
   const [snap, setSnap] = useState<Snapshot | null>(null);
   const [snapAt, setSnapAt] = useState<number | null>(null);
   const [snapBusy, setSnapBusy] = useState(false);
@@ -276,20 +277,33 @@ function TerminalInner() {
               names, NSE covers Indian price/valuation but not every ratio).
             </div>
           )}
-          <div className="mb-2 heading">1-Year Chart</div>
-          <PriceChart data={candles} height={380} />
+          <div className="flex items-center gap-1.5 flex-wrap mb-2">
+            <div className="heading flex-1">Price Chart</div>
+            {PERIODS.map((p) => (
+              <button key={p} onClick={() => setPeriod(p)}
+                className={`px-2 py-1 rounded text-[10.5px] tracking-wide border transition-colors ${
+                  period === p ? "border-amber text-amber bg-amber/10" : "border-line2 text-mut hover:text-txt"
+                }`}>{p}</button>
+            ))}
+          </div>
+          <ChartToolbar config={chartCfg} onChange={setChartCfg} />
+          <PriceChart data={candles} height={400} config={chartCfg} />
         </>
       )}
 
       {!loading && !err && fn === "Technicals & charts" && (
         <>
-          <div className="flex items-center gap-2 mb-3">
+          <div className="flex items-center gap-1.5 flex-wrap mb-2">
             <div className="heading flex-1">Price action</div>
             {PERIODS.map((p) => (
-              <button key={p} onClick={() => setPeriod(p)} className={`btn ${period === p ? "btn-primary" : "btn-ghost"}`}>{p}</button>
+              <button key={p} onClick={() => setPeriod(p)}
+                className={`px-2 py-1 rounded text-[10.5px] tracking-wide border transition-colors ${
+                  period === p ? "border-amber text-amber bg-amber/10" : "border-line2 text-mut hover:text-txt"
+                }`}>{p}</button>
             ))}
           </div>
-          <PriceChart data={candles} height={460} />
+          <ChartToolbar config={chartCfg} onChange={setChartCfg} />
+          <PriceChart data={candles} height={520} config={chartCfg} />
         </>
       )}
 
