@@ -96,20 +96,82 @@ def years_to_expiry(expiry: str) -> float:
         return 0.0
 
 
+def _bs_price_scalar(S: float, K: float, T: float, r: float, sigma: float,
+                     kind: str, q: float = 0.0) -> float:
+    sqrtT = math.sqrt(T)
+    d1 = (math.log(S / K) + (r - q + 0.5 * sigma * sigma) * T) / (sigma * sqrtT)
+    d2 = d1 - sigma * sqrtT
+    ncdf = lambda x: 0.5 * (1.0 + math.erf(x / _SQRT2))  # noqa: E731
+    if kind == "call":
+        return S * math.exp(-q * T) * ncdf(d1) - K * math.exp(-r * T) * ncdf(d2)
+    return K * math.exp(-r * T) * ncdf(-d2) - S * math.exp(-q * T) * ncdf(-d1)
+
+
+def implied_vol_from_price(price: float, S: float, K: float, T: float,
+                           r: float, kind: str) -> float | None:
+    """Solve Black-Scholes IV from an observed option price by bisection.
+    Returns None when the price is outside no-arbitrage bounds (stale/junk
+    quotes) or the inputs are unusable."""
+    if not all(map(math.isfinite, (price, S, K, T, r))) or price <= 0 \
+            or S <= 0 or K <= 0 or T <= 0:
+        return None
+    intrinsic = max(S - K * math.exp(-r * T), 0.0) if kind == "call" \
+        else max(K * math.exp(-r * T) - S, 0.0)
+    if price <= intrinsic + 1e-9 or price >= (S if kind == "call" else K):
+        return None
+    lo, hi = 1e-4, 5.0
+    if _bs_price_scalar(S, K, T, r, hi, kind) < price:
+        return None
+    for _ in range(60):
+        mid = 0.5 * (lo + hi)
+        if _bs_price_scalar(S, K, T, r, mid, kind) < price:
+            lo = mid
+        else:
+            hi = mid
+    return 0.5 * (lo + hi)
+
+
+# Yahoo ships impliedVolatility ≈ 1e-5 (a placeholder) or NaN on stale rows;
+# anything under 0.5% or over 500% is treated as "no market IV".
+_IV_MIN, _IV_MAX = 0.005, 5.0
+
+
+def _usable_iv(row: pd.Series, S: float, T: float, r: float, kind: str) -> float:
+    """Market IV when sane; otherwise solve from the mid (or last) price.
+    NaN when nothing usable exists — honest '—' beats a fake 0.00/1.000."""
+    iv = row.get("impliedVolatility")
+    if iv is not None and math.isfinite(float(iv or float("nan"))) \
+            and _IV_MIN <= float(iv) <= _IV_MAX:
+        return float(iv)
+    bid = float(row.get("bid") or 0)
+    ask = float(row.get("ask") or 0)
+    price = (bid + ask) / 2 if (bid > 0 and ask > 0) \
+        else float(row.get("lastPrice") or 0)
+    solved = implied_vol_from_price(price, S, float(row["strike"]), T, r, kind)
+    return solved if solved is not None else float("nan")
+
+
 def enrich_with_greeks(df: pd.DataFrame, S: float, T: float, r: float,
                        kind: str) -> pd.DataFrame:
-    """Add Black-Scholes Greeks columns to an option-chain frame."""
+    """Add Black-Scholes Greeks columns to an option-chain frame.
+
+    The old implementation filled missing IV with 0 (clamped to 1e-9), which
+    degenerated delta into a 0/1 step function — every call showed Δ=1.000
+    and IV=0.00 whenever Yahoo's chain was stale. Missing IV is now solved
+    from market prices, and rows with no usable price get NaN Greeks (the UI
+    renders them as '—')."""
     if df is None or df.empty or "strike" not in df:
         return df
     out = df.copy()
-    iv = out.get("impliedVolatility")
-    if iv is None:
-        return out
-    g = black_scholes_greeks(S, out["strike"].values, T, r,
-                             iv.fillna(0).values, kind=kind)
+    if "impliedVolatility" not in out:
+        out["impliedVolatility"] = float("nan")
+    iv = out.apply(lambda row: _usable_iv(row, S, T, r, kind), axis=1)
+    out["impliedVolatility"] = iv  # UI shows the IV the Greeks actually used
+    g = black_scholes_greeks(S, out["strike"].values, T, r, iv.values, kind=kind)
+    valid = np.isfinite(iv.values)
     for k in ("delta", "gamma", "theta", "vega", "rho"):
-        out[k] = g[k]
-    out["bs_price"] = g["price"]
+        out[k] = np.where(valid, g[k], np.nan)
+    out["bs_price"] = np.where(valid, g["price"], np.nan)
     return out
 
 

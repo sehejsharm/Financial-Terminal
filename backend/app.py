@@ -11,12 +11,14 @@ Auth: POST /api/v1/auth/login → bearer token → use on every other endpoint.
 """
 from __future__ import annotations
 
+import logging
 import os
 import socket
 import threading
 import time
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
+from fastapi.responses import JSONResponse
 
 # Global backstop: any library that opens a socket without an explicit timeout
 # (fredapi/urllib-style code, some yfinance paths) inherits this instead of
@@ -26,6 +28,7 @@ socket.setdefaulttimeout(20)
 from fastapi.middleware.cors import CORSMiddleware
 
 from backend.audit import AuditMiddleware
+from backend.ratelimit import RateLimitMiddleware
 from backend.config import CORS_ORIGINS
 from backend.routes import (
     admin,
@@ -58,6 +61,35 @@ app = FastAPI(
     redoc_url="/redoc",
 )
 
+# ── error monitoring ──────────────────────────────────────────────────────
+# Optional Sentry: set SENTRY_DSN (and `pip install sentry-sdk`) to stream
+# unhandled exceptions to Sentry's free tier. Without it, the structured
+# exception handler below still logs every silent failure to the journal.
+_log = logging.getLogger("motherboard.app")
+if (os.getenv("SENTRY_DSN") or "").strip():
+    try:
+        import sentry_sdk
+        sentry_sdk.init(dsn=os.environ["SENTRY_DSN"], traces_sample_rate=0.0)
+        _log.info("Sentry error monitoring enabled")
+    except ImportError:
+        _log.warning("SENTRY_DSN set but sentry-sdk not installed — "
+                     "add it to requirements to enable Sentry")
+
+
+@app.exception_handler(Exception)
+async def _unhandled(request: Request, exc: Exception):
+    """Every unhandled exception gets logged with route context so silent
+    failures show up in `journalctl`/docker logs instead of vanishing."""
+    _log.exception("unhandled error on %s %s", request.method, request.url.path)
+    return JSONResponse(status_code=500,
+                        content={"detail": "Internal error — logged."})
+
+
+# Starlette nests middleware with the LAST added outermost. Desired nesting:
+# CORS (outermost — 429s still get CORS headers so the browser can read the
+# error) ⊃ Audit (429s appear in the audit log) ⊃ RateLimit ⊃ routes.
+app.add_middleware(RateLimitMiddleware)
+app.add_middleware(AuditMiddleware)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=CORS_ORIGINS,
@@ -66,7 +98,6 @@ app.add_middleware(
     allow_headers=["*"],
     max_age=600,  # cache CORS preflight 10 min -> far fewer OPTIONS round-trips
 )
-app.add_middleware(AuditMiddleware)
 
 # Unversioned health
 app.include_router(health.router)

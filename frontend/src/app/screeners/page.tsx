@@ -5,6 +5,7 @@ import { useEffect, useState } from "react";
 
 import { DataAge } from "@/components/DataAge";
 import { Shell } from "@/components/Shell";
+import { StatusBadge } from "@/components/StatusBadge";
 import { Pager, SortableTh, TableToolbar, useTableControls } from "@/components/tableControls";
 import { api, type ScreenResult } from "@/lib/api";
 
@@ -114,6 +115,7 @@ export default function ScreenersPage() {
 
       <div className="flex items-center gap-3 mb-4">
         <div className="text-mut text-xs flex-1">{SCREENS[active].desc}</div>
+        <StatusBadge kind="delayed" />
         {result?.as_of && <DataAge at={result.as_of} prefix="Scan data" />}
         {rows && rows.length > 0 && (
           <button onClick={() => exportCsv(SCREENS[active].label, cols, rows)} className="btn-ghost">

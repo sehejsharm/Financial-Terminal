@@ -1,22 +1,15 @@
 "use client";
 
-import { useEffect, useState } from "react";
-
 import { FrameTable } from "@/components/FrameTable";
+import { PanelError, PanelLoading } from "@/components/PanelStates";
 import { api, type Frame } from "@/lib/api";
+import { useAsync } from "@/lib/useAsync";
 
 export function EarningsHistory({ ticker }: { ticker: string }) {
-  const [data, setData] = useState<Frame | null>(null);
-  const [busy, setBusy] = useState(false);
-  const [err, setErr] = useState<string | null>(null);
+  const { data, error, busy, retry } = useAsync<Frame>(() => api.earningsHistory(ticker), [ticker]);
 
-  useEffect(() => {
-    setBusy(true); setErr(null); setData(null);
-    api.earningsHistory(ticker).then(setData).catch((e) => setErr(e?.detail || "Failed to load.")).finally(() => setBusy(false));
-  }, [ticker]);
-
-  if (busy) return <div className="text-mut text-xs">Loading earnings history…</div>;
-  if (err) return <div className="text-red text-sm">{err}</div>;
+  if (busy) return <PanelLoading label="Loading earnings history…" />;
+  if (error) return <PanelError error={error} retry={retry} />;
 
   // Find actual vs estimate columns for a beat/miss bar (case-insensitive).
   const cols = data?.columns ?? [];

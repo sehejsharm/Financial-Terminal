@@ -239,25 +239,30 @@ def test_delivery(user: dict = Depends(auth.current_user)):
             "devices": len(subs), "results": results}
 
 
-def _deliver(username: str, doc: dict, message: str) -> None:
+def _deliver(username: str, doc: dict, message: str) -> dict:
     """Fan a triggered alert out to every configured channel. Dead push
-    subscriptions are pruned in place (caller saves the doc)."""
+    subscriptions are pruned in place (caller saves the doc). Returns a
+    per-channel success map ({} when no channel is configured) so the event
+    feed can show delivery history, not just that the alert fired."""
+    results: dict = {}
     try:
         prefs = doc.get("delivery") or {}
         if notify.email_configured():
-            notify.send_email(f"Motherboard alert: {message}", message,
-                              to=prefs.get("email"))
+            results["email"] = notify.send_email(
+                f"Motherboard alert: {message}", message, to=prefs.get("email"))
         if notify.telegram_configured() and prefs.get("telegram_chat_id"):
-            notify.send_telegram(prefs["telegram_chat_id"],
-                                 f"🔔 {message}")
+            results["telegram"] = notify.send_telegram(
+                prefs["telegram_chat_id"], f"🔔 {message}")
         subs = doc.get("push_subs", [])
         if notify.push_configured() and subs:
             doc["push_subs"] = [
                 s for s in subs
                 if notify.send_push(s, "Motherboard alert", message)
             ]
+            results["push"] = len(doc["push_subs"]) > 0
     except Exception:
         log.exception("alert delivery failed for %s", username)
+    return results
 
 
 # ── evaluator (called from the background loop in backend/app.py) ───────────
@@ -318,12 +323,13 @@ def evaluate_all() -> int:
             a["active"] = False
             a["triggered_at"] = datetime.now(timezone.utc).isoformat(timespec="seconds")
             message = _describe(a, val)
+            delivery = _deliver(username, doc, message)
             doc.setdefault("events", []).append({
                 "ts": a["triggered_at"], "alert_id": a["id"],
                 "message": message, "value": val,
+                "delivery": delivery,   # {channel: ok} — shown in the feed
             })
             doc["events"] = doc["events"][-_MAX_EVENTS:]
-            _deliver(username, doc, message)
             dirty = True
             fired += 1
             log.info("alert fired for %s: %s", username, message)

@@ -379,9 +379,23 @@ export default function AlertsPage() {
           {events.length === 0 && <div className="panel-2 p-4 text-mut text-sm">Nothing has fired yet.</div>}
           <div className="flex flex-col gap-2">
             {events.map((e, i) => (
-              <div key={i} className="panel-2 p-3 text-sm flex items-center gap-3">
+              <div key={i} className="panel-2 p-3 text-sm flex items-center gap-3 flex-wrap">
                 <span className="text-amber">▲</span>
-                <span className="flex-1">{e.message}</span>
+                <span className="flex-1 min-w-[200px]">{e.message}</span>
+                {/* Delivery history: which channels this event actually
+                    reached (in-app is implicit — you're reading it). */}
+                {e.delivery && Object.keys(e.delivery).length > 0 && (
+                  <span className="flex gap-1">
+                    {Object.entries(e.delivery).map(([ch, ok]) => (
+                      <span key={ch}
+                            title={ok ? `Delivered via ${ch}` : `${ch} delivery FAILED`}
+                            className={`px-1.5 py-0.5 rounded border text-[9px] uppercase tracking-wider ${
+                              ok ? "border-green/50 text-green" : "border-red/60 text-red"}`}>
+                        {ch} {ok ? "✓" : "✗"}
+                      </span>
+                    ))}
+                  </span>
+                )}
                 <span className="text-[10px] text-mut whitespace-nowrap">{e.ts.slice(0, 16).replace("T", " ")}</span>
               </div>
             ))}

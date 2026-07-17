@@ -1,9 +1,11 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useRef, useState } from "react";
 
 import { DataAge } from "@/components/DataAge";
+import { PanelError, PanelLoading } from "@/components/PanelStates";
 import { api, type Statement } from "@/lib/api";
+import { useAsync } from "@/lib/useAsync";
 import { humanNumber } from "@/lib/utils";
 
 const KINDS = [
@@ -18,19 +20,20 @@ type Kind = typeof KINDS[number]["key"];
 export function Financials({ ticker, currency }: { ticker: string; currency: string }) {
   const [kind, setKind] = useState<Kind>("income");
   const [quarterly, setQuarterly] = useState(false);
-  const [data, setData] = useState<Statement | null>(null);
-  const [fetchedAt, setFetchedAt] = useState<number | null>(null);
-  const [busy, setBusy] = useState(false);
+  // Set before retry() to force a cache-bypassing reload (DataAge refresh).
+  const freshRef = useRef(false);
 
-  const load = useCallback((fresh = false) => {
-    setBusy(true);
-    api.statement(ticker, kind, quarterly, { fresh })
-      .then((m) => { setData(m.data); setFetchedAt(m.fetchedAt); })
-      .catch(() => { setData({ ticker, kind, columns: [], rows: [] } as Statement); setFetchedAt(Date.now()); })
-      .finally(() => setBusy(false));
-  }, [ticker, kind, quarterly]);
-
-  useEffect(() => { setData(null); setFetchedAt(null); load(); }, [load]);
+  const { data: meta, error, busy, retry } = useAsync<{ data: Statement; fetchedAt: number | null }>(
+    () => {
+      const fresh = freshRef.current;
+      freshRef.current = false;
+      return api.statement(ticker, kind, quarterly, { fresh });
+    },
+    [ticker, kind, quarterly],
+  );
+  const data = meta?.data ?? null;
+  const fetchedAt = meta?.fetchedAt ?? null;
+  const loadFresh = () => { freshRef.current = true; retry(); };
 
   return (
     <div>
@@ -45,7 +48,7 @@ export function Financials({ ticker, currency }: { ticker: string; currency: str
           </button>
         ))}
         <div className="flex-1" />
-        <DataAge at={fetchedAt} onRefresh={() => load(true)} busy={busy} />
+        <DataAge at={fetchedAt} onRefresh={loadFresh} busy={busy} />
         <button
           onClick={() => setQuarterly((v) => !v)}
           className={`btn ${quarterly ? "btn-primary" : "btn-ghost"}`}
@@ -54,7 +57,9 @@ export function Financials({ ticker, currency }: { ticker: string; currency: str
         </button>
       </div>
 
-      {busy && <div className="text-mut text-xs">Loading statement…</div>}
+      {busy && <PanelLoading label="Loading statement…" />}
+
+      {error && !busy && <PanelError error={error} retry={retry} />}
 
       {data && !busy && data.rows.length === 0 && (
         <div className="panel-2 p-4 text-mut text-sm">

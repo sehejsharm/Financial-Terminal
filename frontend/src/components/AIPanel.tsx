@@ -1,9 +1,12 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import { Markdown } from "@/components/Markdown";
+import { PanelError, PanelLoading } from "@/components/PanelStates";
+import { StatusBadge } from "@/components/StatusBadge";
 import { api } from "@/lib/api";
+import { useAsync } from "@/lib/useAsync";
 
 type Mode = "bull-bear" | "deep";
 
@@ -12,28 +15,42 @@ type Mode = "bull-bear" | "deep";
  * don't burn the Groq/Gemini quota every time the user lands on the tab.
  */
 export function AIPanel({ ticker }: { ticker: string }) {
-  const [provider, setProvider] = useState<{ available: boolean; provider: string | null } | null>(null);
+  // Probe failure is a transient network error, NOT "no provider" — keep the
+  // two states distinguishable (PanelError + re-probe vs. the config copy).
+  const { data: provider, error: probeErr, busy: probing, retry: reprobe } =
+    useAsync(() => api.aiProvider(), []);
+
   const [mode, setMode] = useState<Mode | null>(null);
   const [text, setText] = useState<string>("");
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
+  // Ticker at request time — a slow run() for a previous ticker must not
+  // apply its result after the user switched.
+  const tickerRef = useRef(ticker);
+  tickerRef.current = ticker;
+
   useEffect(() => {
     setText(""); setMode(null); setErr(null);
-    api.aiProvider().then(setProvider).catch(() => setProvider({ available: false, provider: null }));
   }, [ticker]);
 
   async function run(m: Mode) {
+    const t = ticker;
     setMode(m); setBusy(true); setErr(null); setText("");
     try {
-      const r = m === "bull-bear" ? await api.bullBear(ticker) : await api.deepAnalysis(ticker);
+      const r = m === "bull-bear" ? await api.bullBear(t) : await api.deepAnalysis(t);
+      if (tickerRef.current !== t) return; // stale — ticker changed mid-flight
       setText(r.markdown);
     } catch (e: any) {
+      if (tickerRef.current !== t) return;
       setErr(e?.detail || "AI request failed.");
     } finally {
-      setBusy(false);
+      if (tickerRef.current === t) setBusy(false);
     }
   }
+
+  if (probing) return <PanelLoading label="Checking AI provider…" />;
+  if (probeErr) return <PanelError error={probeErr} retry={reprobe} label="AI provider check failed" />;
 
   if (provider && !provider.available) {
     return (
@@ -67,6 +84,7 @@ export function AIPanel({ ticker }: { ticker: string }) {
       )}
       {text && !busy && (
         <div className="panel-2 p-5">
+          <div className="mb-3"><StatusBadge kind="ai" /></div>
           <Markdown>{text}</Markdown>
         </div>
       )}

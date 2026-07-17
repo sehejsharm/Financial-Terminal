@@ -26,27 +26,49 @@ const NEEDS_TICKER: Record<WidgetKind, boolean> = {
 };
 
 function ChartWidget({ ticker }: { ticker: string }) {
-  const [candles, setCandles] = useState<any[]>([]);
+  const [candles, setCandles] = useState<any[] | null>(null);  // null = loading
+  const [err, setErr] = useState<string | null>(null);
+  const [epoch, setEpoch] = useState(0);                       // bump = retry
   useEffect(() => {
     // Stale-response guard: switching a pane's ticker quickly must not let
     // an older, slower fetch overwrite the newer one (same race as the
     // Terminal chart).
     let alive = true;
+    setCandles(null); setErr(null);
     api.history(ticker, "1Y")
       .then((h) => { if (alive) setCandles(h?.candles ?? []); })
-      .catch(() => { if (alive) setCandles([]); });
+      .catch((e) => { if (alive) { setCandles([]); setErr(e?.detail || "Chart data failed to load."); } });
     return () => { alive = false; };
-  }, [ticker]);
+  }, [ticker, epoch]);
+  if (candles === null) return <div className="text-mut text-xs animate-pulse">Loading chart…</div>;
+  if (err || candles.length === 0) {
+    return (
+      <div className="panel-2 p-4 text-sm">
+        <div className="text-mut mb-2">{err ?? `No chart data for ${ticker} right now.`}</div>
+        <button onClick={() => setEpoch((n) => n + 1)} className="btn-ghost text-xs">Retry</button>
+      </div>
+    );
+  }
   return <PriceChart data={candles} height={320} />;
 }
 
 function SnapshotWidget({ ticker }: { ticker: string }) {
   const [s, setS] = useState<Snapshot | null>(null);
+  const [failed, setFailed] = useState(false);
+  const [epoch, setEpoch] = useState(0);
   useEffect(() => {
-    setS(null);
-    api.snapshot(ticker).then(setS).catch(() => setS(null));
-  }, [ticker]);
-  if (!s) return <div className="text-mut text-xs">Loading…</div>;
+    setS(null); setFailed(false);
+    api.snapshot(ticker).then(setS).catch(() => setFailed(true));
+  }, [ticker, epoch]);
+  if (failed) {
+    return (
+      <div className="panel-2 p-3 text-sm">
+        <div className="text-mut mb-2">Snapshot failed to load for {ticker}.</div>
+        <button onClick={() => setEpoch((n) => n + 1)} className="btn-ghost text-xs">Retry</button>
+      </div>
+    );
+  }
+  if (!s) return <div className="text-mut text-xs animate-pulse">Loading…</div>;
   const rows: [string, string][] = [
     ["Price", fmtNum(s.price as number, 2)],
     ["Mkt cap", humanNumber(s.market_cap as number)],

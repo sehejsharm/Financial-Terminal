@@ -1,10 +1,10 @@
 "use client";
 
-import { useEffect, useState } from "react";
-
 import { MetricCard } from "@/components/MetricCard";
+import { PanelError, PanelLoading } from "@/components/PanelStates";
 import { api, type Estimates as Est } from "@/lib/api";
 import { looksPercentLabel, prettyLabel } from "@/lib/labels";
+import { useAsync } from "@/lib/useAsync";
 import { fmtNum, formatPercent, humanNumber } from "@/lib/utils";
 
 /** Renders any record-of-records estimate block as a table. */
@@ -56,20 +56,10 @@ function EstTable({ title, block, cur }: { title: string; block?: Record<string,
 }
 
 export function EstimatesView({ ticker, currency }: { ticker: string; currency: string }) {
-  const [data, setData] = useState<Est | null>(null);
-  const [busy, setBusy] = useState(false);
-  const [err, setErr] = useState<string | null>(null);
+  const { data, error, busy, retry } = useAsync<Est>(() => api.estimates(ticker), [ticker]);
 
-  useEffect(() => {
-    setBusy(true); setErr(null); setData(null);
-    api.estimates(ticker)
-      .then(setData)
-      .catch((e) => setErr(e?.detail || "Failed to load estimates."))
-      .finally(() => setBusy(false));
-  }, [ticker]);
-
-  if (busy) return <div className="text-mut text-xs">Loading estimates…</div>;
-  if (err) return <div className="text-red text-sm">{err}</div>;
+  if (busy) return <PanelLoading label="Loading estimates…" />;
+  if (error) return <PanelError error={error} retry={retry} />;
   if (!data) return null;
 
   const pt = data.price_targets;

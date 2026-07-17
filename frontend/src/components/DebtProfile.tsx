@@ -1,9 +1,9 @@
 "use client";
 
-import { useEffect, useState } from "react";
-
 import { MetricCard } from "@/components/MetricCard";
+import { PanelError, PanelLoading } from "@/components/PanelStates";
 import { api, type CapStructure, type Snapshot } from "@/lib/api";
+import { useAsync } from "@/lib/useAsync";
 import { curSymbol, fmtNum, humanNumber } from "@/lib/utils";
 
 /**
@@ -11,15 +11,12 @@ import { curSymbol, fmtNum, humanNumber } from "@/lib/utils";
  * Pulls total debt from capital-structure and ratios from the snapshot.
  */
 export function DebtProfile({ ticker, snap }: { ticker: string; snap: Snapshot | null }) {
-  const [cap, setCap] = useState<CapStructure | null>(null);
-  const [busy, setBusy] = useState(false);
+  const { data: cap, error, busy, retry } = useAsync<CapStructure>(
+    () => api.capitalStructure(ticker), [ticker],
+  );
 
-  useEffect(() => {
-    setBusy(true);
-    api.capitalStructure(ticker).then(setCap).catch(() => setCap(null)).finally(() => setBusy(false));
-  }, [ticker]);
-
-  if (busy) return <div className="text-mut text-xs">Loading debt profile…</div>;
+  if (busy) return <PanelLoading label="Loading debt profile…" />;
+  if (error) return <PanelError error={error} retry={retry} />;
 
   const cur = curSymbol((cap?.currency || (snap?.currency as string)) ?? "USD");
   const de = snap?.debt_to_equity as number | undefined;

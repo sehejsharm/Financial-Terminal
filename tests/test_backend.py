@@ -203,3 +203,37 @@ def test_audit_records_requests(client, auth_h):
     sample = events[-1]
     for k in ("ts", "user", "method", "path", "status", "latency_ms"):
         assert k in sample
+
+
+def test_cached_serves_stale_on_provider_failure():
+    """A provider exception after a successful call degrades to the last
+    known good payload (annotated stale + cached_as_of), never a 500."""
+    from backend.cache import cached
+
+    calls = {"n": 0}
+
+    @cached(ttl=60)
+    def flaky(sym: str):
+        calls["n"] += 1
+        if calls["n"] > 1:
+            raise RuntimeError("provider down")
+        return {"price": 101.5}
+
+    first = flaky("AAPL")
+    assert first == {"price": 101.5}
+    # Expire the fresh entry (keep the :stale copy) to simulate TTL lapse.
+    from backend import cache as cache_mod
+    fresh_key = cache_mod._key(flaky.__qualname__, ("AAPL",), {})
+    cache_mod._lru._data.pop(fresh_key, None)
+    second = flaky("AAPL")          # provider now raises → stale fallback
+    assert second["price"] == 101.5
+    assert second["stale"] is True
+    assert "cached_as_of" in second
+
+    @cached(ttl=0)
+    def always_down(sym: str):
+        raise RuntimeError("no stale copy exists")
+
+    import pytest as _pytest
+    with _pytest.raises(RuntimeError):
+        always_down("MSFT")         # nothing cached → error still propagates

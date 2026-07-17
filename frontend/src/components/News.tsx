@@ -44,10 +44,12 @@ export function News({ ticker }: { ticker: string }) {
   const [sentBusy, setSentBusy] = useState(false);
   const [sentErr, setSentErr] = useState<string | null>(null);
 
-  useEffect(() => {
+  const load = () => {
     setBusy(true); setErr(null); setItems(null); setSent(null); setSentErr(null);
     api.news(ticker, 15).then(setItems).catch((e) => setErr(e?.detail || "Failed to load news.")).finally(() => setBusy(false));
-  }, [ticker]);
+  };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  useEffect(load, [ticker]);
 
   // Explicit button (not auto) — each analysis is a Groq call; results are
   // server-cached 30 min per ticker.
@@ -62,9 +64,23 @@ export function News({ ticker }: { ticker: string }) {
     }
   }
 
-  if (busy) return <div className="text-mut text-xs">Loading headlines…</div>;
-  if (err) return <div className="text-red text-sm">{err}</div>;
-  if (!items || items.length === 0) return <div className="panel-2 p-4 text-mut text-sm">No recent headlines for {ticker}.</div>;
+  if (busy) return <div className="text-mut text-xs animate-pulse">Loading headlines…</div>;
+  if (err) {
+    return (
+      <div className="panel-2 p-4 text-sm">
+        <div className="text-red mb-2">{err}</div>
+        <button onClick={load} className="btn-ghost text-xs">Retry</button>
+      </div>
+    );
+  }
+  if (!items || items.length === 0) {
+    return (
+      <div className="panel-2 p-4 text-mut text-sm flex items-center gap-3">
+        <span>No recent headlines for {ticker}.</span>
+        <button onClick={load} className="btn-ghost text-xs shrink-0">Retry</button>
+      </div>
+    );
+  }
 
   const label = (title: string) =>
     sent?.items.find((s) => s.title === title)?.sentiment;

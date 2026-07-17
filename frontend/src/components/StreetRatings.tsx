@@ -1,24 +1,17 @@
 "use client";
 
-import { useEffect, useState } from "react";
-
 import { FrameTable } from "@/components/FrameTable";
 import { MetricCard } from "@/components/MetricCard";
+import { PanelError, PanelLoading } from "@/components/PanelStates";
 import { api, type Ratings } from "@/lib/api";
+import { useAsync } from "@/lib/useAsync";
 import { curSymbol, fmtNum } from "@/lib/utils";
 
 export function StreetRatings({ ticker, currency }: { ticker: string; currency: string }) {
-  const [data, setData] = useState<Ratings | null>(null);
-  const [busy, setBusy] = useState(false);
-  const [err, setErr] = useState<string | null>(null);
+  const { data, error, busy, retry } = useAsync<Ratings>(() => api.ratings(ticker), [ticker]);
 
-  useEffect(() => {
-    setBusy(true); setErr(null); setData(null);
-    api.ratings(ticker).then(setData).catch((e) => setErr(e?.detail || "Failed to load.")).finally(() => setBusy(false));
-  }, [ticker]);
-
-  if (busy) return <div className="text-mut text-xs">Loading street ratings…</div>;
-  if (err) return <div className="text-red text-sm">{err}</div>;
+  if (busy) return <PanelLoading label="Loading street ratings…" />;
+  if (error) return <PanelError error={error} retry={retry} />;
   if (!data) return null;
 
   const cur = curSymbol(currency);

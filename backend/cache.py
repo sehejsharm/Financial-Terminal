@@ -8,12 +8,20 @@ from __future__ import annotations
 
 import functools
 import hashlib
+import logging
 import pickle
 import time
 from collections import OrderedDict
+from datetime import datetime, timezone
 from typing import Any, Callable
 
 from backend.config import REDIS_URL
+
+log = logging.getLogger("motherboard.cache")
+
+# How long a last-known-good copy stays servable after the fresh TTL lapses.
+# One provider outage must degrade to "cached as of X", not a blank page.
+STALE_TTL = 24 * 3600
 
 _redis = None
 if REDIS_URL:
@@ -78,10 +86,24 @@ def cached(ttl: int = 600) -> Callable:
             if _redis is not None:
                 try:
                     _redis.setex(key, ttl, pickle.dumps(value))
+                    # Long-lived last-known-good copy for outage fallback.
+                    _redis.setex(f"{key}:stale", STALE_TTL,
+                                 pickle.dumps((time.time(), value)))
                 except Exception:
                     pass
             else:
                 _lru.set(key, value, ttl)
+                _lru.set(f"{key}:stale", (time.time(), value), STALE_TTL)
+
+        def _stale(key: str):
+            """(stored_at, value) of the last good result, or None."""
+            if _redis is not None:
+                try:
+                    blob = _redis.get(f"{key}:stale")
+                    return pickle.loads(blob) if blob is not None else None
+                except Exception:
+                    return None
+            return _lru.get(f"{key}:stale")
 
         @functools.wraps(fn)
         def wrapper(*args, **kwargs):
@@ -97,7 +119,26 @@ def cached(ttl: int = 600) -> Callable:
                 hit = _lru.get(key)
                 if hit is not None:
                     return hit
-            value = fn(*args, **kwargs)
+            try:
+                value = fn(*args, **kwargs)
+            except Exception:
+                # Graceful degradation: a provider outage serves the last
+                # known good payload (annotated when it's a dict) instead of
+                # exploding into a blank page.
+                prev = _stale(key)
+                if prev is not None:
+                    stored_at, stale_value = prev
+                    log.warning("%s failed — serving stale copy from %ds ago",
+                                fn.__qualname__, int(time.time() - stored_at),
+                                exc_info=True)
+                    if isinstance(stale_value, dict):
+                        stale_value = {**stale_value,
+                                       "stale": True,
+                                       "cached_as_of": datetime.fromtimestamp(
+                                           stored_at, tz=timezone.utc
+                                       ).isoformat(timespec="seconds")}
+                    return stale_value
+                raise
             _store(key, value)
             return value
 

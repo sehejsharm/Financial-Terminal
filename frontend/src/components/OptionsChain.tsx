@@ -5,14 +5,15 @@ import { useEffect, useState } from "react";
 import { api, type OptionChain, type OptionRow } from "@/lib/api";
 import { fmtNum } from "@/lib/utils";
 
-const COLS: { key: string; label: string; digits?: number }[] = [
+const COLS: { key: string; label: string; digits?: number; pct?: boolean }[] = [
   { key: "strike", label: "Strike", digits: 1 },
   { key: "lastPrice", label: "Last", digits: 2 },
   { key: "bid", label: "Bid", digits: 2 },
   { key: "ask", label: "Ask", digits: 2 },
   { key: "volume", label: "Vol", digits: 0 },
   { key: "openInterest", label: "OI", digits: 0 },
-  { key: "impliedVolatility", label: "IV", digits: 2 },
+  // IV arrives as a decimal (0.35) — display as 35.0%.
+  { key: "impliedVolatility", label: "IV %", digits: 1, pct: true },
   { key: "delta", label: "Δ", digits: 3 },
   { key: "gamma", label: "Γ", digits: 4 },
   { key: "theta", label: "Θ", digits: 3 },
@@ -40,7 +41,7 @@ function OptTable({ rows, spot }: { rows: OptionRow[]; spot: number }) {
                   const v = r[c.key];
                   return (
                     <td key={c.key} className="px-2 py-1 num text-right text-txt/90">
-                      {typeof v === "number" ? fmtNum(v, c.digits ?? 2) : "—"}
+                      {typeof v === "number" ? fmtNum(c.pct ? v * 100 : v, c.digits ?? 2) : "—"}
                     </td>
                   );
                 })}

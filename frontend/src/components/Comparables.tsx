@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import { ScrollX } from "@/components/ScrollX";
 import { api, type CompRow } from "@/lib/api";
@@ -19,15 +19,25 @@ export function Comparables({ ticker, peers }: { ticker: string; peers?: string[
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
+  // Request-id guard: only the latest comps request may apply (fast ticker
+  // switching or repeated Compare clicks must not let a slow older response
+  // overwrite a newer one).
+  const reqRef = useRef(0);
+
   function load(peerStr: string) {
     const ts = peerStr.split(/[,\s]+/).map((t) => t.trim().toUpperCase()).filter(Boolean);
     if (!ts.length) return;
+    const reqId = ++reqRef.current;
     setBusy(true); setErr(null);
-    api.comps(ts).then(setRows).catch((e) => setErr(e?.detail || "Comps failed.")).finally(() => setBusy(false));
+    api.comps(ts)
+      .then((r) => { if (reqRef.current === reqId) setRows(r); })
+      .catch((e) => { if (reqRef.current === reqId) setErr(e?.detail || "Comps failed."); })
+      .finally(() => { if (reqRef.current === reqId) setBusy(false); });
   }
 
   useEffect(() => {
     let alive = true;
+    reqRef.current++; // invalidate any in-flight comps for the previous ticker
     setRows(null); setBasis(null);
     if (peers && peers.length) {
       const s = [ticker, ...peers.filter((p) => p !== ticker)].join(", ");

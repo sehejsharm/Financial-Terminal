@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useEffect, useState } from "react";
 
 import { Shell } from "@/components/Shell";
+import { StatusBadge } from "@/components/StatusBadge";
 import { Pager, SortableTh, TableToolbar, useTableControls } from "@/components/tableControls";
 import { api, type DealRow, type FlowRow, type InsiderRow } from "@/lib/api";
 import { fmtNum, humanNumber } from "@/lib/utils";
@@ -185,7 +186,10 @@ export default function SharksPage() {
 
   return (
     <Shell>
-      <h1 className="heading mb-3">BIG SHARK UPDATES</h1>
+      <div className="flex items-center gap-3 mb-3">
+        <h1 className="heading">BIG SHARK UPDATES</h1>
+        <StatusBadge kind="eod" />
+      </div>
       <div className="panel-2 p-3 mb-4 text-[11px] text-mut">
         A true real-time feed of bulk/block deals requires a paid data subscription.
         NSE publishes these end-of-day only, so this is the latest <strong>END-OF-DAY</strong> activity

@@ -1,23 +1,16 @@
 "use client";
 
-import { useEffect, useState } from "react";
-
 import { FrameTable } from "@/components/FrameTable";
+import { PanelError, PanelLoading } from "@/components/PanelStates";
 import { api, type Ownership as Own } from "@/lib/api";
+import { useAsync } from "@/lib/useAsync";
 import { humanNumber } from "@/lib/utils";
 
 export function Ownership({ ticker }: { ticker: string }) {
-  const [data, setData] = useState<Own | null>(null);
-  const [busy, setBusy] = useState(false);
-  const [err, setErr] = useState<string | null>(null);
+  const { data, error, busy, retry } = useAsync<Own>(() => api.ownership(ticker), [ticker]);
 
-  useEffect(() => {
-    setBusy(true); setErr(null); setData(null);
-    api.ownership(ticker).then(setData).catch((e) => setErr(e?.detail || "Failed to load ownership.")).finally(() => setBusy(false));
-  }, [ticker]);
-
-  if (busy) return <div className="text-mut text-xs">Loading ownership…</div>;
-  if (err) return <div className="text-red text-sm">{err}</div>;
+  if (busy) return <PanelLoading label="Loading ownership…" />;
+  if (error) return <PanelError error={error} retry={retry} />;
   if (!data) return null;
 
   const empty = data.major_holders.rows.length === 0

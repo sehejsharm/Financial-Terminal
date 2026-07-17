@@ -5,6 +5,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { ChevronRight, Download, ExternalLink, Flag, Pin, PinOff, X } from "lucide-react";
 
 import { DataAge } from "@/components/DataAge";
+import { StatusBadge } from "@/components/StatusBadge";
 import { api, type ChainNode, type Quote, type ValueChain, type VcHistoryEntry } from "@/lib/api";
 import { fmtNum, fmtPct } from "@/lib/utils";
 
@@ -375,7 +376,12 @@ export function ValueChainMap({ ticker }: { ticker: string }) {
   const [view, setView] = useState({ x: 0, y: 0, w: W, h: H });
   const panRef = useRef<{ sx: number; sy: number; vx: number; vy: number } | null>(null);
 
+  // Request-id guard: a slow generation for a previously-shown node must not
+  // overwrite the map after the user re-centered or switched ticker.
+  const loadReqRef = useRef(0);
+
   const load = useCallback((t: string, refresh = false) => {
+    const reqId = ++loadReqRef.current;
     setBusy(true); setErr(null); setData(null); setSelected(null); setPinnedAt(null);
     setSnapshotTs(null); setView({ x: 0, y: 0, w: W, h: H });
     const pin = !refresh && loadPin(t);
@@ -384,10 +390,12 @@ export function ValueChainMap({ ticker }: { ticker: string }) {
       return;
     }
     api.valueChain(t, refresh)
-      .then((m) => { setData(m.data); setFetchedAt(m.fetchedAt); })
-      .catch((e) => setErr(e?.detail || "Value-chain mapping failed."))
-      .finally(() => setBusy(false));
-    api.vcHistory(t).then(setHistory).catch(() => setHistory([]));
+      .then((m) => { if (loadReqRef.current === reqId) { setData(m.data); setFetchedAt(m.fetchedAt); } })
+      .catch((e) => { if (loadReqRef.current === reqId) setErr(e?.detail || "Value-chain mapping failed."); })
+      .finally(() => { if (loadReqRef.current === reqId) setBusy(false); });
+    api.vcHistory(t)
+      .then((h) => { if (loadReqRef.current === reqId) setHistory(h); })
+      .catch(() => { if (loadReqRef.current === reqId) setHistory([]); });
   }, []);
 
   useEffect(() => { load(current); }, [current, load]);
@@ -477,6 +485,7 @@ export function ValueChainMap({ ticker }: { ticker: string }) {
       {/* PROMINENT provenance banner (was small footer text — promoted given
           the hallucination risk of ungrounded generations). */}
       <div className="border border-amber/60 bg-amber/10 rounded-md px-3 py-2 mb-3 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs">
+        <StatusBadge kind="ai" />
         <span className="text-amber font-bold uppercase tracking-wider">AI-generated map</span>
         <span className="text-mut">{data.source || "LLM"}{data.generated_at ? ` · generated ${new Date(data.generated_at).toLocaleString()}` : ""}</span>
         <span className="text-mut">Not sourced from filings unless marked <span className="text-green">✓ verified</span> — verify independently.</span>

@@ -1,28 +1,28 @@
 "use client";
 
-import { useEffect, useState } from "react";
-
 import { MetricCard } from "@/components/MetricCard";
+import { PanelEmpty, PanelError, PanelLoading } from "@/components/PanelStates";
 import { api, type CapStructure } from "@/lib/api";
+import { useAsync } from "@/lib/useAsync";
 import { curSymbol, humanNumber } from "@/lib/utils";
 
 /** Capital stack: debt / cash / equity with a proportional bar (enterprise value). */
 export function CapitalStructureView({ ticker }: { ticker: string }) {
-  const [data, setData] = useState<CapStructure | null>(null);
-  const [busy, setBusy] = useState(false);
-  const [err, setErr] = useState<string | null>(null);
+  const { data, error, busy, retry } = useAsync<CapStructure>(
+    () => api.capitalStructure(ticker), [ticker],
+  );
 
-  useEffect(() => {
-    setBusy(true); setErr(null); setData(null);
-    api.capitalStructure(ticker)
-      .then(setData)
-      .catch((e) => setErr(e?.detail || "Failed to load capital structure."))
-      .finally(() => setBusy(false));
-  }, [ticker]);
-
-  if (busy) return <div className="text-mut text-xs">Loading capital structure…</div>;
-  if (err) return <div className="text-red text-sm">{err}</div>;
+  if (busy) return <PanelLoading label="Loading capital structure…" />;
+  if (error) return <PanelError error={error} retry={retry} />;
   if (!data) return null;
+
+  if (data.market_cap == null && data.total_debt == null && data.cash == null) {
+    return (
+      <PanelEmpty retry={retry}>
+        Capital-structure inputs aren&apos;t covered by free data for this listing.
+      </PanelEmpty>
+    );
+  }
 
   const cur = curSymbol(data.currency);
   const debt = data.total_debt ?? 0;

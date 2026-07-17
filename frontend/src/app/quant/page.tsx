@@ -103,8 +103,28 @@ export default function QuantPage() {
     api.listWatchlists().then(setWatchlists).catch(() => {});
   }, []);
 
-  async function run() {
-    const tickers = [...new Set(input.split(/[,\s]+/).map((t) => t.trim().toUpperCase()).filter(Boolean))];
+  // Auto-populate on first visit: restore the last-used ticker set (or keep
+  // the NIFTY default) and run immediately — the page used to sit blank
+  // until the user manually clicked Run.
+  useEffect(() => {
+    let inp = input, b = bench;
+    try {
+      inp = localStorage.getItem("mb_quant_input") || inp;
+      b = localStorage.getItem("mb_quant_bench") || b;
+      setInput(inp); setBench(b);
+    } catch { /* defaults stand */ }
+    run(inp, b);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  async function run(inputStr?: string, benchStr?: string) {
+    const rawInput = inputStr ?? input;
+    const rawBench = (benchStr ?? bench).trim().toUpperCase();
+    try {
+      localStorage.setItem("mb_quant_input", rawInput);
+      localStorage.setItem("mb_quant_bench", rawBench);
+    } catch { /* noop */ }
+    const tickers = [...new Set(rawInput.split(/[,\s]+/).map((t) => t.trim().toUpperCase()).filter(Boolean))];
     if (tickers.length < 2) { setErr("Need at least 2 tickers."); return; }
     if (tickers.length > 12) { setErr("Max 12 tickers (12 history fetches)."); return; }
     setBusy(true); setErr(null); setResult(null);
@@ -116,7 +136,7 @@ export default function QuantPage() {
     const { tickers: ts, returns } = alignedReturns(series);
     const matrix = ts.map((_, i) => ts.map((_, j) => pearson(returns[i], returns[j])));
 
-    const bi = ts.indexOf(bench.trim().toUpperCase());
+    const bi = ts.indexOf(rawBench);
     let betas: QuantResult["betas"] = null;
     if (bi >= 0) {
       betas = ts
@@ -125,7 +145,7 @@ export default function QuantPage() {
           b60: beta(returns[i].slice(-60), returns[bi].slice(-60)),
           bfull: beta(returns[i], returns[bi]),
         }))
-        .filter((r) => r.ticker !== bench.trim().toUpperCase());
+        .filter((r) => r.ticker !== rawBench);
     }
     setResult({ tickers: ts, matrix, betas });
     setBusy(false);
@@ -157,7 +177,7 @@ export default function QuantPage() {
           <span className="label-xs">Benchmark</span>
           <input value={bench} onChange={(e) => setBench(e.target.value)} className="input-bare" />
         </label>
-        <button onClick={run} disabled={busy} className="btn-primary">{busy ? "Computing…" : "Compute"}</button>
+        <button onClick={() => run()} disabled={busy} className="btn-primary">{busy ? "Computing…" : "Compute"}</button>
         {watchlists.length > 0 && (
           <div className="flex items-center gap-1 text-xs text-mut w-full">
             Load watchlist:
@@ -168,8 +188,20 @@ export default function QuantPage() {
         )}
       </div>
 
-      {err && <div className="text-red text-sm mb-3">{err}</div>}
+      {err && (
+        <div className="panel-2 p-4 mb-3 text-sm">
+          <div className="text-red mb-2">{err}</div>
+          <button onClick={() => run()} className="btn-ghost text-xs">Retry</button>
+        </div>
+      )}
       {busy && <QuantSkeleton />}
+      {!busy && !err && !res && (
+        <div className="panel-2 p-6 text-center text-sm text-mut">
+          Enter 2–12 tickers above (include the benchmark) and hit
+          <span className="text-amber"> Run</span> — or load a watchlist —
+          to see the correlation matrix and betas.
+        </div>
+      )}
 
       {res && (
         <div className="grid grid-cols-1 xl:grid-cols-[2fr_1fr] gap-6">

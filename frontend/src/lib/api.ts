@@ -93,6 +93,9 @@ function cacheClearAll() {
 export type FetchOpts = {
   /** Bypass the localStorage cache and hit the network (still re-caches). */
   fresh?: boolean;
+  /** Abort the request after this many ms (default 30s). A hung provider
+   *  call must surface as a retryable error, never an eternal spinner. */
+  timeoutMs?: number;
 };
 
 export type FetchMeta<T> = {
@@ -123,7 +126,19 @@ export async function apiFetchMeta<T = unknown>(
   const tk = token.get();
   if (tk) headers.set("Authorization", `Bearer ${tk}`);
 
-  const res = await fetch(`${API_URL}${path}`, { ...init, headers, cache: "no-store" });
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), opts.timeoutMs ?? 30_000);
+  let res: Response;
+  try {
+    res = await fetch(`${API_URL}${path}`,
+                      { ...init, headers, cache: "no-store", signal: ctrl.signal });
+  } catch (e: any) {
+    throw new ApiError(0, e?.name === "AbortError"
+      ? "Request timed out — the data provider may be slow. Try again."
+      : "Network error — check your connection and retry.");
+  } finally {
+    clearTimeout(timer);
+  }
   if (!res.ok) {
     let detail = res.statusText;
     try {
@@ -238,7 +253,12 @@ export type Alert = {
   op: ">" | "<"; value: number; active: boolean;
   created_at: string; triggered_at: string | null;
 };
-export type AlertEvent = { ts: string; alert_id: string; message: string; value: number };
+export type AlertEvent = {
+  ts: string; alert_id: string; message: string; value: number;
+  /** Per-channel delivery outcome ({email: true, telegram: false}); absent
+   *  on events fired before delivery history existed. */
+  delivery?: Record<string, boolean>;
+};
 export type Note = { ticker: string; text: string; updated_at: string | null };
 export type WorkspacePane = { widget: string; ticker?: string | null };
 export type WorkspaceLayout = { id: string; name: string; panes: WorkspacePane[]; split: number[] };
