@@ -5,20 +5,24 @@ import { useEffect, useState } from "react";
 import { api, type OptionChain, type OptionRow } from "@/lib/api";
 import { fmtNum } from "@/lib/utils";
 
-const COLS: { key: string; label: string; digits?: number; pct?: boolean }[] = [
-  { key: "strike", label: "Strike", digits: 1 },
-  { key: "lastPrice", label: "Last", digits: 2 },
+// `mobile: false` columns collapse below md — at 375px only
+// Strike / Last / IV % / Δ fit legibly.
+const COLS: { key: string; label: string; digits?: number; pct?: boolean; mobile?: boolean }[] = [
+  { key: "strike", label: "Strike", digits: 1, mobile: true },
+  { key: "lastPrice", label: "Last", digits: 2, mobile: true },
   { key: "bid", label: "Bid", digits: 2 },
   { key: "ask", label: "Ask", digits: 2 },
   { key: "volume", label: "Vol", digits: 0 },
   { key: "openInterest", label: "OI", digits: 0 },
   // IV arrives as a decimal (0.35) — display as 35.0%.
-  { key: "impliedVolatility", label: "IV %", digits: 1, pct: true },
-  { key: "delta", label: "Δ", digits: 3 },
+  { key: "impliedVolatility", label: "IV %", digits: 1, pct: true, mobile: true },
+  { key: "delta", label: "Δ", digits: 3, mobile: true },
   { key: "gamma", label: "Γ", digits: 4 },
   { key: "theta", label: "Θ", digits: 3 },
   { key: "vega", label: "ν", digits: 3 },
 ];
+
+const respCls = (c: { mobile?: boolean }) => (c.mobile ? "" : "hidden md:table-cell");
 
 function OptTable({ rows, spot }: { rows: OptionRow[]; spot: number }) {
   if (!rows.length) return <div className="panel-2 p-3 text-mut text-xs">No contracts.</div>;
@@ -28,7 +32,7 @@ function OptTable({ rows, spot }: { rows: OptionRow[]; spot: number }) {
         <thead className="text-mut uppercase tracking-wider sticky top-0 bg-panel">
           <tr className="border-b border-line">
             {COLS.map((c) => (
-              <th key={c.key} className="text-right px-2 py-1.5 font-medium">{c.label}</th>
+              <th key={c.key} className={`text-right px-2 py-1.5 font-medium ${respCls(c)}`}>{c.label}</th>
             ))}
           </tr>
         </thead>
@@ -40,7 +44,7 @@ function OptTable({ rows, spot }: { rows: OptionRow[]; spot: number }) {
                 {COLS.map((c) => {
                   const v = r[c.key];
                   return (
-                    <td key={c.key} className="px-2 py-1 num text-right text-txt/90">
+                    <td key={c.key} className={`px-2 py-1 num text-right text-txt/90 ${respCls(c)}`}>
                       {typeof v === "number" ? fmtNum(c.pct ? v * 100 : v, c.digits ?? 2) : "—"}
                     </td>
                   );

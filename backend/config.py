@@ -10,7 +10,9 @@ from dotenv import load_dotenv
 load_dotenv()
 
 BASE_DIR = Path(__file__).resolve().parent.parent
-DATA_DIR = BASE_DIR / "data"
+# MB_DATA_DIR override exists for test harnesses (e2e runs point it at a
+# scratch dir); default is unchanged.
+DATA_DIR = Path(os.getenv("MB_DATA_DIR") or (BASE_DIR / "data"))
 
 # JWT
 JWT_ALGO = "HS256"

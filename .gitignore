@@ -34,3 +34,8 @@ venv/
 
 # OS
 .DS_Store
+
+# E2E test artifacts
+e2e-data/
+frontend/playwright-report/
+frontend/test-results/

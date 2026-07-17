@@ -18,7 +18,11 @@ from pathlib import Path
 
 import streamlit as st
 
-DATA_DIR = Path(__file__).resolve().parent.parent / "data"
+import os as _os
+
+# MB_DATA_DIR override matches backend/config.py (used by test harnesses).
+DATA_DIR = Path(_os.getenv("MB_DATA_DIR")
+                or (Path(__file__).resolve().parent.parent / "data"))
 USERS_PATH = DATA_DIR / "users.json"
 INITIAL_PW_PATH = DATA_DIR / "INITIAL_ADMIN_PASSWORD.txt"
 

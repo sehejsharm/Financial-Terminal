@@ -54,10 +54,16 @@ def _new_portfolio(name: str, positions: list | None = None) -> dict:
 
 
 def _doc(username: str) -> dict:
-    """Load + lazily migrate the per-user doc to the multi-portfolio shape."""
+    """Load + lazily migrate the per-user doc to the multi-portfolio shape.
+
+    The migrated/created doc is persisted IMMEDIATELY: portfolio ids are
+    generated here, and without the save every request would mint a fresh
+    default portfolio with a new id — the id a client just fetched from
+    /list would 404 on the very next call."""
     doc = get_storage().user_doc("portfolios", username, None) or {}
     if "portfolios" not in doc:
         doc = {"portfolios": [_new_portfolio("Main", doc.get("positions") or [])]}
+        get_storage().save_user_doc("portfolios", username, doc)
     for p in doc["portfolios"]:
         p.setdefault("realized", [])
         p.setdefault("history", [])
@@ -187,7 +193,10 @@ def import_positions(body: ImportRequest,
 def _pos_meta(ticker: str) -> dict:
     """Sector/beta/yield for a position — quota_safe (no FMP/TD burn), cached
     10 min so summary refreshes stay cheap."""
-    s = providers.snapshot(ticker, quota_safe=True) or {}
+    try:
+        s = providers.snapshot(ticker, quota_safe=True) or {}
+    except Exception:
+        s = {}
     return {"name": s.get("name") or ticker, "sector": s.get("sector"),
             "beta": s.get("beta"), "dividend_yield": s.get("dividend_yield")}
 
@@ -224,7 +233,12 @@ def summary(pid: str | None = None, user: dict = Depends(auth.current_user)):
                 "factors": None}
 
     tickers = sorted({p["ticker"] for p in positions})
-    quotes = providers.quotes_bulk(tickers)
+    try:
+        quotes = providers.quotes_bulk(tickers)
+    except Exception:
+        # Provider outage must not blank the holdings list — rows render
+        # with "—" prices instead.
+        quotes = {}
 
     rows, total_value, total_cost, total_day = [], 0.0, 0.0, 0.0
     for p in positions:

@@ -79,7 +79,34 @@ export function Comparables({ ticker, peers }: { ticker: string; peers?: string[
       )}
       {err && <div className="text-red text-sm mb-2">{err}</div>}
       {rows && rows.length === 0 && <div className="panel-2 p-4 text-mut text-sm">No comparable data.</div>}
+      {/* <md: card layout — the metric matrix clips badly at 375px. */}
       {rows && rows.length > 0 && (
+        <div className="md:hidden flex flex-col gap-2">
+          {rows.map((r, i) => {
+            const numeric = cols.filter((c) => typeof r[c] === "number").slice(0, 4);
+            const t = r.Ticker ? String(r.Ticker) : null;
+            const href = t ? `/terminal?t=${encodeURIComponent(t.includes(".") ? t : `${t}.NS`)}` : null;
+            return (
+              <div key={i} className="panel-2 p-3">
+                <div className="flex items-baseline justify-between gap-2 mb-1.5">
+                  <span className="text-amber font-bold">{t ?? "—"}</span>
+                  {href && <Link href={href} className="text-amber text-xs hover:underline">Open →</Link>}
+                </div>
+                <div className="grid grid-cols-2 gap-x-4 gap-y-1">
+                  {numeric.map((c) => (
+                    <div key={c} className="flex justify-between text-xs">
+                      <span className="label-xs">{c}</span>
+                      <span className="num">{fmtNum(r[c] as number, 2)}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+      {rows && rows.length > 0 && (
+        <div className="hidden md:block">
         <ScrollX className="panel">
           <table className="w-full text-xs">
             <thead className="text-mut uppercase tracking-wider">
@@ -107,6 +134,7 @@ export function Comparables({ ticker, peers }: { ticker: string; peers?: string[
             </tbody>
           </table>
         </ScrollX>
+        </div>
       )}
       <div className="text-[10.5px] text-mut mt-2">EV/EBITDA* uses market cap as an EV proxy (no debt-layer feed on free data).</div>
     </div>

@@ -598,4 +598,8 @@ export const api = {
     apiFetch<unknown>("/api/v1/screens/etfs", {
       method: "POST", body: JSON.stringify({ sort_by, sector }),
     }).then(normScreen),
+  customScreen: (filters: { key: string; op: ">" | "<"; value: number }[]) =>
+    apiFetch<unknown>("/api/v1/screens/custom", {
+      method: "POST", body: JSON.stringify({ filters }),
+    }).then(normScreen),
 };

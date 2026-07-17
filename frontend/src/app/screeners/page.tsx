@@ -58,6 +58,29 @@ function exportCsv(name: string, cols: string[], rows: any[]) {
   URL.revokeObjectURL(url);
 }
 
+// Metric keys the backend's custom-filter engine understands
+// (lib/screens.py FILTER_METRICS).
+const CUSTOM_METRICS: { key: string; label: string }[] = [
+  { key: "mcap_cr", label: "Market cap (₹ cr)" },
+  { key: "eps_growth", label: "EPS growth (%)" },
+  { key: "sales_growth", label: "Sales growth (%)" },
+  { key: "peg", label: "PEG ratio" },
+  { key: "de", label: "Debt / Equity" },
+  { key: "roce", label: "ROCE (%)" },
+  { key: "promoter", label: "Promoter/insider holding (%)" },
+  { key: "pe", label: "P/E" },
+  { key: "roe", label: "ROE (%)" },
+];
+
+type CustomFilter = { key: string; op: ">" | "<"; value: number };
+type SavedScreen = { name: string; filters: CustomFilter[] };
+const SAVED_KEY = "mb_custom_screens";
+
+function loadSaved(): SavedScreen[] {
+  try { return JSON.parse(localStorage.getItem(SAVED_KEY) || "[]"); }
+  catch { return []; }
+}
+
 function tickerOf(r: any): string {
   const t = String(r.ticker ?? r.symbol ?? "").toUpperCase();
   if (!t) return "";
@@ -66,16 +89,30 @@ function tickerOf(r: any): string {
 }
 
 export default function ScreenersPage() {
+  // active = 0..N-1 preset index, or -1 for the custom builder.
   const [active, setActive] = useState(0);
   const [result, setResult] = useState<ScreenResult | null>(null);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
+  // ── custom screen builder ────────────────────────────────────────────
+  const [filters, setFilters] = useState<CustomFilter[]>(
+    [{ key: "mcap_cr", op: ">", value: 20000 }]);
+  const [saved, setSaved] = useState<SavedScreen[]>([]);
+  useEffect(() => { setSaved(loadSaved()); }, []);
+
+  function persistSaved(next: SavedScreen[]) {
+    setSaved(next);
+    try { localStorage.setItem(SAVED_KEY, JSON.stringify(next)); } catch { /* noop */ }
+  }
+
   async function run(i = active) {
     setActive(i);
     setBusy(true); setErr(null); setResult(null);
     try {
-      setResult(await SCREENS[i].run());
+      setResult(i === -1
+        ? await api.customScreen(filters.filter((f) => Number.isFinite(f.value)))
+        : await SCREENS[i].run());
     } catch (e: any) {
       setErr(e?.detail || "Screen failed. The data backend may be waking up — try again in a few seconds.");
     } finally {
@@ -111,14 +148,87 @@ export default function ScreenersPage() {
             {s.label}
           </button>
         ))}
+        {/* Never disabled: opening the builder is view-only (no fetch), so
+            it must stay reachable even while a preset scan is in flight. */}
+        <button onClick={() => { setActive(-1); setResult(null); setErr(null); }}
+                className={`btn ${active === -1 ? "btn-primary" : "btn-ghost"}`}>
+          Custom
+        </button>
       </div>
 
+      {active === -1 && (
+        <div className="panel-2 p-3 mb-4">
+          <div className="label-xs mb-2">Build your own screen — all conditions must pass (AND)</div>
+          <div className="flex flex-col gap-2">
+            {filters.map((f, i) => (
+              <div key={i} className="flex flex-wrap items-center gap-2">
+                <select value={f.key}
+                        onChange={(e) => setFilters(filters.map((x, j) => j === i ? { ...x, key: e.target.value } : x))}
+                        className="input-bare cursor-pointer !py-1 text-xs w-56">
+                  {CUSTOM_METRICS.map((m) => <option key={m.key} value={m.key}>{m.label}</option>)}
+                </select>
+                <select value={f.op}
+                        onChange={(e) => setFilters(filters.map((x, j) => j === i ? { ...x, op: e.target.value as ">" | "<" } : x))}
+                        className="input-bare cursor-pointer !py-1 text-xs w-16">
+                  <option value=">">&gt;</option>
+                  <option value="<">&lt;</option>
+                </select>
+                <input type="number" value={Number.isFinite(f.value) ? f.value : ""}
+                       onChange={(e) => setFilters(filters.map((x, j) => j === i ? { ...x, value: parseFloat(e.target.value) } : x))}
+                       className="input-bare !py-1 text-xs w-32" />
+                {filters.length > 1 && (
+                  <button onClick={() => setFilters(filters.filter((_, j) => j !== i))}
+                          className="text-mut hover:text-red text-xs" title="Remove condition">✕</button>
+                )}
+              </div>
+            ))}
+          </div>
+          <div className="flex flex-wrap items-center gap-2 mt-3">
+            <button onClick={() => setFilters([...filters, { key: "pe", op: "<", value: 25 }])}
+                    className="btn-ghost text-xs">+ Add condition</button>
+            <button onClick={() => run(-1)} disabled={busy} className="btn-primary text-xs">
+              {busy ? "Scanning…" : "Run custom screen"}
+            </button>
+            <button
+              onClick={() => {
+                const name = window.prompt("Save this screen as…");
+                if (!name?.trim()) return;
+                persistSaved([...saved.filter((s) => s.name !== name.trim()),
+                              { name: name.trim(), filters }]);
+              }}
+              className="btn-ghost text-xs">Save screen</button>
+            {saved.length > 0 && <span className="label-xs ml-2">Saved:</span>}
+            {saved.map((s) => (
+              <span key={s.name} className="inline-flex items-center gap-1">
+                <button onClick={() => { setFilters(s.filters); }}
+                        className="btn-ghost text-xs">{s.name}</button>
+                <button onClick={() => {
+                          if (confirm(`Delete saved screen "${s.name}"?`))
+                            persistSaved(saved.filter((x) => x.name !== s.name));
+                        }}
+                        className="text-mut hover:text-red text-[10px]" title="Delete saved screen">✕</button>
+              </span>
+            ))}
+          </div>
+          <div className="text-[10.5px] text-mut mt-2">
+            Growth / ROCE / PEG coverage is limited on free data — screens using
+            them may match fewer names than expected. Saved screens live in this
+            browser.
+          </div>
+        </div>
+      )}
+
       <div className="flex items-center gap-3 mb-4">
-        <div className="text-mut text-xs flex-1">{SCREENS[active].desc}</div>
+        <div className="text-mut text-xs flex-1">
+          {active === -1
+            ? `Custom screen — ${filters.length} condition${filters.length === 1 ? "" : "s"}.`
+            : SCREENS[active].desc}
+        </div>
         <StatusBadge kind="delayed" />
         {result?.as_of && <DataAge at={result.as_of} prefix="Scan data" />}
         {rows && rows.length > 0 && (
-          <button onClick={() => exportCsv(SCREENS[active].label, cols, rows)} className="btn-ghost">
+          <button onClick={() => exportCsv(active === -1 ? "Custom" : SCREENS[active].label, cols, rows)}
+                  className="btn-ghost">
             Export CSV
           </button>
         )}
@@ -155,7 +265,36 @@ export default function ScreenersPage() {
       {rows && rows.length > 0 && (
         <>
           <TableToolbar ctl={ctl} placeholder="Filter by name / ticker…" />
-          <div className="panel overflow-auto">
+          {/* <md: stacked cards — the wide table is unusable at 375px. */}
+          <div className="md:hidden flex flex-col gap-2">
+            {ctl.pageRows.map((r, i) => {
+              const numeric = cols.filter((c) => typeof r[c] === "number").slice(0, 4);
+              return (
+                <div key={i} className="panel-2 p-3">
+                  <div className="flex items-baseline justify-between gap-2 mb-1.5">
+                    {tickerOf(r) ? (
+                      <Link href={`/terminal?t=${encodeURIComponent(tickerOf(r))}`}
+                            className="text-amber font-bold hover:underline">
+                        {String(r.ticker ?? r.symbol ?? "")}
+                      </Link>
+                    ) : (
+                      <span className="text-amber font-bold">{String(r.ticker ?? r.symbol ?? "—")}</span>
+                    )}
+                    <span className="text-xs text-mut truncate">{String(r.name ?? "")}</span>
+                  </div>
+                  <div className="grid grid-cols-2 gap-x-4 gap-y-1">
+                    {numeric.map((c) => (
+                      <div key={c} className="flex justify-between text-xs">
+                        <span className="label-xs">{c.replace(/_/g, " ")}</span>
+                        <span className="num">{fmtCell(c, r[c])}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+          <div className="panel overflow-auto hidden md:block">
             <table className="w-full text-xs">
               <thead className="text-mut uppercase tracking-wider">
                 <tr className="border-b border-line">
