@@ -55,6 +55,18 @@ def current_user(credentials: HTTPAuthorizationCredentials | None
     return {"username": claims["sub"], "role": claims.get("role", "user")}
 
 
+def decode_token(token: str | None) -> dict | None:
+    """Validate a raw JWT (e.g. from a WebSocket/SSE ?token= query param,
+    where an Authorization header can't be set). Returns claims or None."""
+    if not token:
+        return None
+    try:
+        claims = jwt.decode(token, get_jwt_secret(), algorithms=[JWT_ALGO])
+    except jwt.InvalidTokenError:
+        return None
+    return {"username": claims["sub"], "role": claims.get("role", "user")}
+
+
 def require_master_admin(user: dict = Depends(current_user)) -> dict:
     if user.get("role") != user_store.ROLE_MASTER:
         raise HTTPException(status.HTTP_403_FORBIDDEN,

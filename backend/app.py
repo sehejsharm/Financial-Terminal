@@ -11,6 +11,7 @@ Auth: POST /api/v1/auth/login → bearer token → use on every other endpoint.
 """
 from __future__ import annotations
 
+import asyncio
 import logging
 import os
 import socket
@@ -44,6 +45,7 @@ from backend.routes import (
     options,
     portfolio,
     screens,
+    stream,
     value_chain,
     watchlists,
     workspaces,
@@ -107,7 +109,7 @@ _V1 = "/api/v1"
 for r in (auth.router, market.router, fundamentals.router, screens.router,
           options.router, value_chain.router, ai.router, watchlists.router,
           macro.router, deals.router, admin.router, portfolio.router,
-          alerts.router, notes.router, workspaces.router):
+          alerts.router, notes.router, workspaces.router, stream.router):
     app.include_router(r, prefix=_V1)
 
 
@@ -200,3 +202,12 @@ def _prewarm() -> None:
     threading.Thread(target=_fast, daemon=True, name="prewarm-fast").start()
     threading.Thread(target=_slow, daemon=True, name="prewarm-slow").start()
     threading.Thread(target=_alerts, daemon=True, name="alert-eval").start()
+
+
+@app.on_event("startup")
+async def _start_stream_ingest() -> None:
+    """Coalesced market-data poller for the /stream fan-out. Runs as an
+    asyncio task (not a thread) — it needs the event loop the WebSocket
+    connections live on. Idle (near-zero cost) until a client subscribes."""
+    from backend.stream import ingest
+    asyncio.create_task(ingest.run())

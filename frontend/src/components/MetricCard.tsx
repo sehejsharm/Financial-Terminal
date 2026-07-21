@@ -1,9 +1,13 @@
+import type { ReactNode } from "react";
+
 import { cn } from "@/lib/utils";
 
 type Props = {
   label: string;
-  value: string | number | null | undefined;
-  delta?: string | null;
+  // ReactNode so a streaming <LiveNumber> can slot straight into the value/
+  // delta slots (string | number remain valid — they're ReactNodes too).
+  value: ReactNode;
+  delta?: ReactNode;
   tone?: "neutral" | "positive" | "negative";
   className?: string;
   /** Optional hover tooltip (native title) explaining methodology/source. */

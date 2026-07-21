@@ -8,3 +8,4 @@ httpx>=0.27   # used by FastAPI's TestClient in tests
 # Python — builds fine without a compiler), so the Dockerfile installs this
 # in a separate pip line WITHOUT --only-binary.
 pywebpush>=2.0
+tzdata>=2024.1

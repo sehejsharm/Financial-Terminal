@@ -33,6 +33,8 @@ EXPOSE 8000
 
 # --limit-concurrency: shed load with an immediate 503 instead of queueing
 # forever once the box is saturated — keeps /healthz and login answering
-# even if some data endpoint goes pathological.
+# even if some data endpoint goes pathological. Raised from 48 → 256 because
+# each long-lived /stream WebSocket holds a concurrency slot for its whole
+# life; idle sockets are I/O-bound and cheap, but at 48 they'd starve REST.
 CMD ["uvicorn", "backend.app:app", "--host", "0.0.0.0", "--port", "8000", \
-     "--limit-concurrency", "48"]
+     "--limit-concurrency", "256"]

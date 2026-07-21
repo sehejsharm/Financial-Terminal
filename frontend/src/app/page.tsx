@@ -4,13 +4,15 @@ import Link from "next/link";
 import { useState } from "react";
 
 import { DataAge } from "@/components/DataAge";
+import { LiveNumber } from "@/components/LiveNumber";
 import { MetricCard } from "@/components/MetricCard";
 import { RowsSkeleton } from "@/components/Skeleton";
 import { Shell } from "@/components/Shell";
 import { WatchlistEditor } from "@/components/WatchlistEditor";
-import { api, type Mover, type Quote } from "@/lib/api";
+import { api, type Mover } from "@/lib/api";
 import { useLive } from "@/lib/useLive";
-import { curForTicker, fmtNum, fmtPct } from "@/lib/utils";
+import { useQuote } from "@/lib/useQuote";
+import { curForTicker, fmtPct } from "@/lib/utils";
 
 // All NSE-resolvable so the dashboard fills via the direct NSE provider
 // (fast, never blocked). The old INR=X / GC=F / SI=F / CL=F set went through
@@ -66,42 +68,38 @@ function MoversPanel() {
   );
 }
 
-export default function DashboardPage() {
-  // Index quotes poll every 15s while visible (paused in background tabs).
-  // The backend keeps this exact symbol set warm, so polls return in ~ms.
-  const { data, busy, updatedAt, refresh } = useLive<Record<string, Quote | null>>(
-    () => api.quoteBulk(SNAPSHOT_TICKERS),
-    15_000,
+/** One streaming index tile. Subscribes itself to the symbol (ref-counted),
+ *  so only this card re-renders when its tick changes — not the whole grid. */
+function IndexCard({ t }: { t: string }) {
+  const tick = useQuote(t);
+  const cur = curForTicker(t, tick?.ccy);
+  const cp = tick?.chgPct ?? null;
+  const tone = cp == null ? "neutral" : cp >= 0 ? "positive" : "negative";
+  const has = tick?.ltp != null;
+  return (
+    <Link href={`/terminal?t=${encodeURIComponent(t)}`}>
+      <MetricCard
+        label={NAMES[t] ?? t}
+        value={has ? <LiveNumber symbol={t} field="ltp" format="price" ccy={cur} /> : "···"}
+        delta={cp != null ? <LiveNumber symbol={t} field="chgPct" format="pct" showDelta /> : null}
+        tone={tone}
+        className={`cursor-pointer ${!has ? "animate-pulse" : ""}`}
+      />
+    </Link>
   );
-  const quotes = data ?? {};
-  const loaded = data !== null;
+}
 
+export default function DashboardPage() {
+  // Index tiles now stream: each IndexCard subscribes to the shared socket
+  // (seeded once from REST by the store, so no blank first paint). The old
+  // per-page 15s quoteBulk poll is gone — liveness shows in the header badge.
   return (
     <Shell>
       <div className="flex items-center gap-3 mb-3">
         <h1 className="heading">MARKET SNAPSHOT</h1>
-        <div className="flex-1" />
-        <DataAge at={updatedAt} onRefresh={refresh} busy={busy} />
       </div>
       <div className="grid gap-3 mb-8" style={{ gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))" }}>
-        {SNAPSHOT_TICKERS.map((t) => {
-          const q = quotes[t];
-          const cur = curForTicker(t, q?.currency);
-          const cp = q?.change_pct ?? null;
-          const tone = cp == null ? "neutral" : cp >= 0 ? "positive" : "negative";
-          const pending = !loaded && !q;
-          return (
-            <Link key={t} href={`/terminal?t=${encodeURIComponent(t)}`}>
-              <MetricCard
-                label={NAMES[t] ?? t}
-                value={q?.price != null ? `${cur}${fmtNum(q.price, 2)}` : (pending ? "···" : "—")}
-                delta={cp != null ? fmtPct(cp) : null}
-                tone={tone}
-                className={`cursor-pointer ${pending ? "animate-pulse" : ""}`}
-              />
-            </Link>
-          );
-        })}
+        {SNAPSHOT_TICKERS.map((t) => <IndexCard key={t} t={t} />)}
       </div>
 
       {/* min-w-0 on grid children: without it the movers column refused to

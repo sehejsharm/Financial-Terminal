@@ -10,9 +10,39 @@ import {
 
 import { api, token, type AlertEvent, type Quote } from "@/lib/api";
 import { useLiveStatus } from "@/lib/useLive";
+import { useStreamStatus } from "@/lib/useQuote";
 import { cn, fmtPct } from "@/lib/utils";
 
 import { CommandPalette } from "./CommandPalette";
+
+/** Header data-status pill. Reflects the real socket when this page streams
+ *  (LIVE / RECONNECTING / STALE / CLOSED via heartbeat), and falls back to
+ *  the legacy polling indicator on pages not yet on the stream. */
+function StreamBadge({ polling }: { polling: boolean }) {
+  const { status } = useStreamStatus();
+  const streaming = status === "live" || status === "reconnecting"
+    || status === "stale" || status === "closed";
+
+  const map = {
+    live: { label: "LIVE", cls: "text-green animate-pulse", tip: "Streaming — ticks arriving live over the socket." },
+    reconnecting: { label: "RECONNECTING", cls: "text-amber animate-pulse", tip: "Socket dropped — reconnecting with backoff." },
+    stale: { label: "STALE", cls: "text-red", tip: "Connected but no ticks recently — feed may be paused." },
+    closed: { label: "CLOSED", cls: "text-mut", tip: "Market is closed — showing the last session's values (honest, not faked)." },
+  } as const;
+
+  const s = streaming
+    ? map[status as keyof typeof map]
+    : polling
+      ? { label: "LIVE", cls: "text-green animate-pulse", tip: "Panels on this page auto-refresh while the tab is visible." }
+      : { label: "STATIC", cls: "text-mut", tip: "No auto-refresh on this page — data loads on demand." };
+
+  return (
+    <div className="hidden sm:flex items-center gap-2 text-[11px] text-mut" title={s.tip}>
+      <Activity size={12} className={s.cls} />
+      {s.label}
+    </div>
+  );
+}
 
 const NAV = [
   { href: "/",          label: "Dashboard",  icon: Home },
@@ -279,15 +309,7 @@ export function Shell({ children }: { children: React.ReactNode }) {
                 </div>
               )}
             </div>
-            <div
-              className="hidden sm:flex items-center gap-2 text-[11px] text-mut"
-              title={polling
-                ? "Panels on this page auto-refresh while the tab is visible"
-                : "No auto-refresh on this page — data loads on demand"}
-            >
-              <Activity size={12} className={polling ? "text-green animate-pulse" : "text-mut"} />
-              {polling ? "LIVE" : "STATIC"}
-            </div>
+            <StreamBadge polling={polling} />
           </div>
         </header>
 

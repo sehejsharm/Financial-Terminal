@@ -88,3 +88,20 @@ html.light.cb {
   .btn-primary { @apply btn bg-amber text-black hover:bg-amber/90; }
   .btn-ghost   { @apply btn bg-panel2 text-txt border border-line2 hover:border-amber; }
 }
+
+/* ── Streaming <LiveNumber> tick flash ────────────────────────────────────
+   Colours come from the --c-green/--c-red vars, so html.cb (colorblind-safe
+   blue/orange) remaps the flash automatically. Respects reduced-motion. */
+@keyframes mbFlashUp {
+  0%   { background: rgb(var(--c-green) / 0.35); }
+  100% { background: transparent; }
+}
+@keyframes mbFlashDown {
+  0%   { background: rgb(var(--c-red) / 0.35); }
+  100% { background: transparent; }
+}
+.live-flash-up   { animation: mbFlashUp 0.6s ease-out; border-radius: 3px; }
+.live-flash-down { animation: mbFlashDown 0.6s ease-out; border-radius: 3px; }
+@media (prefers-reduced-motion: reduce) {
+  .live-flash-up, .live-flash-down { animation: none; }
+}

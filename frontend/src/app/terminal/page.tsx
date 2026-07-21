@@ -23,10 +23,12 @@ import { TerminalSkeleton } from "@/components/Skeleton";
 import { TickerInput } from "@/components/TickerInput";
 import { StreetRatings } from "@/components/StreetRatings";
 import { ValueChainMap } from "@/components/ValueChainMap";
+import { LiveNumber } from "@/components/LiveNumber";
 import { Wacc } from "@/components/Wacc";
 import { api, type Quote, type ResolveRec, type Snapshot } from "@/lib/api";
 import { FN_CODES } from "@/lib/commands";
 import { useLive } from "@/lib/useLive";
+import { useQuote } from "@/lib/useQuote";
 import { curForTicker, fmtNum, fmtPct, formatPercent, humanNumber, inferCurrency } from "@/lib/utils";
 
 const FUNCTIONS = [
@@ -115,6 +117,9 @@ function TerminalInner() {
   // Live quote: polls every 15s while the tab is visible (pauses hidden).
   const quoteLive = useLive<Quote>(() => api.quote(ticker), 15_000, [ticker]);
   const quote = quoteLive.data;
+  // Live tick for this symbol (shared socket) — drives the streaming price
+  // card and its up/down flash; seeds from REST so it's never blank.
+  const liveTick = useQuote(ticker);
 
   // Snapshot (fundamentals): loads on ticker change; the header refresh
   // button forces past the localStorage cache.
@@ -225,9 +230,13 @@ function TerminalInner() {
         </div>
         <MetricCard
           label="Price"
-          value={price != null ? `${cur}${fmtNum(price, 2)}` : "—"}
-          delta={cp != null ? fmtPct(cp) : null}
-          tone={cp == null ? "neutral" : cp >= 0 ? "positive" : "negative"}
+          value={(liveTick?.ltp ?? price) != null
+            ? <LiveNumber symbol={ticker} field="ltp" format="price" ccy={cur} />
+            : "—"}
+          delta={(liveTick?.chgPct ?? cp) != null
+            ? <LiveNumber symbol={ticker} field="chgPct" format="pct" showDelta />
+            : null}
+          tone={(() => { const c = liveTick?.chgPct ?? cp; return c == null ? "neutral" : c >= 0 ? "positive" : "negative"; })()}
           className="!p-3 min-w-[160px]"
         />
       </div>
