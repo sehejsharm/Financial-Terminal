@@ -6,6 +6,7 @@ import {
 import { useEffect, useMemo, useRef, useState } from "react";
 
 import { bollinger, ema, macd, rsi, sma } from "@/lib/indicators";
+import { useQuote } from "@/lib/useQuote";
 
 // yfinance serialises columns capitalised (Date/Close/Open…); Twelve Data uses
 // lowercase. Accept both so the chart never silently renders empty.
@@ -86,12 +87,18 @@ const OVERLAY_COLORS: Record<Overlay, string> = {
  * Colors come from the terminal palette so it matches the active theme.
  */
 export function PriceChart({
-  data, height = 360, config = DEFAULT_CHART_CONFIG,
-}: { data: Candle[]; height?: number; config?: ChartConfig }) {
+  data, height = 360, config = DEFAULT_CHART_CONFIG, symbol,
+}: { data: Candle[]; height?: number; config?: ChartConfig; symbol?: string }) {
   const ref = useRef<HTMLDivElement>(null);
   const paneRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<IChartApi | null>(null);
   const paneChartRef = useRef<IChartApi | null>(null);
+  // Live-candle append: refs to the price series + last bar so an incoming
+  // tick can .update() the final candle instead of rebuilding the chart.
+  const priceSeriesRef = useRef<any>(null);
+  const seriesKindRef = useRef<ChartType>("area");
+  const lastBarRef = useRef<OHLCPoint | null>(null);
+  const liveTick = useQuote(symbol ?? null);
 
   // Colors are read from CSS variables when the chart is (re)built, so a
   // theme or colorblind-palette toggle mid-session must trigger a rebuild —
@@ -164,6 +171,10 @@ export function PriceChart({
       });
       priceSeries.setData(points.map((p) => ({ time: p.time, value: p.close })));
     }
+    // Expose the price series + last bar so live ticks can append (below).
+    priceSeriesRef.current = priceSeries;
+    seriesKindRef.current = config.type;
+    lastBarRef.current = points.length ? { ...points[points.length - 1] } : null;
 
     // ── volume histogram (bottom 18% of the main pane) ───────────────────
     if (config.volume && points.some((p) => p.volume > 0)) {
@@ -260,11 +271,33 @@ export function PriceChart({
       pane?.remove();
       chartRef.current = null;
       paneChartRef.current = null;
+      priceSeriesRef.current = null;
     };
     // Rebuild wholesale on any config/data change — series counts and types
     // vary too much for incremental updates to be worth the bookkeeping.
   }, [points, intraday, themeEpoch, config.type, config.volume, config.log, config.pane,
       config.overlays.join(",")]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Live-candle append: fold the latest tick into the final bar via the
+  // series' .update() (no rebuild). Only when the tick is FRESH — a stale
+  // tick (market closed) must never mutate a historical bar. Extends the
+  // last bar's high/low and moves its close to the LTP.
+  useEffect(() => {
+    const series = priceSeriesRef.current;
+    const bar = lastBarRef.current;
+    const ltp = liveTick?.ltp;
+    if (!series || !bar || ltp == null || liveTick?.stale) return;
+    if (seriesKindRef.current === "candles") {
+      const next = { time: bar.time, open: bar.open,
+                     high: Math.max(bar.high, ltp), low: Math.min(bar.low, ltp),
+                     close: ltp };
+      series.update(next);
+      lastBarRef.current = { ...bar, high: next.high, low: next.low, close: ltp };
+    } else {
+      series.update({ time: bar.time, value: ltp });
+      lastBarRef.current = { ...bar, close: ltp };
+    }
+  }, [liveTick]);
 
   return (
     <div>

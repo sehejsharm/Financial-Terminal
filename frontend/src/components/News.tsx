@@ -4,16 +4,8 @@ import { useEffect, useState } from "react";
 import { Sparkles } from "lucide-react";
 
 import { api, type NewsItem, type SentimentResp } from "@/lib/api";
+import { timeAgoShort, useNow } from "@/lib/clock";
 import { fmtNum } from "@/lib/utils";
-
-function timeAgo(iso: string | null): string {
-  if (!iso) return "";
-  const secs = (Date.now() - new Date(iso).getTime()) / 1000;
-  if (secs < 0) return "";
-  if (secs < 3600) return `${Math.floor(secs / 60)}m ago`;
-  if (secs < 86400) return `${Math.floor(secs / 3600)}h ago`;
-  return `${Math.floor(secs / 86400)}d ago`;
-}
 
 const SENT_STYLE: Record<string, string> = {
   bull: "border-green/60 text-green",
@@ -37,6 +29,7 @@ function TrendBars({ history }: { history: SentimentResp["history"] }) {
 }
 
 export function News({ ticker }: { ticker: string }) {
+  const now = useNow();
   const [items, setItems] = useState<NewsItem[] | null>(null);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
@@ -118,7 +111,7 @@ export function News({ ticker }: { ticker: string }) {
                   )}
                   {n.title}
                 </div>
-                <span className="text-[10px] text-mut whitespace-nowrap mt-0.5">{timeAgo(n.published)}</span>
+                <span className="text-[10px] text-mut whitespace-nowrap mt-0.5">{timeAgoShort(n.published, now)}</span>
               </div>
               {n.summary && <div className="text-xs text-mut mt-1 line-clamp-2">{n.summary}</div>}
               <div className="text-[10px] text-amber/80 uppercase tracking-wider mt-1.5">{n.publisher}</div>

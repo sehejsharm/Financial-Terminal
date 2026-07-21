@@ -5,39 +5,32 @@ import { useEffect, useState } from "react";
 import { News } from "@/components/News";
 import { Shell } from "@/components/Shell";
 import { api, type NewsItem } from "@/lib/api";
+import { timeAgoShort, useNow } from "@/lib/clock";
 
-function timeAgo(iso: string | null): string {
-  if (!iso) return "";
-  const secs = (Date.now() - new Date(iso).getTime()) / 1000;
-  if (secs < 0) return "";
-  if (secs < 3600) return `${Math.floor(secs / 60)}m ago`;
-  if (secs < 86400) return `${Math.floor(secs / 3600)}h ago`;
-  return `${Math.floor(secs / 86400)}d ago`;
-}
-
-function Hero({ item }: { item: NewsItem }) {
+function Hero({ item, now }: { item: NewsItem; now: number }) {
   return (
     <a href={item.link} target="_blank" rel="noopener noreferrer"
        className="block panel-2 p-5 hover:border-amber transition-colors col-span-2 row-span-2 relative overflow-hidden">
       <div className="absolute top-3 right-3 text-[9px] uppercase tracking-[0.18em] text-amber bg-amber/10 px-2 py-0.5 rounded border border-amber/40">FEATURED</div>
-      <div className="text-[10px] text-amber/80 uppercase tracking-wider mb-2">{item.publisher} · {timeAgo(item.published)}</div>
+      <div className="text-[10px] text-amber/80 uppercase tracking-wider mb-2">{item.publisher} · {timeAgoShort(item.published, now)}</div>
       <div className="text-lg font-bold text-white leading-snug mb-2 pr-12">{item.title}</div>
       <div className="text-sm text-mut line-clamp-4">{item.summary}</div>
     </a>
   );
 }
 
-function MiniCard({ item }: { item: NewsItem }) {
+function MiniCard({ item, now }: { item: NewsItem; now: number }) {
   return (
     <a href={item.link} target="_blank" rel="noopener noreferrer"
        className="block panel-2 p-3 hover:border-amber transition-colors">
-      <div className="text-[10px] text-amber/80 uppercase tracking-wider mb-1">{item.publisher} · {timeAgo(item.published)}</div>
+      <div className="text-[10px] text-amber/80 uppercase tracking-wider mb-1">{item.publisher} · {timeAgoShort(item.published, now)}</div>
       <div className="text-sm text-txt font-medium leading-snug line-clamp-3">{item.title}</div>
     </a>
   );
 }
 
 export default function NewsPage() {
+  const now = useNow();
   const [tab, setTab] = useState<"market" | "ticker">("market");
   const [items, setItems] = useState<NewsItem[] | null>(null);
   const [busy, setBusy] = useState(false);
@@ -70,8 +63,8 @@ export default function NewsPage() {
             <>
               <div className="grid grid-cols-1 md:grid-cols-4 gap-3 mb-6"
                    style={{ gridAutoRows: "minmax(110px, auto)" }}>
-                <Hero item={hero} />
-                {subHero.map((it, i) => <MiniCard key={i} item={it} />)}
+                <Hero item={hero} now={now} />
+                {subHero.map((it, i) => <MiniCard key={i} item={it} now={now} />)}
               </div>
 
               {rest.length > 0 && (
@@ -83,7 +76,7 @@ export default function NewsPage() {
                          className="block panel-2 p-3 hover:border-amber transition-colors">
                         <div className="flex items-start justify-between gap-3">
                           <div className="text-sm text-txt font-medium leading-snug">{n.title}</div>
-                          <span className="text-[10px] text-mut whitespace-nowrap mt-0.5">{timeAgo(n.published)}</span>
+                          <span className="text-[10px] text-mut whitespace-nowrap mt-0.5">{timeAgoShort(n.published, now)}</span>
                         </div>
                         {n.summary && <div className="text-xs text-mut mt-1 line-clamp-2">{n.summary}</div>}
                         <div className="text-[10px] text-amber/80 uppercase tracking-wider mt-1.5">{n.publisher}</div>

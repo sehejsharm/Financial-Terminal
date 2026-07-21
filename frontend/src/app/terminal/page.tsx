@@ -332,7 +332,7 @@ function TerminalInner() {
               </div>
             )}
             <div className={chartBusy ? "opacity-60 transition-opacity" : "transition-opacity"}>
-              <PriceChart data={candles} height={400} config={chartCfg} />
+              <PriceChart data={candles} height={400} config={chartCfg} symbol={ticker} />
             </div>
           </div>
         </>
@@ -357,7 +357,7 @@ function TerminalInner() {
               </div>
             )}
             <div className={chartBusy ? "opacity-60 transition-opacity" : "transition-opacity"}>
-              <PriceChart data={candles} height={520} config={chartCfg} />
+              <PriceChart data={candles} height={520} config={chartCfg} symbol={ticker} />
             </div>
           </div>
         </>

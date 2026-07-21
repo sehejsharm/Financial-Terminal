@@ -57,7 +57,7 @@ function parseCsv(text: string): { rows: ImportRow[]; skipped: string[] } {
 
 /** Lightweight inline SVG line chart: portfolio value (amber) vs cost basis
  *  (muted, dashed). No charting library — two paths in a viewBox. */
-function HistoryChart({ points }: { points: PortfolioHistoryPoint[] }) {
+function HistoryChart({ points, ccy = "" }: { points: PortfolioHistoryPoint[]; ccy?: string }) {
   const W = 400, H = 120, PAD = 4;
   const vals = points.flatMap((p) => [p.value, p.cost]);
   const min = Math.min(...vals), max = Math.max(...vals);
@@ -77,7 +77,7 @@ function HistoryChart({ points }: { points: PortfolioHistoryPoint[] }) {
       </svg>
       <div className="flex justify-between text-[10px] text-mut mt-1">
         <span className="num">{points[0].date}</span>
-        <span className="num text-amber">{humanNumber(last.value)}</span>
+        <span className="num text-amber">{humanNumber(last.value, ccy)}</span>
         <span className="num">{last.date}</span>
       </div>
     </div>
@@ -211,7 +211,15 @@ export default function PortfolioPage() {
 
   const t = data?.totals;
   const f = data?.factors;
-  const cur = curSymbol(data?.positions[0]?.currency);
+  // A portfolio can hold mixed-currency positions (e.g. AAPL in $ + RELIANCE
+  // in ₹). Only stamp a currency symbol on the AGGREGATE totals when every
+  // position shares one currency; otherwise the summed total isn't a single-
+  // currency figure, so we render it unsymboled and flag it honestly (per-row
+  // values still use each holding's own currency).
+  const posCcys = Array.from(
+    new Set((data?.positions ?? []).map((p) => p.currency).filter(Boolean) as string[]));
+  const mixedCcy = posCcys.length > 1;
+  const cur = posCcys.length === 1 ? curSymbol(posCcys[0]) : "";
 
   return (
     <Shell>
@@ -297,20 +305,29 @@ export default function PortfolioPage() {
       </div>
 
       {t && (
-        <div className={`grid grid-cols-2 ${data?.realized ? "md:grid-cols-5" : "md:grid-cols-4"} gap-3 mb-6`}>
-          <MetricCard label="Market value" value={humanNumber(t.value)} />
-          <MetricCard label="Total P&L" value={humanNumber(t.pnl)}
-                      delta={t.pnl_pct != null ? fmtPct(t.pnl_pct) : null}
-                      tone={t.pnl >= 0 ? "positive" : "negative"} />
-          <MetricCard label="Day P&L" value={humanNumber(t.day_pnl)}
-                      tone={t.day_pnl >= 0 ? "positive" : "negative"} />
-          {data?.realized && (
-            <MetricCard label="Realized P&L" value={humanNumber(data.realized.total, cur)}
-                        tone={data.realized.total >= 0 ? "positive" : "negative"} />
+        <>
+          <div className={`grid grid-cols-2 ${data?.realized ? "md:grid-cols-5" : "md:grid-cols-4"} gap-3 mb-6`}>
+            <MetricCard label="Market value" value={humanNumber(t.value, cur)} />
+            <MetricCard label="Total P&L" value={humanNumber(t.pnl, cur)}
+                        delta={t.pnl_pct != null ? fmtPct(t.pnl_pct) : null}
+                        tone={t.pnl >= 0 ? "positive" : "negative"} />
+            <MetricCard label="Day P&L" value={humanNumber(t.day_pnl, cur)}
+                        tone={t.day_pnl >= 0 ? "positive" : "negative"} />
+            {data?.realized && (
+              <MetricCard label="Realized P&L" value={humanNumber(data.realized.total, cur)}
+                          tone={data.realized.total >= 0 ? "positive" : "negative"} />
+            )}
+            <MetricCard label="Wtd beta / div yield"
+                        value={`${f?.beta != null ? fmtNum(f.beta, 2) : "—"} / ${f?.dividend_yield != null ? formatPercent(f.dividend_yield) : "—"}`} />
+          </div>
+          {mixedCcy && (
+            <div className="text-[10.5px] text-amber/90 -mt-4 mb-6">
+              This book holds multiple currencies ({posCcys.join(", ")}) — the totals
+              above are un-converted sums shown without a symbol. Each holding&apos;s own
+              currency is used in the rows below.
+            </div>
           )}
-          <MetricCard label="Wtd beta / div yield"
-                      value={`${f?.beta != null ? fmtNum(f.beta, 2) : "—"} / ${f?.dividend_yield != null ? formatPercent(f.dividend_yield) : "—"}`} />
-        </div>
+        </>
       )}
 
       {/* P&L history */}
@@ -323,7 +340,7 @@ export default function PortfolioPage() {
                 History accrues one point per day you view the portfolio — check back tomorrow.
               </div>
             ) : (
-              <HistoryChart points={history} />
+              <HistoryChart points={history} ccy={cur} />
             )}
           </div>
         </div>
