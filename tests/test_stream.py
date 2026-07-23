@@ -149,3 +149,54 @@ def test_stream_health_endpoint(client):
     assert r.status_code == 200
     body = r.json()
     assert "connections" in body and "symbols" in body and "marketOpen" in body
+
+
+def test_hub_evicts_last_on_unsubscribe():
+    """_last must not grow unbounded: when a symbol's refcount hits 0 the
+    in-memory last-tick is evicted (review finding — memory leak)."""
+    from backend.stream import hub
+    conn = hub.Connection()
+    hub.register(conn)
+    hub.add_symbols(conn, ["EVICT.NS"])
+    hub.publish("EVICT.NS", {"ltp": 10.0, "ts": 1})
+    assert hub.last_tick("EVICT.NS") is not None
+    hub.unregister(conn)  # decref → 0
+    assert hub.last_tick("EVICT.NS") is None
+    assert "EVICT.NS" not in hub.active_symbols()
+
+
+def test_hub_emits_explicit_null_on_field_clear():
+    """A field going value→None emits an explicit null so the client clears
+    the stale value (review finding), instead of being silently suppressed."""
+    from backend.stream import hub
+    conn = hub.Connection()
+    hub.register(conn)
+    hub.add_symbols(conn, ["CLR.NS"])
+    hub.publish("CLR.NS", {"ltp": 10.0, "bid": 9.9, "ts": 1})
+    conn.queue.get_nowait()  # drain first frame
+    hub.publish("CLR.NS", {"ltp": 10.0, "bid": None, "ts": 2})  # bid cleared
+    frame = conn.queue.get_nowait()
+    d = frame["d"][0]
+    assert "bid" in d and d["bid"] is None
+    hub.unregister(conn)
+
+
+def test_hub_overflow_collapses_to_snapshot():
+    """When a slow client's queue fills, the backlog collapses to ONE snapshot
+    of its symbols (no field silently lost), not a dropped delta."""
+    from backend.stream import hub
+    conn = hub.Connection()
+    hub.register(conn)
+    hub.add_symbols(conn, ["OVF.NS"])
+    # Fill to capacity then publish ONE more to trigger exactly one overflow;
+    # the backlog collapses to a single snapshot (no per-delta drop).
+    for i in range(hub._QUEUE_MAX + 1):
+        hub.publish("OVF.NS", {"ltp": 100.0 + i, "ts": i})
+    frames = []
+    while not conn.queue.empty():
+        frames.append(conn.queue.get_nowait())
+    assert len(frames) == 1
+    assert frames[0]["t"] == "snap"
+    assert frames[0]["d"][0]["s"] == "OVF.NS"
+    assert frames[0]["d"][0]["ltp"] == 100.0 + hub._QUEUE_MAX  # latest price retained
+    hub.unregister(conn)

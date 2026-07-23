@@ -53,6 +53,26 @@ type Fn = typeof FUNCTIONS[number];
 
 const PERIODS = ["1D", "5D", "1M", "3M", "6M", "YTD", "1Y", "3Y", "5Y", "10Y"] as const;
 
+/** Header price card, isolated so the live tick re-renders ONLY this card —
+ *  not the whole terminal (8 metric cards + chart) on every tick. Owns its
+ *  own useQuote(ticker); falls back to the REST price/change until a tick. */
+function HeaderPriceCard({ ticker, cur, fallbackPrice, fallbackCp }: {
+  ticker: string; cur: string; fallbackPrice: number | null; fallbackCp: number | null;
+}) {
+  const liveTick = useQuote(ticker);
+  const priceVal = liveTick?.ltp ?? fallbackPrice;
+  const cpVal = liveTick?.chgPct ?? fallbackCp;
+  return (
+    <MetricCard
+      label="Price"
+      value={priceVal != null ? <LiveNumber symbol={ticker} field="ltp" format="price" ccy={cur} /> : "—"}
+      delta={cpVal != null ? <LiveNumber symbol={ticker} field="chgPct" format="pct" showDelta /> : null}
+      tone={cpVal == null ? "neutral" : cpVal >= 0 ? "positive" : "negative"}
+      className="!p-3 min-w-[160px]"
+    />
+  );
+}
+
 function TerminalInner() {
   const router = useRouter();
   const sp = useSearchParams();
@@ -117,9 +137,6 @@ function TerminalInner() {
   // Live quote: polls every 15s while the tab is visible (pauses hidden).
   const quoteLive = useLive<Quote>(() => api.quote(ticker), 15_000, [ticker]);
   const quote = quoteLive.data;
-  // Live tick for this symbol (shared socket) — drives the streaming price
-  // card and its up/down flash; seeds from REST so it's never blank.
-  const liveTick = useQuote(ticker);
 
   // Snapshot (fundamentals): loads on ticker change; the header refresh
   // button forces past the localStorage cache.
@@ -228,17 +245,7 @@ function TerminalInner() {
             </a>
           </div>
         </div>
-        <MetricCard
-          label="Price"
-          value={(liveTick?.ltp ?? price) != null
-            ? <LiveNumber symbol={ticker} field="ltp" format="price" ccy={cur} />
-            : "—"}
-          delta={(liveTick?.chgPct ?? cp) != null
-            ? <LiveNumber symbol={ticker} field="chgPct" format="pct" showDelta />
-            : null}
-          tone={(() => { const c = liveTick?.chgPct ?? cp; return c == null ? "neutral" : c >= 0 ? "positive" : "negative"; })()}
-          className="!p-3 min-w-[160px]"
-        />
+        <HeaderPriceCard ticker={ticker} cur={cur} fallbackPrice={price} fallbackCp={cp} />
       </div>
 
       {disamb && disamb.length > 0 && (

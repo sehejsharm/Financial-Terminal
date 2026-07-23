@@ -38,6 +38,15 @@ export type Tick = {
 // falls back to the legacy polling indicator during migration).
 export type StreamStatus = "idle" | "connecting" | "live" | "reconnecting" | "stale" | "closed";
 
+/** Client mirror of backend session.market_for_symbol — classifies a symbol
+ *  as an NSE or US instrument for badge honesty. */
+function marketOf(sym: string): "NSE" | "US" {
+  const s = sym.toUpperCase();
+  if (s.endsWith(".NS") || s.endsWith(".BO")) return "NSE";
+  if (s.startsWith("^") && ["NSE", "BSE", "CNX", "NIFTY", "INDIAVIX", "CRSLDX"].some((t) => s.includes(t))) return "NSE";
+  return "US";
+}
+
 const API = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
 const WS_URL = API.replace(/^http/, "ws") + "/api/v1/stream";
 const SSE_URL = API + "/api/v1/stream/sse";
@@ -62,9 +71,12 @@ class QuoteStore {
   private evalTimer: ReturnType<typeof setInterval> | null = null;
 
   private _status: StreamStatus = "idle";
+  private lastPersistAt = 0;
   lastTickAt = 0;
   lastMessageAt = 0;
   marketOpen = false;
+  private nseOpen = false;
+  private usOpen = false;
 
   constructor() {
     if (typeof window !== "undefined") this.loadPersisted();
@@ -80,18 +92,32 @@ class QuoteStore {
       if (n === 1) fresh.push(s);
     }
     if (fresh.length) {
+      // Capture whether a transport already existed BEFORE connecting: on a
+      // FRESH connection the symbols travel in the WS resubscribe (onopen) or
+      // the SSE connect URL, so sending an explicit sub op here would need-
+      // lessly tear an SSE down and wait out its reconnect backoff.
+      const existed = !!(this.ws || this.es);
       this.ensureConnected();
-      this.send({ op: "sub", symbols: fresh });
+      if (existed) this.send({ op: "sub", symbols: fresh });
       this.seed(fresh); // REST fill so cells paint before the first tick
     }
     return () => {
       const gone: string[] = [];
       for (const s of syms) {
         const n = (this.refcount.get(s) || 0) - 1;
-        if (n <= 0) { this.refcount.delete(s); gone.push(s); }
-        else this.refcount.set(s, n);
+        if (n <= 0) {
+          this.refcount.delete(s);
+          this.ticks.delete(s);   // evict — else the map grows unbounded across a session
+          gone.push(s);
+        } else this.refcount.set(s, n);
       }
       if (gone.length) this.send({ op: "unsub", symbols: gone });
+      // No subscribers left → stop the 1s status evaluator (restarted on the
+      // next connect via the !evalTimer guard in ensureConnected).
+      if (this.refcount.size === 0 && this.evalTimer) {
+        clearInterval(this.evalTimer);
+        this.evalTimer = null;
+      }
       this.evalStatus();
     };
   }
@@ -199,6 +225,8 @@ class QuoteStore {
         break;
       case "stat":
         this.marketOpen = !!msg.d?.marketOpen;
+        this.nseOpen = !!msg.d?.nseOpen;
+        this.usOpen = !!msg.d?.usOpen;
         this.evalStatus();
         break;
       case "hb":
@@ -276,9 +304,19 @@ class QuoteStore {
   }
 
   private persist() {
+    // Throttle: flush() runs ~10×/s; serialising every time was O(symbols)
+    // CPU per frame. Persist at most every 2s, and only the currently-
+    // subscribed symbols (capped) — not every symbol ever seen this session.
+    const t = Date.now();
+    if (t - this.lastPersistAt < 2000) return;
+    this.lastPersistAt = t;
     try {
       const obj: Record<string, Tick> = {};
-      for (const [s, t] of this.ticks) obj[s] = t;
+      let n = 0;
+      for (const s of this.refcount.keys()) {
+        const tick = this.ticks.get(s);
+        if (tick) { obj[s] = tick; if (++n >= 200) break; }
+      }
       sessionStorage.setItem(PERSIST_KEY, JSON.stringify(obj));
     } catch { /* quota / private mode */ }
   }
@@ -292,13 +330,25 @@ class QuoteStore {
     } catch { /* noop */ }
   }
 
+  /** True when at least one CURRENTLY-SUBSCRIBED symbol's market is open —
+   *  so viewing only NSE names while NSE is shut reads CLOSED (honest), not
+   *  STALE, even if US happens to be open. */
+  private relevantMarketOpen(): boolean {
+    let sawNse = false, sawUs = false;
+    for (const s of this.refcount.keys()) {
+      if (marketOf(s) === "NSE") sawNse = true; else sawUs = true;
+    }
+    if (!sawNse && !sawUs) return this.marketOpen;
+    return (sawNse && this.nseOpen) || (sawUs && this.usOpen);
+  }
+
   // ── status ─────────────────────────────────────────────────────────────
   private evalStatus() {
     if (this.refcount.size === 0) { this.setStatus("idle"); return; }
     const open = !!(this.ws && this.ws.readyState === WebSocket.OPEN) || !!this.es;
     let next: StreamStatus;
     if (!open) next = this.reconnectTimer ? "reconnecting" : "connecting";
-    else if (!this.marketOpen) next = "closed";
+    else if (!this.relevantMarketOpen()) next = "closed";
     else if (Date.now() - this.lastTickAt > STALE_MS) next = "stale";
     else next = "live";
     this.setStatus(next);

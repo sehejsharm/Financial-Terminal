@@ -50,7 +50,10 @@ async def stream_ws(ws: WebSocket, token: str | None = Query(None)):
                 frame = await asyncio.wait_for(conn.queue.get(), timeout=_HB_SEC)
                 await ws.send_text(json.dumps(frame))
             except asyncio.TimeoutError:
-                await ws.send_text(json.dumps({"t": "hb", "ts": int(time.time() * 1000)}))
+                # Heartbeat doubles as a market-state refresh: a bare hb would
+                # freeze the client's marketOpen for the whole connection, so
+                # an NSE→closed transition would never reach an idle client.
+                await ws.send_text(json.dumps(_stat_frame()))
 
     send_task = asyncio.create_task(_send_loop())
     try:
@@ -90,10 +93,13 @@ async def stream_sse(request: Request, symbols: str = Query(""),
         return StreamingResponse(iter(()), status_code=401)
     syms = [s.strip().upper() for s in symbols.split(",") if s.strip()][:_MAX_SYMBOLS]
     conn = hub.Connection()
-    hub.register(conn)
-    snap = hub.add_symbols(conn, syms)
 
     async def _gen():
+        # Register INSIDE the generator so registration and the finally's
+        # unregister are on the same execution path — if the client vanishes
+        # before iteration starts, neither happens (balanced, no leak).
+        hub.register(conn)
+        snap = hub.add_symbols(conn, syms)
         try:
             yield f"data: {json.dumps(_stat_frame())}\n\n"
             if snap:
@@ -105,7 +111,7 @@ async def stream_sse(request: Request, symbols: str = Query(""),
                     frame = await asyncio.wait_for(conn.queue.get(), timeout=_HB_SEC)
                     yield f"data: {json.dumps(frame)}\n\n"
                 except asyncio.TimeoutError:
-                    yield f"data: {json.dumps({'t': 'hb', 'ts': int(time.time() * 1000)})}\n\n"
+                    yield f"data: {json.dumps(_stat_frame())}\n\n"
         finally:
             hub.unregister(conn)
 

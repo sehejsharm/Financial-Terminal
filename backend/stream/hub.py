@@ -28,10 +28,19 @@ _conns: set["Connection"] = set()
 _refcount: dict[str, int] = {}
 _last: dict[str, dict] = {}
 
+# Dedicated Redis client with TIGHT socket timeouts. The last-tick mirror is
+# touched from publish()/add_symbols(), which run on the asyncio event loop —
+# a hung Redis node must fail in ~250 ms instead of stalling every streaming
+# client. (The shared cache client has no such bound, so we don't reuse it.)
 _redis = None
-try:  # reuse the cache layer's client if configured; optional
-    from backend.cache import _redis as _cache_redis  # type: ignore
-    _redis = _cache_redis
+try:
+    from backend.config import REDIS_URL
+    if REDIS_URL:
+        import redis  # type: ignore
+        _redis = redis.Redis.from_url(
+            REDIS_URL, decode_responses=False,
+            socket_timeout=0.25, socket_connect_timeout=0.25,
+        )
 except Exception:  # pragma: no cover
     _redis = None
 
@@ -52,12 +61,19 @@ class Connection:
         try:
             self.queue.put_nowait(frame)
         except asyncio.QueueFull:
-            # Coalesce: drop the oldest pending frame and keep the newest —
-            # a slow client falls behind on history, never on latest price.
+            # Slow client: don't drop individual deltas (that would silently
+            # lose a field that only changed once). Collapse the whole backlog
+            # into ONE fresh snapshot of this connection's symbols from _last,
+            # so the client resyncs to a complete, current state.
             try:
-                self.queue.get_nowait()
-                self.queue.put_nowait(frame)
-            except Exception:
+                while True:
+                    self.queue.get_nowait()
+            except asyncio.QueueEmpty:
+                pass
+            snap = [_last[s] for s in self.symbols if s in _last]
+            try:
+                self.queue.put_nowait({"t": "snap", "d": snap})
+            except asyncio.QueueFull:
                 pass
 
 
@@ -81,6 +97,10 @@ def _decref(sym: str) -> None:
     n = _refcount.get(sym, 0) - 1
     if n <= 0:
         _refcount.pop(sym, None)
+        # Evict the in-memory last-tick too, so _last doesn't grow unbounded
+        # with the universe of symbols ever seen. Redis re-warms it on a later
+        # re-subscribe.
+        _last.pop(sym, None)
     else:
         _refcount[sym] = n
 
@@ -123,7 +143,10 @@ def publish(sym: str, tick: dict) -> None:
     changed: dict[str, Any] = {}
     for f in _FIELDS:
         v = tick.get(f)
-        if v is not None and (prev is None or prev.get(f) != v):
+        pv = prev.get(f) if prev else None
+        if v is None and pv is not None:
+            changed[f] = None          # explicit clear — a field went away
+        elif v is not None and pv != v:
             changed[f] = v
     # Static-ish metadata only sent when it (re)appears.
     for f in ("ccy", "src", "stale"):

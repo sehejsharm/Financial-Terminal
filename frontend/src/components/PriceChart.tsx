@@ -286,7 +286,9 @@ export function PriceChart({
     const series = priceSeriesRef.current;
     const bar = lastBarRef.current;
     const ltp = liveTick?.ltp;
-    if (!series || !bar || ltp == null || liveTick?.stale) return;
+    // Only a genuine live tick may mutate the last bar — never a REST/cache
+    // seed (seeded) and never a stale/closed-market tick.
+    if (!series || !bar || ltp == null || liveTick?.stale || liveTick?.seeded) return;
     if (seriesKindRef.current === "candles") {
       const next = { time: bar.time, open: bar.open,
                      high: Math.max(bar.high, ltp), low: Math.min(bar.low, ltp),

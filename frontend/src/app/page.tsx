@@ -43,7 +43,7 @@ function LiveMoverRow({ m }: { m: Mover }) {
           className="flex items-center justify-between gap-2 px-2 py-1.5 rounded hover:bg-panel border border-transparent hover:border-line min-w-0">
       <span className="text-sm truncate min-w-0">{String(m.name ?? sym)}</span>
       <span className={`num text-sm shrink-0 ${cp >= 0 ? "text-green" : "text-red"}`}>
-        <LiveNumber symbol={streamSym} field="chgPct" format="pct" />
+        <LiveNumber value={cp} format="pct" />
       </span>
     </Link>
   );
@@ -89,8 +89,10 @@ function IndexCard({ t }: { t: string }) {
     <Link href={`/terminal?t=${encodeURIComponent(t)}`}>
       <MetricCard
         label={NAMES[t] ?? t}
-        value={has ? <LiveNumber symbol={t} field="ltp" format="price" ccy={cur} /> : "···"}
-        delta={cp != null ? <LiveNumber symbol={t} field="chgPct" format="pct" showDelta /> : null}
+        /* Derived (value=) so the LiveNumbers don't RE-subscribe — the card's
+           own useQuote already re-renders it each tick. */
+        value={has ? <LiveNumber value={tick?.ltp ?? null} format="price" ccy={cur} /> : "···"}
+        delta={cp != null ? <LiveNumber value={cp} format="pct" /> : null}
         tone={tone}
         className={`cursor-pointer ${!has ? "animate-pulse" : ""}`}
       />
