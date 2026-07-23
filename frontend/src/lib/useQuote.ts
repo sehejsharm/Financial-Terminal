@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect } from "react";
+import { useCallback, useEffect, useReducer } from "react";
 import { useSyncExternalStore } from "react";
 
 import { quoteStore, type StreamStatus, type Tick } from "@/lib/quoteStore";
@@ -33,6 +33,40 @@ export function useQuotes(symbols: string[]): void {
     if (!key) return;
     return quoteStore.subscribe(key.split(","));
   }, [key]);
+}
+
+/** Live ticks for MANY symbols, for a cross-row aggregate (e.g. portfolio
+ *  totals). Ref-counts subscriptions and forces at most ONE re-render per
+ *  animation frame no matter how many of the symbols tick — so a live total
+ *  updates smoothly without re-rendering per symbol. Returns a fresh Map each
+ *  render (not a useSyncExternalStore snapshot, so identity churn is fine). */
+export function useLiveTicks(symbols: string[]): Map<string, Tick> {
+  const syms = Array.from(new Set(symbols.map((s) => s.toUpperCase()).filter(Boolean)));
+  const key = syms.slice().sort().join(",");
+  const [, force] = useReducer((x: number) => x + 1, 0);
+
+  useEffect(() => {
+    if (!key) return;
+    const list = key.split(",");
+    const unsubSocket = quoteStore.subscribe(list);
+    let scheduled = false;
+    const onTick = () => {
+      if (scheduled) return;
+      scheduled = true;
+      const run = () => { scheduled = false; force(); };
+      if (typeof requestAnimationFrame !== "undefined") requestAnimationFrame(run);
+      else setTimeout(run, 100);
+    };
+    const unsubTicks = list.map((s) => quoteStore.subscribeTick(s, onTick));
+    return () => { unsubSocket(); unsubTicks.forEach((u) => u()); };
+  }, [key]);
+
+  const map = new Map<string, Tick>();
+  for (const s of syms) {
+    const t = quoteStore.getTick(s);
+    if (t) map.set(s, t);
+  }
+  return map;
 }
 
 /** Real socket state for the LIVE/RECONNECTING/STALE/CLOSED badge. */

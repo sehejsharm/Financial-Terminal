@@ -5,6 +5,7 @@ import { useEffect, useRef, useState } from "react";
 import { Trash2, Upload, X } from "lucide-react";
 
 import { DataAge } from "@/components/DataAge";
+import { LiveNumber } from "@/components/LiveNumber";
 import { ScrollX } from "@/components/ScrollX";
 import { TickerInput } from "@/components/TickerInput";
 import { MetricCard } from "@/components/MetricCard";
@@ -13,10 +14,104 @@ import {
   api,
   type PortfolioHistoryPoint,
   type PortfolioInfo,
+  type PortfolioRow,
   type PortfolioSummary,
 } from "@/lib/api";
 import { useLive } from "@/lib/useLive";
+import { useLiveTicks, useQuote } from "@/lib/useQuote";
 import { curSymbol, fmtNum, fmtPct, formatPercent, humanNumber } from "@/lib/utils";
+
+/** One holdings row, live: subscribes to its symbol and recomputes price /
+ *  value / P&L / day P&L from each tick (falling back to the REST summary
+ *  when the socket has nothing yet). Only THIS row re-renders on its tick. */
+function LivePositionRow({ p, onClose }: { p: PortfolioRow; onClose: (id: string) => void }) {
+  const tick = useQuote(p.ticker);
+  const c = curSymbol(p.currency);
+  const live = tick && !tick.seeded ? tick.ltp : null; // a real streamed price
+  const ltp = live ?? p.price ?? null;
+  const value = ltp != null ? ltp * p.qty : p.value ?? null;
+  const pnl = ltp != null ? (ltp - p.cost) * p.qty : p.pnl ?? null;
+  const pnlPct = ltp != null && p.cost ? ((ltp - p.cost) / p.cost) * 100 : p.pnl_pct ?? null;
+  const day = tick?.chg != null && live != null ? tick.chg * p.qty : p.day_pnl ?? null;
+  const sign = (n: number | null) => (n != null && n < 0 ? "text-red" : "text-green");
+  return (
+    <tr className="border-b border-line/60 hover:bg-panel">
+      <td className="px-3 py-2">
+        <Link href={`/terminal?t=${encodeURIComponent(p.ticker)}`} className="text-amber hover:underline">{p.ticker}</Link>
+        <div className="text-mut text-[10px]">{p.sector ?? ""}</div>
+      </td>
+      <td className="px-3 py-2 num text-right">{fmtNum(p.qty, 0)}</td>
+      <td className="px-3 py-2 num text-right">{fmtNum(p.cost, 2)}</td>
+      <td className="px-3 py-2 num text-right">
+        {ltp != null ? <LiveNumber value={ltp} format="price" ccy={c} /> : "—"}
+      </td>
+      <td className="px-3 py-2 num text-right">
+        {value != null ? <LiveNumber value={value} format="human" ccy={c} /> : "—"}
+      </td>
+      <td className={`px-3 py-2 num text-right ${sign(pnl)}`}>
+        {pnl != null ? <LiveNumber value={pnl} format="human" ccy={c} /> : "—"}
+      </td>
+      <td className={`px-3 py-2 num text-right ${sign(pnlPct)}`}>
+        {pnlPct != null ? fmtPct(pnlPct) : "—"}
+      </td>
+      <td className={`px-3 py-2 num text-right ${sign(day)}`}>
+        {day != null ? <LiveNumber value={day} format="human" ccy={c} /> : "—"}
+      </td>
+      <td className="px-3 py-2 num text-right">{p.weight != null ? `${fmtNum(p.weight, 1)}%` : "—"}</td>
+      <td className="px-3 py-2 text-right">
+        <button onClick={() => onClose(p.id)} className="text-mut hover:text-red" title="Close position (with optional sell price)">
+          <Trash2 size={13} />
+        </button>
+      </td>
+    </tr>
+  );
+}
+
+/** Portfolio totals, live: recomputes value / P&L / day P&L from the live
+ *  ticks of every holding (one re-render per frame, not per row). Falls back
+ *  to each holding's REST price until its socket price arrives. */
+function LiveTotals({
+  positions, cur, fallback, realizedTotal, factors,
+}: {
+  positions: PortfolioRow[];
+  cur: string;
+  fallback: NonNullable<PortfolioSummary["totals"]>;
+  realizedTotal: number | null;
+  factors: PortfolioSummary["factors"];
+}) {
+  const ticks = useLiveTicks(positions.map((p) => p.ticker));
+  let value = 0, cost = 0, day = 0, priced = 0;
+  for (const p of positions) {
+    const t = ticks.get(p.ticker.toUpperCase());
+    const ltp = (t && !t.seeded ? t.ltp : null) ?? p.price ?? null;
+    if (ltp == null) continue;
+    value += ltp * p.qty;
+    cost += p.cost * p.qty;
+    day += t?.chg != null && !t.seeded ? t.chg * p.qty : (p.day_pnl ?? 0);
+    priced++;
+  }
+  // No priced legs yet → show the REST snapshot totals verbatim.
+  const V = priced ? value : fallback.value;
+  const pnl = priced ? value - cost : fallback.pnl;
+  const pnlPct = priced ? (cost ? (pnl / cost) * 100 : null) : fallback.pnl_pct;
+  const dayPnl = priced ? day : fallback.day_pnl;
+  return (
+    <div className={`grid grid-cols-2 ${realizedTotal != null ? "md:grid-cols-5" : "md:grid-cols-4"} gap-3 mb-6`}>
+      <MetricCard label="Market value" value={<LiveNumber value={V} format="human" ccy={cur} />} />
+      <MetricCard label="Total P&L" value={<LiveNumber value={pnl} format="human" ccy={cur} />}
+                  delta={pnlPct != null ? fmtPct(pnlPct) : null}
+                  tone={pnl >= 0 ? "positive" : "negative"} />
+      <MetricCard label="Day P&L" value={<LiveNumber value={dayPnl} format="human" ccy={cur} />}
+                  tone={dayPnl >= 0 ? "positive" : "negative"} />
+      {realizedTotal != null && (
+        <MetricCard label="Realized P&L" value={humanNumber(realizedTotal, cur)}
+                    tone={realizedTotal >= 0 ? "positive" : "negative"} />
+      )}
+      <MetricCard label="Wtd beta / div yield"
+                  value={`${factors?.beta != null ? fmtNum(factors.beta, 2) : "—"} / ${factors?.dividend_yield != null ? formatPercent(factors.dividend_yield) : "—"}`} />
+    </div>
+  );
+}
 
 const PID_KEY = "mb_portfolio_pid";
 
@@ -304,22 +399,10 @@ export default function PortfolioPage() {
         {err && <div className="text-red text-xs w-full">{err}</div>}
       </div>
 
-      {t && (
+      {t && data && (
         <>
-          <div className={`grid grid-cols-2 ${data?.realized ? "md:grid-cols-5" : "md:grid-cols-4"} gap-3 mb-6`}>
-            <MetricCard label="Market value" value={humanNumber(t.value, cur)} />
-            <MetricCard label="Total P&L" value={humanNumber(t.pnl, cur)}
-                        delta={t.pnl_pct != null ? fmtPct(t.pnl_pct) : null}
-                        tone={t.pnl >= 0 ? "positive" : "negative"} />
-            <MetricCard label="Day P&L" value={humanNumber(t.day_pnl, cur)}
-                        tone={t.day_pnl >= 0 ? "positive" : "negative"} />
-            {data?.realized && (
-              <MetricCard label="Realized P&L" value={humanNumber(data.realized.total, cur)}
-                          tone={data.realized.total >= 0 ? "positive" : "negative"} />
-            )}
-            <MetricCard label="Wtd beta / div yield"
-                        value={`${f?.beta != null ? fmtNum(f.beta, 2) : "—"} / ${f?.dividend_yield != null ? formatPercent(f.dividend_yield) : "—"}`} />
-          </div>
+          <LiveTotals positions={data.positions} cur={cur} fallback={t}
+                      realizedTotal={data.realized ? data.realized.total : null} factors={f ?? null} />
           {mixedCcy && (
             <div className="text-[10.5px] text-amber/90 -mt-4 mb-6">
               This book holds multiple currencies ({posCcys.join(", ")}) — the totals
@@ -366,36 +449,7 @@ export default function PortfolioPage() {
                 </tr>
               </thead>
               <tbody>
-                {data.positions.map((p) => {
-                  const c = curSymbol(p.currency);
-                  return (
-                    <tr key={p.id} className="border-b border-line/60 hover:bg-panel">
-                      <td className="px-3 py-2">
-                        <Link href={`/terminal?t=${encodeURIComponent(p.ticker)}`} className="text-amber hover:underline">{p.ticker}</Link>
-                        <div className="text-mut text-[10px]">{p.sector ?? ""}</div>
-                      </td>
-                      <td className="px-3 py-2 num text-right">{fmtNum(p.qty, 0)}</td>
-                      <td className="px-3 py-2 num text-right">{fmtNum(p.cost, 2)}</td>
-                      <td className="px-3 py-2 num text-right">{p.price != null ? `${c}${fmtNum(p.price, 2)}` : "—"}</td>
-                      <td className="px-3 py-2 num text-right">{p.value != null ? humanNumber(p.value, c) : "—"}</td>
-                      <td className={`px-3 py-2 num text-right ${p.pnl != null && p.pnl < 0 ? "text-red" : "text-green"}`}>
-                        {p.pnl != null ? humanNumber(p.pnl, c) : "—"}
-                      </td>
-                      <td className={`px-3 py-2 num text-right ${p.pnl_pct != null && p.pnl_pct < 0 ? "text-red" : "text-green"}`}>
-                        {p.pnl_pct != null ? fmtPct(p.pnl_pct) : "—"}
-                      </td>
-                      <td className={`px-3 py-2 num text-right ${p.day_pnl != null && p.day_pnl < 0 ? "text-red" : "text-green"}`}>
-                        {p.day_pnl != null ? humanNumber(p.day_pnl, c) : "—"}
-                      </td>
-                      <td className="px-3 py-2 num text-right">{p.weight != null ? `${fmtNum(p.weight, 1)}%` : "—"}</td>
-                      <td className="px-3 py-2 text-right">
-                        <button onClick={() => close(p.id)} className="text-mut hover:text-red" title="Close position (with optional sell price)">
-                          <Trash2 size={13} />
-                        </button>
-                      </td>
-                    </tr>
-                  );
-                })}
+                {data.positions.map((p) => <LivePositionRow key={p.id} p={p} onClose={close} />)}
               </tbody>
             </table>
           </ScrollX>

@@ -30,6 +30,25 @@ const NAMES: Record<string, string> = {
   "^CNXMIDCAP": "NIFTY MIDCAP 100", "^CNX500": "NIFTY 500",
 };
 
+/** A mover row whose % streams live (the NIFTY gainers/losers list is a
+ *  computed EOD-ish set, but each constituent's change % can update live
+ *  during the session). Bare NSE names are qualified for the socket. */
+function LiveMoverRow({ m }: { m: Mover }) {
+  const sym = String(m.symbol ?? m.ticker ?? "");
+  const streamSym = sym && !sym.includes(".") && !sym.startsWith("^") ? `${sym}.NS` : sym;
+  const tick = useQuote(streamSym || null);
+  const cp = tick?.chgPct ?? Number(m.change_pct ?? m.percent_change ?? 0);
+  return (
+    <Link href={`/terminal?t=${encodeURIComponent(sym)}`}
+          className="flex items-center justify-between gap-2 px-2 py-1.5 rounded hover:bg-panel border border-transparent hover:border-line min-w-0">
+      <span className="text-sm truncate min-w-0">{String(m.name ?? sym)}</span>
+      <span className={`num text-sm shrink-0 ${cp >= 0 ? "text-green" : "text-red"}`}>
+        <LiveNumber symbol={streamSym} field="chgPct" format="pct" />
+      </span>
+    </Link>
+  );
+}
+
 function MoversPanel() {
   const [kind, setKind] = useState<"gainers" | "losers">("gainers");
   // Movers refresh every 60s while the tab is visible (server cache TTL 300s,
@@ -52,17 +71,7 @@ function MoversPanel() {
       {busy && rows.length === 0 && <RowsSkeleton rows={8} />}
       {!busy && rows.length === 0 && <div className="text-mut text-xs">No data.</div>}
       <div className="flex flex-col gap-1">
-        {rows.map((m, i) => {
-          const sym = String(m.symbol ?? m.ticker ?? "");
-          const cp = Number(m.change_pct ?? m.percent_change ?? 0);
-          return (
-            <Link key={i} href={`/terminal?t=${encodeURIComponent(sym)}`}
-                  className="flex items-center justify-between gap-2 px-2 py-1.5 rounded hover:bg-panel border border-transparent hover:border-line min-w-0">
-              <span className="text-sm truncate min-w-0">{String(m.name ?? sym)}</span>
-              <span className={`num text-sm shrink-0 ${cp >= 0 ? "text-green" : "text-red"}`}>{fmtPct(cp)}</span>
-            </Link>
-          );
-        })}
+        {rows.map((m, i) => <LiveMoverRow key={i} m={m} />)}
       </div>
     </div>
   );
