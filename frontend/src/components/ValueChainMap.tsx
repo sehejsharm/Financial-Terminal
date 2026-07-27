@@ -17,7 +17,10 @@ import {
   type ChainDiff,
   type EdgeMetric, type MergedEntity, type Role, type View,
 } from "@/lib/valueChainGraph";
-import { fmtNum, fmtPct } from "@/lib/utils";
+import {
+  buildOverlayIndex, overlayFor, type NodeOverlay,
+} from "@/lib/valueChainOverlays";
+import { fmtNum, fmtPct, humanNumber } from "@/lib/utils";
 
 /**
  * Bloomberg SPLC-style supply-chain node graph, rendered as an SVG.
@@ -206,11 +209,12 @@ function YoyMark({ x, y, yoy }: { x: number; y: number; yoy: number | null }) {
 
 // ── node box ────────────────────────────────────────────────────────────────
 function Node({ x, y, label, note, pct, color, onClick, selected, verified, dimmed,
-                onHover, onLeave, roles = [], disputed = 0, diffStatus }: {
+                onHover, onLeave, roles = [], disputed = 0, diffStatus, overlay }: {
   x: number; y: number; label: string; note?: string; pct?: number | null;
   color: string; onClick: () => void; selected: boolean;
   verified?: boolean; dimmed?: boolean; roles?: Role[]; disputed?: number;
   diffStatus?: "added" | "removed" | "changed" | "same";
+  overlay?: NodeOverlay;
   onHover?: (e: React.MouseEvent | React.FocusEvent) => void;
   onLeave?: () => void;
 }) {
@@ -258,6 +262,43 @@ function Node({ x, y, label, note, pct, color, onClick, selected, verified, dimm
           <title>{r}</title>
         </circle>
       ))}
+      {/* ── cross-module overlays ── */}
+      {/* Holding: an amber ring around the whole box — you own this. */}
+      {overlay?.held && (
+        <g>
+          <title>{`In your portfolio: ${overlay.held.qty} @ ${overlay.held.ticker}`}</title>
+          <rect x={x - 82} y={y - 20} width={164} height={40} rx={7}
+                fill="none" stroke="#ffb000" strokeWidth={1.6} opacity={0.85} />
+          <circle cx={x + 78} cy={y - 18} r={6} fill="#0c0e12" stroke="#ffb000" strokeWidth={1.2} />
+          <text x={x + 78} y={y - 15.4} textAnchor="middle" fontSize={8} fill="#ffb000"
+                fontWeight={700} fontFamily="JetBrains Mono, monospace">₽</text>
+        </g>
+      )}
+      {/* Big Sharks: a buy/sell triangle when a bulk/block/insider deal hit. */}
+      {overlay && overlay.deals.length > 0 && (() => {
+        const d = overlay.deals[0];
+        const col = d.side === "buy" ? "#1fd286" : d.side === "sell" ? "#ff4d4f" : "#7d8694";
+        return (
+          <g>
+            <title>{`${d.kind} ${d.side !== "unknown" ? d.side : "deal"} — ${d.label}${d.date ? ` (${d.date})` : ""}`}</title>
+            <circle cx={x - 78} cy={y + 15} r={6.5} fill="#0c0e12" stroke={col} strokeWidth={1.2} />
+            <path d={d.side === "sell"
+                     ? `M${x - 81.4},${y + 12.8} L${x - 78},${y + 17.8} L${x - 74.6},${y + 12.8} Z`
+                     : `M${x - 81.4},${y + 17.2} L${x - 78},${y + 12.2} L${x - 74.6},${y + 17.2} Z`}
+                  fill={col} />
+          </g>
+        );
+      })()}
+      {/* News: a dot that PULSES when a matching headline just landed. */}
+      {overlay && overlay.news.length > 0 && (
+        <g className={overlay.fresh ? "vc-pulse" : undefined}>
+          <title>{`${overlay.news.length} recent headline(s): ${overlay.news[0].title}`}</title>
+          <circle cx={x + 78} cy={y + 15} r={6.5} fill="#0c0e12"
+                  stroke={overlay.fresh ? "#ffb000" : "#4b5563"} strokeWidth={1.2} />
+          <circle cx={x + 78} cy={y + 15} r={2.6} fill={overlay.fresh ? "#ffb000" : "#7d8694"} />
+        </g>
+      )}
+
       {/* Disputed badge — only once MORE THAN ONE person has flagged this
           relationship. A single flag is one opinion; repeats are a signal. */}
       {disputed > 1 && (
@@ -275,10 +316,10 @@ function Node({ x, y, label, note, pct, color, onClick, selected, verified, dimm
 }
 
 // ── drill-down panel ────────────────────────────────────────────────────────
-function NodeDetail({ node, parentTicker, chainTicker, onClose, onRecenter, onReported }: {
+function NodeDetail({ node, parentTicker, chainTicker, onClose, onRecenter, onReported, overlay }: {
   node: Selected; parentTicker: string; chainTicker: string;
   onClose: () => void; onRecenter: (symbol: string, name: string) => void;
-  onReported?: () => void;
+  onReported?: () => void; overlay?: NodeOverlay;
 }) {
   const router = useRouter();
   const [cands, setCands] = useState<Cand[] | null>(null);
@@ -427,11 +468,43 @@ function NodeDetail({ node, parentTicker, chainTicker, onClose, onRecenter, onRe
         </div>
       )}
 
+      {overlay && overlay.news.length > 0 && (
+        <div className="flex flex-col gap-0.5">
+          <span className="label-xs">Headlines naming {node.name}</span>
+          {overlay.news.map((n, i) => (
+            <a key={i} href={n.link} target="_blank" rel="noopener noreferrer"
+               className="block text-[11px] text-mut hover:text-amber line-clamp-2">› {n.title}</a>
+          ))}
+        </div>
+      )}
       {headlines.length > 0 && (
         <div className="flex flex-col gap-0.5">
           {headlines.map((h, i) => (
             <a key={i} href={h.link} target="_blank" rel="noopener noreferrer"
                className="block text-[11px] text-mut hover:text-amber line-clamp-2">› {h.title}</a>
+          ))}
+        </div>
+      )}
+
+      {/* Cross-module signals for this counterparty. */}
+      {overlay?.held && (
+        <div className="rounded border border-amber/50 bg-amber/10 px-2 py-1 text-[11px]">
+          <span className="text-amber">◎ In your portfolio</span>{" "}
+          <span className="text-mut">{fmtNum(overlay.held.qty, 0)} {overlay.held.ticker}</span>
+          {overlay.held.pnlPct != null && (
+            <span className={overlay.held.pnlPct >= 0 ? "text-green" : "text-red"}> {fmtPct(overlay.held.pnlPct)}</span>
+          )}
+        </div>
+      )}
+      {overlay && overlay.deals.length > 0 && (
+        <div className="flex flex-col gap-0.5">
+          <span className="label-xs">Recent shark activity</span>
+          {overlay.deals.map((d, i) => (
+            <div key={i} className={`text-[11px] ${d.side === "sell" ? "text-red" : d.side === "buy" ? "text-green" : "text-mut"}`}>
+              {d.side === "sell" ? "▼" : d.side === "buy" ? "▲" : "•"} {d.kind} — {d.label}
+              {d.value != null && <span className="text-mut"> {humanNumber(d.value)}</span>}
+              {d.date && <span className="text-mut"> · {d.date}</span>}
+            </div>
           ))}
         </div>
       )}
@@ -535,6 +608,14 @@ export function ValueChainMap({ ticker }: { ticker: string }) {
   const [snapshotTs, setSnapshotTs] = useState<string | null>(null); // viewing a prior version
   // Aggregate flags per entity (normalised name -> count), for the disputed badge.
   const [reportCounts, setReportCounts] = useState<Record<string, VcReportCount>>({});
+  // Cross-module overlays: what you hold, who's trading it, what just broke.
+  const [positions, setPositions] = useState<{ ticker: string; qty: number; value?: number | null; pnl_pct?: number | null }[]>([]);
+  const [deals, setDeals] = useState<{ bulk: any[]; block: any[]; insider: any[] }>({ bulk: [], block: [], insider: [] });
+  const [newsItems, setNewsItems] = useState<{ title: string; link: string; published: string | null; publisher?: string }[]>([]);
+  const [overlaysOn, setOverlaysOn] = useState(true);
+  // Links already rendered — anything new pulses on arrival.
+  const seenLinksRef = useRef<Set<string>>(new Set());
+  const [pulseEpoch, setPulseEpoch] = useState(0);
   const [graphFilter, setGraphFilter] = useState("");
   // Which quantitative measure drives edge thickness/intensity.
   const [edgeMetric, setEdgeMetric] = useState<EdgeMetric>("pctRevenue");
@@ -602,6 +683,59 @@ export function ValueChainMap({ ticker }: { ticker: string }) {
   }, []);
 
   useEffect(() => { load(current); }, [current, load]);
+
+  // ── overlay sources ─────────────────────────────────────────────────────
+  // Portfolio + deals are slow-moving: fetched once per mapped company.
+  useEffect(() => {
+    let alive = true;
+    api.portfolioSummary()
+      .then((p) => { if (alive) setPositions(p.positions ?? []); })
+      .catch(() => { if (alive) setPositions([]); });
+    Promise.allSettled([api.bulkDeals(), api.blockDeals(), api.insiderDeals()])
+      .then(([b, k, i]) => {
+        if (!alive) return;
+        setDeals({
+          bulk: b.status === "fulfilled" ? (b.value as any[]) ?? [] : [],
+          block: k.status === "fulfilled" ? (k.value as any[]) ?? [] : [],
+          insider: i.status === "fulfilled" ? (i.value as any)?.rows ?? [] : [],
+        });
+      });
+    return () => { alive = false; };
+  }, []);
+
+  // News is the live one: the subject's own feed plus the market tape, polled
+  // while the tab is visible. New headlines make their node pulse.
+  useEffect(() => {
+    let alive = true;
+    seenLinksRef.current = new Set();   // new company => nothing "seen" yet
+    const pull = async () => {
+      if (typeof document !== "undefined" && document.hidden) return;
+      const [t, m] = await Promise.allSettled([
+        api.news(current, 20), api.marketNews(30),
+      ]);
+      if (!alive) return;
+      const merged: Record<string, { title: string; link: string; published: string | null; publisher?: string }> = {};
+      for (const r of [t, m]) {
+        if (r.status !== "fulfilled") continue;
+        for (const n of ((r.value as any[]) ?? [])) {
+          if (n?.link) merged[n.link] = n;
+        }
+      }
+      const items = Object.values(merged);
+      setNewsItems(items);
+      setPulseEpoch((n) => n + 1);
+      // Let the pulse run for a few seconds, then mark these links seen so a
+      // headline announces itself exactly once.
+      setTimeout(() => {
+        if (!alive) return;
+        for (const n of items) seenLinksRef.current.add(n.link);
+        setPulseEpoch((n) => n + 1);
+      }, 6000);
+    };
+    pull();
+    const id = setInterval(pull, 60_000);
+    return () => { alive = false; clearInterval(id); };
+  }, [current]);
 
   function viewSnapshot(entry: VcHistoryEntry) {
     setData(entry.data); setSnapshotTs(entry.generated_at); setSelected(null);
@@ -764,6 +898,17 @@ export function ValueChainMap({ ticker }: { ticker: string }) {
     added: "#1fd286", removed: "#ff4d4f", changed: "#ffb000",
   };
 
+  // Cross-module overlay index (holdings / deals / news) keyed by entity.
+  const overlays = overlaysOn
+    ? buildOverlayIndex(allNodes, {
+        positions, bulk: deals.bulk, block: deals.block, insider: deals.insider,
+        news: newsItems, seenLinks: seenLinksRef.current,
+      })
+    : new Map<string, NodeOverlay>();
+  const heldCount = [...overlays.values()].filter((o) => o.held).length;
+  const dealCount = [...overlays.values()].filter((o) => o.deals.length).length;
+  const newsCount = [...overlays.values()].filter((o) => o.news.length).length;
+
   const pick = (n: Placed) => {
     // A press that panned isn't a selection click.
     if (draggedRef.current) return;
@@ -842,6 +987,23 @@ export function ValueChainMap({ ticker }: { ticker: string }) {
         </span>
         <span className="hidden sm:inline text-line2">|</span>
         <span className="opacity-80 whitespace-nowrap">solid ✓ = verified · dashed = AI-estimated</span>
+
+        {/* Cross-module overlays: what you hold / who traded it / what broke. */}
+        <span className="inline-flex items-center gap-1.5 whitespace-nowrap">
+          <button onClick={() => setOverlaysOn((v) => !v)}
+                  title="Overlay your portfolio holdings, Big Sharks deal activity and matching news onto the graph"
+                  className={`px-1.5 py-0.5 rounded border text-[10px] ${
+                    overlaysOn ? "border-amber text-amber bg-amber/10" : "border-line2 text-mut hover:text-txt"}`}>
+            Overlays
+          </button>
+          {overlaysOn && (
+            <span className="text-[10px] text-mut">
+              <span className="text-amber">◎</span> {heldCount} held ·{" "}
+              <span className="text-green">▲</span> {dealCount} deals ·{" "}
+              <span className="text-amber">●</span> {newsCount} in the news
+            </span>
+          )}
+        </span>
 
         {/* edge-weight metric */}
         <span className="inline-flex items-center gap-1 whitespace-nowrap">
@@ -1028,6 +1190,7 @@ export function ValueChainMap({ ticker }: { ticker: string }) {
                   verified={n.confidence === "verified"} dimmed={!matchesFilter(n)}
                   disputed={lookupReportCount(reportCounts, n.key)}
                   diffStatus={diff?.byKey.get(n.key)?.status}
+                  overlay={overlayFor(overlays, n.key)}
                   onHover={(e) => showTip(e, n, n.primaryRole)} onLeave={hideTip}
                   selected={selected?.key === n.key} />
           ))}
@@ -1083,6 +1246,31 @@ export function ValueChainMap({ ticker }: { ticker: string }) {
             {hover.node.ticker && (
               <div className="text-[10px] text-mut mt-1">Ticker hint: <span className="text-txt">{hover.node.ticker}</span></div>
             )}
+            {(() => {
+              const o = overlayFor(overlays, hover.node.key);
+              if (!o) return null;
+              return (
+                <>
+                  {o.held && (
+                    <div className="text-[10px] text-amber mt-1">
+                      ◎ In your portfolio: {fmtNum(o.held.qty, 0)} {o.held.ticker}
+                      {o.held.pnlPct != null && (
+                        <span className={o.held.pnlPct >= 0 ? "text-green" : "text-red"}> {fmtPct(o.held.pnlPct)}</span>
+                      )}
+                    </div>
+                  )}
+                  {o.deals.slice(0, 2).map((d, i) => (
+                    <div key={i} className={`text-[10px] mt-0.5 ${d.side === "sell" ? "text-red" : "text-green"}`}>
+                      {d.side === "sell" ? "▼" : "▲"} {d.kind} {d.side !== "unknown" ? d.side : ""} — {d.label}
+                      {d.value != null && <span className="text-mut"> ({humanNumber(d.value)})</span>}
+                    </div>
+                  ))}
+                  {o.news.slice(0, 2).map((n, i) => (
+                    <div key={i} className="text-[10px] text-mut mt-0.5 line-clamp-2">› {n.title}</div>
+                  ))}
+                </>
+              );
+            })()}
             {lookupReportCount(reportCounts, hover.node.key) > 1 && (
               <div className="text-[10px] text-red mt-1">
                 ⚑ Flagged as wrong by {lookupReportCount(reportCounts, hover.node.key)} reports
@@ -1155,6 +1343,7 @@ export function ValueChainMap({ ticker }: { ticker: string }) {
           <div className="min-w-0 lg:max-h-[72vh]">
             <NodeDetail node={selected} parentTicker={current} chainTicker={current}
                         onClose={() => setSelected(null)} onRecenter={recenter}
+                        overlay={overlayFor(overlays, selected.key)}
                         onReported={() => {
                           // Refresh badges so the new flag counts immediately.
                           api.vcReportCounts(current)

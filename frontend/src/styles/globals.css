@@ -105,3 +105,20 @@ html.light.cb {
 @media (prefers-reduced-motion: reduce) {
   .live-flash-up, .live-flash-down { animation: none; }
 }
+
+/* ── value-chain: "a headline just landed on this node" pulse ─────────────
+   Announces new information on the graph the user is already looking at.
+   Amber ring expands out of the news dot, twice, then stops. */
+@keyframes vcPulse {
+  0%   { opacity: 0.9; transform: scale(1); }
+  70%  { opacity: 0;   transform: scale(2.6); }
+  100% { opacity: 0;   transform: scale(2.6); }
+}
+.vc-pulse > circle:first-of-type {
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: vcPulse 1.6s ease-out 2;
+}
+@media (prefers-reduced-motion: reduce) {
+  .vc-pulse > circle:first-of-type { animation: none; }
+}
