@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   clamp, DEFAULT_VIEW, fitView, H, MAX_W, MIN_W, W, zoomAt,
   entityKey, findAliasKey, mergeEntities,
+  edgeOpacityFor, edgeWidthFor, fmtUsd, maxUsd, readMetrics, resolveMetric,
 } from "./valueChainGraph";
 
 describe("clamp", () => {
@@ -193,5 +194,81 @@ describe("mergeEntities — name variants", () => {
       competitors: [{ name: "Tata Motors" }],
     });
     expect(merged).toHaveLength(2);
+  });
+});
+
+describe("readMetrics (legacy fallback)", () => {
+  it("maps legacy revenue_pct to the RIGHT metric per role", () => {
+    // The same legacy field means revenue share for a customer and input-cost
+    // share for a supplier — mapping it to the wrong one would mislabel edges.
+    expect(readMetrics({ name: "X", revenue_pct: 20 }, "customer").pctRevenue).toBe(20);
+    expect(readMetrics({ name: "X", revenue_pct: 20 }, "customer").pctCOGS).toBeNull();
+    expect(readMetrics({ name: "X", revenue_pct: 20 }, "supplier").pctCOGS).toBe(20);
+    expect(readMetrics({ name: "X", revenue_pct: 20 }, "supplier").pctRevenue).toBeNull();
+  });
+  it("prefers explicit modern fields over the legacy one", () => {
+    const m = readMetrics({ name: "X", revenue_pct: 20, pct_revenue: 33 }, "customer");
+    expect(m.pctRevenue).toBe(33);
+  });
+  it("reads dollar value and YoY", () => {
+    const m = readMetrics({ name: "X", est_usd_value: 2.4e9, yoy_pct: -8 }, "customer");
+    expect(m.estUSDValue).toBe(2.4e9);
+    expect(m.yoyPct).toBe(-8);
+  });
+  it("is null-safe for a missing node", () => {
+    expect(readMetrics(undefined, "customer").pctRevenue).toBeNull();
+  });
+});
+
+describe("resolveMetric (graceful fallback)", () => {
+  const base = { pctRevenue: null, pctCOGS: null, estUSDValue: null, yoyPct: null };
+  it("uses the requested metric when present", () => {
+    const r = resolveMetric({ ...base, pctRevenue: 12, estUSDValue: 5e9 }, "pctRevenue");
+    expect(r).toMatchObject({ value: 12, used: "pctRevenue", fellBack: false });
+  });
+  it("falls back to whatever the AI DID return, and says so", () => {
+    const r = resolveMetric({ ...base, estUSDValue: 5e9 }, "pctRevenue");
+    expect(r).toMatchObject({ value: 5e9, used: "estUSDValue", fellBack: true });
+  });
+  it("reports nothing when the edge is unquantified", () => {
+    expect(resolveMetric(base, "pctCOGS")).toMatchObject({ value: null, used: null });
+  });
+});
+
+describe("edge scaling", () => {
+  it("percentage edges scale on an absolute 0-100 scale", () => {
+    expect(edgeWidthFor(5, "pctRevenue")).toBeLessThan(edgeWidthFor(40, "pctRevenue"));
+    expect(edgeWidthFor(40, "pctRevenue")).toBeLessThanOrEqual(6);
+    expect(edgeWidthFor(0.1, "pctRevenue")).toBeGreaterThanOrEqual(1.2);
+  });
+  it("dollar edges normalise against the graph maximum", () => {
+    const max = 1e10;
+    expect(edgeWidthFor(1e10, "estUSDValue", max)).toBeGreaterThan(edgeWidthFor(1e8, "estUSDValue", max));
+    expect(edgeWidthFor(1e10, "estUSDValue", max)).toBeLessThanOrEqual(6);
+  });
+  it("unquantified edges get the thin base weight, not zero", () => {
+    expect(edgeWidthFor(null, null)).toBe(1.2);
+    expect(edgeOpacityFor(null, null)).toBe(0.35);
+    // A dollar edge with no graph maximum must not divide by zero.
+    expect(Number.isFinite(edgeWidthFor(5e9, "estUSDValue", 0))).toBe(true);
+  });
+  it("opacity stays inside legible bounds", () => {
+    for (const v of [0, 1, 50, 100, 1e12]) {
+      const o = edgeOpacityFor(v, "pctRevenue");
+      expect(o).toBeGreaterThanOrEqual(0.3);
+      expect(o).toBeLessThanOrEqual(0.9);
+    }
+  });
+});
+
+describe("maxUsd / fmtUsd", () => {
+  it("finds the max ignoring nulls", () => {
+    expect(maxUsd([null, 5e8, undefined, 2e9, NaN])).toBe(2e9);
+    expect(maxUsd([])).toBe(0);
+  });
+  it("formats compactly", () => {
+    expect(fmtUsd(2.4e9)).toBe("$2.4B");
+    expect(fmtUsd(3.5e6)).toBe("$3.5M");
+    expect(fmtUsd(null)).toBe("—");
   });
 });

@@ -115,6 +115,9 @@ export type MergedEntity = {
    *  COSTS, for a customer share of REVENUE. Never collapse them into one
    *  number; keep them separate and label per role. */
   pctByRole: Partial<Record<Role, number | null>>;
+  /** Full quantitative measure set per role (pct of revenue / pct of input
+   *  costs / est. USD value / YoY), for the metric toggle. */
+  metricsByRole: Partial<Record<Role, EdgeMetrics>>;
   notesByRole: Partial<Record<Role, string>>;
   note?: string;
   revenue_pct?: number | null;
@@ -180,6 +183,7 @@ export function mergeEntities(data: Pick<ValueChain, "suppliers" | "customers" |
           roles: [role],
           primaryRole: role,
           pctByRole: { [role]: n.revenue_pct ?? null },
+          metricsByRole: { [role]: readMetrics(n, role) },
           notesByRole: n.note ? { [role]: n.note } : {},
           note: n.note,
           revenue_pct: n.revenue_pct ?? null,
@@ -192,6 +196,7 @@ export function mergeEntities(data: Pick<ValueChain, "suppliers" | "customers" |
       }
       if (!cur.roles.includes(role)) cur.roles.push(role);
       cur.pctByRole[role] = n.revenue_pct ?? null;
+      cur.metricsByRole[role] = readMetrics(n, role);
       if (n.note) cur.notesByRole[role] = n.note;
       cur.sources[role] = n;
       if (!cur.ticker && n.ticker) cur.ticker = n.ticker;
@@ -216,4 +221,98 @@ export function mergeEntities(data: Pick<ValueChain, "suppliers" | "customers" |
     e.revenue_pct = e.pctByRole[e.primaryRole] ?? null;
   }
   return [...byKey.values()];
+}
+
+// ── quantitative edge weighting ────────────────────────────────────────────
+// An edge can carry several measures; the user picks which one drives the
+// visual weight. They are NOT interchangeable (a % of revenue and a dollar
+// value aren't the same scale), so each is normalised on its own terms and
+// the UI always says which measure it actually used for a given edge.
+
+export type EdgeMetric = "pctRevenue" | "pctCOGS" | "estUSDValue";
+
+export const EDGE_METRIC_LABEL: Record<EdgeMetric, string> = {
+  pctRevenue: "% of revenue",
+  pctCOGS: "% of input costs",
+  estUSDValue: "est. $ value",
+};
+
+/** Per-role quantitative measures, camelCased from the snake_case wire. */
+export type EdgeMetrics = {
+  pctRevenue: number | null;
+  pctCOGS: number | null;
+  estUSDValue: number | null;
+  yoyPct: number | null;
+};
+
+export function readMetrics(n: ChainNode | undefined, role: Role): EdgeMetrics {
+  if (!n) return { pctRevenue: null, pctCOGS: null, estUSDValue: null, yoyPct: null };
+  // Legacy `revenue_pct` is role-dependent: revenue share for a customer,
+  // input-cost share for a supplier. Map it to the right modern field so old
+  // maps (pins, history snapshots) still weight correctly.
+  const legacyRevenue = role === "customer" ? n.revenue_pct ?? null : null;
+  const legacyCogs = role === "supplier" ? n.revenue_pct ?? null : null;
+  return {
+    pctRevenue: n.pct_revenue ?? legacyRevenue,
+    pctCOGS: n.pct_cogs ?? legacyCogs,
+    estUSDValue: n.est_usd_value ?? null,
+    yoyPct: n.yoy_pct ?? null,
+  };
+}
+
+/**
+ * Resolve which measure to draw an edge with. Returns the requested metric
+ * when present; otherwise falls back to whatever the model DID give, and
+ * reports it, so the UI can be honest that this edge is weighted by a
+ * different measure than the one selected.
+ */
+export function resolveMetric(
+  m: EdgeMetrics, want: EdgeMetric,
+): { value: number | null; used: EdgeMetric | null; fellBack: boolean } {
+  const order: EdgeMetric[] = [want,
+    ...(["pctRevenue", "pctCOGS", "estUSDValue"] as EdgeMetric[]).filter((k) => k !== want)];
+  for (const k of order) {
+    const v = m[k];
+    if (v != null && Number.isFinite(v)) return { value: v, used: k, fellBack: k !== want };
+  }
+  return { value: null, used: null, fellBack: false };
+}
+
+/** Largest USD value in the graph — dollar edges are normalised against it
+ *  (percentages use their own absolute 0-100 scale instead). */
+export function maxUsd(values: (number | null | undefined)[]): number {
+  let max = 0;
+  for (const v of values) if (v != null && Number.isFinite(v) && v > max) max = v;
+  return max;
+}
+
+/** Stroke width for an edge, scaled per metric kind. */
+export function edgeWidthFor(value: number | null, used: EdgeMetric | null, usdMax = 0): number {
+  if (value == null || used == null) return 1.2;
+  if (used === "estUSDValue") {
+    if (usdMax <= 0) return 1.2;
+    // sqrt so one mega-contract doesn't flatten every other edge to a hair.
+    return clamp(1.2 + 4.8 * Math.sqrt(clamp(value / usdMax, 0, 1)), 1.2, 6);
+  }
+  return clamp(1 + value / 10, 1.2, 6);
+}
+
+/** Stroke opacity for an edge, same scaling rules as the width. */
+export function edgeOpacityFor(value: number | null, used: EdgeMetric | null, usdMax = 0): number {
+  if (value == null || used == null) return 0.35;
+  if (used === "estUSDValue") {
+    if (usdMax <= 0) return 0.35;
+    return clamp(0.3 + 0.6 * Math.sqrt(clamp(value / usdMax, 0, 1)), 0.3, 0.9);
+  }
+  return clamp(0.3 + value / 80, 0.3, 0.9);
+}
+
+/** Compact human form for a dollar edge value ($2.4B). */
+export function fmtUsd(v: number | null | undefined): string {
+  if (v == null || !Number.isFinite(v)) return "—";
+  const a = Math.abs(v);
+  for (const [div, suf] of [[1e12, "T"], [1e9, "B"], [1e6, "M"], [1e3, "K"]] as const) {
+    if (a >= div) return `$${(v / div).toFixed(a / div >= 100 ? 0 : 1)}${suf}`;
+  }
+  return `$${v.toFixed(0)}`;
 }

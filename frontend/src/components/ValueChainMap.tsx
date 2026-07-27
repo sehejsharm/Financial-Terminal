@@ -8,8 +8,9 @@ import { DataAge } from "@/components/DataAge";
 import { StatusBadge } from "@/components/StatusBadge";
 import { api, type ChainNode, type Quote, type ValueChain, type VcHistoryEntry } from "@/lib/api";
 import {
-  clamp, CX, CY, DEFAULT_VIEW, fitView, H, MAX_W, mergeEntities, MIN_W, W, zoomAt,
-  type MergedEntity, type Role, type View,
+  clamp, CX, CY, DEFAULT_VIEW, EDGE_METRIC_LABEL, edgeOpacityFor, edgeWidthFor,
+  fitView, fmtUsd, H, MAX_W, maxUsd, mergeEntities, MIN_W, resolveMetric, W, zoomAt,
+  type EdgeMetric, type MergedEntity, type Role, type View,
 } from "@/lib/valueChainGraph";
 import { fmtNum, fmtPct } from "@/lib/utils";
 
@@ -37,15 +38,6 @@ const COL = {
 
 type Selected = MergedEntity & { role: Role };
 type Cand = { symbol: string; name: string; source: string };
-
-// Materiality → edge visuals: thicker/brighter edges for relationships the
-// AI estimates as a larger share of revenue / input costs.
-function edgeWidth(pct?: number | null): number {
-  return pct != null ? Math.max(1.2, Math.min(6, 1 + pct / 10)) : 1.2;
-}
-function edgeOpacity(pct?: number | null): number {
-  return pct != null ? Math.min(0.9, 0.3 + pct / 80) : 0.35;
-}
 
 /** Pointer travel (px) past which a press counts as a pan, not a node click. */
 const DRAG_SLOP = 4;
@@ -117,11 +109,13 @@ function exportCsv(data: ValueChain) {
   // `roles` lists EVERY role the entity plays (so a customer+competitor is
   // identifiable in the export); one row per role occurrence is kept for
   // back-compat with anything already parsing this file.
-  const lines = ["role,roles,name,note,revenue_pct,ticker_hint,confidence,verified_at"];
+  const lines = ["role,roles,name,note,revenue_pct,pct_revenue,pct_cogs,"
+                 + "est_usd_value,yoy_pct,ticker_hint,confidence,verified_at"];
   const push = (role: Role, ns?: ChainNode[]) =>
     (ns ?? []).forEach((n) => lines.push(
       [role, esc((n.roles ?? [role]).join("|")), esc(n.name), esc(n.note),
-       n.revenue_pct ?? "", esc(n.ticker),
+       n.revenue_pct ?? "", n.pct_revenue ?? "", n.pct_cogs ?? "",
+       n.est_usd_value ?? "", n.yoy_pct ?? "", esc(n.ticker),
        n.confidence ?? "estimated", esc(n.verified_at ?? "")].join(","),
     ));
   push("supplier", data.suppliers);
@@ -177,6 +171,23 @@ function savePin(ticker: string, data: ValueChain) {
 }
 function clearPin(ticker: string) {
   try { localStorage.removeItem(PIN_PREFIX + ticker.toUpperCase()); } catch { /* noop */ }
+}
+
+/** Small YoY trend arrow at an edge's midpoint. Only drawn where the model
+ *  actually supplied a YoY estimate — absence means "unknown", not "flat". */
+function YoyMark({ x, y, yoy }: { x: number; y: number; yoy: number | null }) {
+  if (yoy == null || !Number.isFinite(yoy)) return null;
+  const up = yoy >= 0;
+  const col = up ? "#1fd286" : "#ff4d4f";
+  return (
+    <g aria-hidden="true">
+      <title>{`YoY ${up ? "+" : ""}${fmtNum(yoy, 1)}% (AI est.)`}</title>
+      <circle cx={x} cy={y} r={7.5} fill="#0c0e12" stroke={col} strokeWidth={1} opacity={0.95} />
+      <path d={up ? `M${x - 3.4},${y + 2.2} L${x},${y - 2.8} L${x + 3.4},${y + 2.2} Z`
+                  : `M${x - 3.4},${y - 2.2} L${x},${y + 2.8} L${x + 3.4},${y - 2.2} Z`}
+            fill={col} />
+    </g>
+  );
 }
 
 // ── node box ────────────────────────────────────────────────────────────────
@@ -335,16 +346,26 @@ function NodeDetail({ node, parentTicker, chainTicker, onClose, onRecenter }: {
 
       {/* Exposure is stated PER ROLE — the supplier number is a share of
           input costs, the customer number a share of revenue. Never blended. */}
-      {node.roles.some((r) => node.pctByRole[r] != null) && (
-        <div className="flex flex-col gap-0.5">
-          {node.roles.map((r) => node.pctByRole[r] != null && (
-            <div key={r} className="text-[11px] text-amber">
-              ≈{fmtNum(node.pctByRole[r], 1)}% {r === "supplier" ? "of input costs" : "of revenue"}
-              <span className="text-mut"> ({r}, AI est.)</span>
-            </div>
-          ))}
-        </div>
-      )}
+      {node.roles.map((r) => {
+        const m = node.metricsByRole[r];
+        if (!m || (m.pctRevenue == null && m.pctCOGS == null
+                   && m.estUSDValue == null && m.yoyPct == null)) return null;
+        return (
+          <div key={r} className="flex flex-col gap-0.5">
+            {node.roles.length > 1 && (
+              <span className="text-[9px] uppercase tracking-wider" style={{ color: COL[r] }}>{r}</span>
+            )}
+            {m.pctRevenue != null && <div className="text-[11px] text-amber">≈{fmtNum(m.pctRevenue, 1)}% of revenue <span className="text-mut">(AI est.)</span></div>}
+            {m.pctCOGS != null && <div className="text-[11px] text-amber">≈{fmtNum(m.pctCOGS, 1)}% of input costs <span className="text-mut">(AI est.)</span></div>}
+            {m.estUSDValue != null && <div className="text-[11px] text-amber">≈{fmtUsd(m.estUSDValue)}/yr <span className="text-mut">(AI est.)</span></div>}
+            {m.yoyPct != null && (
+              <div className={`text-[11px] ${m.yoyPct >= 0 ? "text-green" : "text-red"}`}>
+                {m.yoyPct >= 0 ? "▲" : "▼"} {fmtNum(Math.abs(m.yoyPct), 1)}% YoY <span className="text-mut">(AI est.)</span>
+              </div>
+            )}
+          </div>
+        );
+      })}
       {/* Per-role notes, so a customer note and a competitor note both show. */}
       {node.roles.map((r) => node.notesByRole[r] && (
         <div key={r} className="text-xs text-mut break-words">
@@ -437,6 +458,8 @@ export function ValueChainMap({ ticker }: { ticker: string }) {
   const [history, setHistory] = useState<VcHistoryEntry[]>([]);
   const [snapshotTs, setSnapshotTs] = useState<string | null>(null); // viewing a prior version
   const [graphFilter, setGraphFilter] = useState("");
+  // Which quantitative measure drives edge thickness/intensity.
+  const [edgeMetric, setEdgeMetric] = useState<EdgeMetric>("pctRevenue");
   const [view, setView] = useState<View>({ ...DEFAULT_VIEW });
   const panRef = useRef<{ sx: number; sy: number; vx: number; vy: number } | null>(null);
   const containerRef = useRef<HTMLDivElement | null>(null);
@@ -453,11 +476,11 @@ export function ValueChainMap({ ticker }: { ticker: string }) {
   // Hover tooltip: full untruncated text without needing a click. Position is
   // container-relative px; flip flags keep it inside the canvas near edges.
   const [hover, setHover] = useState<
-    { node: ChainNode; role: Role; cx: number; cy: number; flipX: boolean; flipY: boolean } | null
+    { node: MergedEntity; role: Role; cx: number; cy: number; flipX: boolean; flipY: boolean } | null
   >(null);
 
   const showTip = useCallback((e: React.MouseEvent | React.FocusEvent,
-                               node: ChainNode, role: Role) => {
+                               node: MergedEntity, role: Role) => {
     const el = containerRef.current;
     if (!el) return;
     const r = el.getBoundingClientRect();
@@ -633,6 +656,20 @@ export function ValueChainMap({ ticker }: { ticker: string }) {
   // One flat list — edges are keyed off each entity's ROLES, not the column
   // it happens to be drawn in.
   const allNodes: Placed[] = [...suppliers, ...customers, ...competitors];
+  // Dollar edges are normalised against the biggest relationship in THIS
+  // graph (percentages keep their own absolute 0-100 scale).
+  const usdMax = maxUsd(allNodes.flatMap((n) =>
+    n.roles.map((r) => n.metricsByRole[r]?.estUSDValue ?? null)));
+  /** Resolve the drawing weight for one (entity, role) edge. */
+  const edgeOf = (n: Placed, role: Role) =>
+    resolveMetric(n.metricsByRole[role] ?? {
+      pctRevenue: null, pctCOGS: null, estUSDValue: null, yoyPct: null,
+    }, edgeMetric);
+  // How many edges can't answer the selected metric — surfaced in the legend
+  // rather than silently drawn as if they were simply small.
+  const flowEdges = allNodes.flatMap((n) =>
+    n.roles.filter((r) => r !== "competitor").map((r) => edgeOf(n, r)));
+  const missingMetric = flowEdges.filter((e) => e.value == null || e.fellBack).length;
 
   const pick = (n: Placed) => {
     // A press that panned isn't a selection click.
@@ -683,7 +720,24 @@ export function ValueChainMap({ ticker }: { ticker: string }) {
         <span><span style={{ color: COL.company }}>●</span> {data.name}</span>
         <span><span style={{ color: COL.customer }}>●</span> Customers</span>
         <span><span style={{ color: COL.competitor }}>●</span> Competitors</span>
-        <span className="opacity-80">solid ✓ = admin-verified · others = AI-estimated (weight = est. exposure)</span>
+        <span className="opacity-80">solid ✓ = admin-verified · others = AI-estimated</span>
+        {/* Which measure drives edge thickness/intensity. */}
+        <span className="inline-flex items-center gap-1">
+          <span className="label-xs">Weight by</span>
+          {(["pctRevenue", "pctCOGS", "estUSDValue"] as EdgeMetric[]).map((m) => (
+            <button key={m} onClick={() => setEdgeMetric(m)}
+                    title={`Scale edge thickness by ${EDGE_METRIC_LABEL[m]}`}
+                    className={`px-1.5 py-0.5 rounded border text-[10px] ${
+                      edgeMetric === m ? "border-amber text-amber bg-amber/10" : "border-line2 text-mut hover:text-txt"}`}>
+              {EDGE_METRIC_LABEL[m]}
+            </button>
+          ))}
+        </span>
+        {missingMetric > 0 && (
+          <span className="text-amber/90" title="These edges are drawn from another measure (or at base weight) because the AI didn't return the selected one — they are NOT necessarily small.">
+            {missingMetric} edge{missingMetric > 1 ? "s" : ""} lack this measure
+          </span>
+        )}
         <input value={graphFilter} onChange={(e) => setGraphFilter(e.target.value)}
                placeholder="Find in graph…" className="input-bare !py-1 !px-2 text-[11px] w-32" />
         {history.length > 1 && (
@@ -749,24 +803,38 @@ export function ValueChainMap({ ticker }: { ticker: string }) {
               that both supplies and buys gets an inbound AND an outbound
               arrow. Styling encodes exposure (width/opacity) and provenance
               (verified = solid, AI-estimated = dashed). */}
-          {allNodes.filter((n) => n.roles.includes("supplier")).map((s, i) => (
-            <line key={`se${i}`} x1={s.x + 78} y1={s.y} x2={CX - 90} y2={CY}
-                  stroke={s.confidence === "verified" ? "#1fd286" : COL.supplier}
-                  strokeOpacity={s.confidence === "verified" ? 0.9 : edgeOpacity(s.pctByRole.supplier)}
-                  strokeWidth={s.confidence === "verified" ? Math.max(2, edgeWidth(s.pctByRole.supplier)) : edgeWidth(s.pctByRole.supplier)}
-                  strokeDasharray={s.confidence === "verified" ? undefined : "6 4"}
-                  opacity={matchesFilter(s) ? 1 : 0.12}
-                  markerEnd="url(#arrow)" />
-          ))}
-          {allNodes.filter((n) => n.roles.includes("customer")).map((c, i) => (
-            <line key={`ce${i}`} x1={CX + 90} y1={CY} x2={c.x - 78} y2={c.y}
-                  stroke={c.confidence === "verified" ? "#1fd286" : COL.customer}
-                  strokeOpacity={c.confidence === "verified" ? 0.9 : edgeOpacity(c.pctByRole.customer)}
-                  strokeWidth={c.confidence === "verified" ? Math.max(2, edgeWidth(c.pctByRole.customer)) : edgeWidth(c.pctByRole.customer)}
-                  strokeDasharray={c.confidence === "verified" ? undefined : "6 4"}
-                  opacity={matchesFilter(c) ? 1 : 0.12}
-                  markerEnd="url(#arrow)" />
-          ))}
+          {allNodes.filter((n) => n.roles.includes("supplier")).map((s, i) => {
+            const m = edgeOf(s, "supplier");
+            const w = edgeWidthFor(m.value, m.used, usdMax);
+            return (
+              <g key={`se${i}`} opacity={matchesFilter(s) ? 1 : 0.12}>
+                <line x1={s.x + 78} y1={s.y} x2={CX - 90} y2={CY}
+                      stroke={s.confidence === "verified" ? "#1fd286" : COL.supplier}
+                      strokeOpacity={s.confidence === "verified" ? 0.9 : edgeOpacityFor(m.value, m.used, usdMax)}
+                      strokeWidth={s.confidence === "verified" ? Math.max(2, w) : w}
+                      strokeDasharray={s.confidence === "verified" ? undefined : "6 4"}
+                      markerEnd="url(#arrow)" />
+                <YoyMark x={(s.x + 78 + CX - 90) / 2} y={(s.y + CY) / 2}
+                         yoy={s.metricsByRole.supplier?.yoyPct ?? null} />
+              </g>
+            );
+          })}
+          {allNodes.filter((n) => n.roles.includes("customer")).map((c, i) => {
+            const m = edgeOf(c, "customer");
+            const w = edgeWidthFor(m.value, m.used, usdMax);
+            return (
+              <g key={`ce${i}`} opacity={matchesFilter(c) ? 1 : 0.12}>
+                <line x1={CX + 90} y1={CY} x2={c.x - 78} y2={c.y}
+                      stroke={c.confidence === "verified" ? "#1fd286" : COL.customer}
+                      strokeOpacity={c.confidence === "verified" ? 0.9 : edgeOpacityFor(m.value, m.used, usdMax)}
+                      strokeWidth={c.confidence === "verified" ? Math.max(2, w) : w}
+                      strokeDasharray={c.confidence === "verified" ? undefined : "6 4"}
+                      markerEnd="url(#arrow)" />
+                <YoyMark x={(CX + 90 + c.x - 78) / 2} y={(CY + c.y) / 2}
+                         yoy={c.metricsByRole.customer?.yoyPct ?? null} />
+              </g>
+            );
+          })}
           {allNodes.filter((n) => n.roles.includes("competitor")).map((c, i) => (
             <line key={`ke${i}`} x1={CX} y1={CY + 26} x2={c.x} y2={c.y - 18}
                   stroke={COL.competitor} strokeOpacity={0.3} strokeWidth={1.1}
@@ -816,12 +884,28 @@ export function ValueChainMap({ ticker }: { ticker: string }) {
                 : <span className="text-[9px] text-amber border border-amber/40 rounded px-1">AI est.</span>}
             </div>
             <div className="text-xs font-semibold text-txt break-words">{hover.node.name}</div>
-            {hover.node.revenue_pct != null && (
-              <div className="text-[11px] text-amber mt-0.5">
-                ≈{fmtNum(hover.node.revenue_pct, 1)}%{" "}
-                {hover.role === "supplier" ? "of input costs" : "of revenue"} (est.)
-              </div>
-            )}
+            {(() => {
+              const m = hover.node.metricsByRole[hover.role];
+              if (!m) return null;
+              return (
+                <div className="mt-0.5 flex flex-col gap-0.5">
+                  {m.pctRevenue != null && (
+                    <div className="text-[11px] text-amber">≈{fmtNum(m.pctRevenue, 1)}% of revenue (est.)</div>
+                  )}
+                  {m.pctCOGS != null && (
+                    <div className="text-[11px] text-amber">≈{fmtNum(m.pctCOGS, 1)}% of input costs (est.)</div>
+                  )}
+                  {m.estUSDValue != null && (
+                    <div className="text-[11px] text-amber">≈{fmtUsd(m.estUSDValue)}/yr (est.)</div>
+                  )}
+                  {m.yoyPct != null && (
+                    <div className={`text-[11px] ${m.yoyPct >= 0 ? "text-green" : "text-red"}`}>
+                      {m.yoyPct >= 0 ? "▲" : "▼"} {fmtNum(Math.abs(m.yoyPct), 1)}% YoY (est.)
+                    </div>
+                  )}
+                </div>
+              );
+            })()}
             {hover.node.note && (
               <div className="text-[11px] text-mut mt-1 break-words">{hover.node.note}</div>
             )}

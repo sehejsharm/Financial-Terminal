@@ -202,6 +202,17 @@ export type ChainNode = {
   revenue_pct?: number | null;
   /** AI-suggested primary ticker for this partner — must be verified. */
   ticker?: string | null;
+  /** Quantitative edge weights. All OPTIONAL and frequently null: the model
+   *  is instructed to emit them only with a concrete basis, so the UI must
+   *  fall back gracefully rather than imply precision.
+   *  pct_revenue = share of the SUBJECT's revenue,
+   *  pct_cogs    = share of the SUBJECT's input costs,
+   *  est_usd_value = estimated ANNUAL relationship value in USD,
+   *  yoy_pct     = estimated YoY change in the relationship's size (+/-%). */
+  pct_revenue?: number | null;
+  pct_cogs?: number | null;
+  est_usd_value?: number | null;
+  yoy_pct?: number | null;
   /** Provenance tier: "estimated" (AI) or "verified" (admin-published). */
   confidence?: "estimated" | "verified";
   verified_at?: string | null;
