@@ -175,16 +175,28 @@ function clearPin(ticker: string) {
 }
 
 // ── node box ────────────────────────────────────────────────────────────────
-function Node({ x, y, label, note, pct, color, onClick, selected, verified, dimmed }: {
+function Node({ x, y, label, note, pct, color, onClick, selected, verified, dimmed,
+                onHover, onLeave }: {
   x: number; y: number; label: string; note?: string; pct?: number | null;
   color: string; onClick: () => void; selected: boolean;
   verified?: boolean; dimmed?: boolean;
+  onHover?: (e: React.MouseEvent | React.FocusEvent) => void;
+  onLeave?: () => void;
 }) {
   const sub = pct != null ? `≈${fmtNum(pct, 0)}% · ${note ?? ""}` : note;
   const shown = (verified ? "✓ " : "") + label;
+  // aria-label rather than <title>: <title> makes the browser render its own
+  // slow native tooltip on top of ours, but we still owe screen readers an
+  // accessible name.
+  const a11y = `${verified ? "Verified" : "AI-estimated"}: ${label}${sub ? ` — ${sub}` : ""}`;
   return (
-    <g onClick={onClick} style={{ cursor: "pointer" }} opacity={dimmed ? 0.15 : 1}>
-      <title>{`${verified ? "[VERIFIED] " : "[AI-estimated] "}${label}${sub ? ` — ${sub}` : ""}`}</title>
+    <g onClick={onClick} style={{ cursor: "pointer" }} opacity={dimmed ? 0.15 : 1}
+       role="button" tabIndex={0} aria-label={a11y}
+       onMouseEnter={onHover} onMouseMove={onHover} onMouseLeave={onLeave}
+       onFocus={onHover} onBlur={onLeave}
+       onKeyDown={(e) => {
+         if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onClick(); }
+       }}>
       <rect x={x - 78} y={y - 16} width={156} height={32} rx={5}
             fill={selected ? "#1c2129" : "#11151b"} stroke={verified ? "#1fd286" : color}
             strokeWidth={selected ? 2.4 : verified ? 2 : 1.4} />
@@ -389,6 +401,29 @@ export function ValueChainMap({ ticker }: { ticker: string }) {
   // Set once a press travels past DRAG_SLOP, so releasing a pan doesn't also
   // "click" whatever node the drag happened to start on.
   const draggedRef = useRef(false);
+
+  // Hover tooltip: full untruncated text without needing a click. Position is
+  // container-relative px; flip flags keep it inside the canvas near edges.
+  const [hover, setHover] = useState<
+    { node: ChainNode; role: Role; cx: number; cy: number; flipX: boolean; flipY: boolean } | null
+  >(null);
+
+  const showTip = useCallback((e: React.MouseEvent | React.FocusEvent,
+                               node: ChainNode, role: Role) => {
+    const el = containerRef.current;
+    if (!el) return;
+    const r = el.getBoundingClientRect();
+    // FocusEvent has no coordinates — fall back to the focused node's own box.
+    const src = "clientX" in e
+      ? { x: (e as React.MouseEvent).clientX, y: (e as React.MouseEvent).clientY }
+      : (() => {
+          const b = (e.target as Element).getBoundingClientRect?.();
+          return b ? { x: b.left + b.width / 2, y: b.top + b.height / 2 } : { x: r.left, y: r.top };
+        })();
+    const cx = src.x - r.left, cy = src.y - r.top;
+    setHover({ node, role, cx, cy, flipX: cx > r.width - 280, flipY: cy > r.height - 150 });
+  }, []);
+  const hideTip = useCallback(() => setHover(null), []);
 
   // Request-id guard: a slow generation for a previously-shown node must not
   // overwrite the map after the user re-centered or switched ticker.
@@ -692,21 +727,62 @@ export function ValueChainMap({ ticker }: { ticker: string }) {
             <Node key={`s${i}`} x={s.x} y={s.y} label={s.name} note={s.note} pct={s.revenue_pct}
                   color={COL.supplier} onClick={() => pick(s, "supplier")}
                   verified={s.confidence === "verified"} dimmed={!matchesFilter(s)}
+                  onHover={(e) => showTip(e, s, "supplier")} onLeave={hideTip}
                   selected={selected?.name === s.name && selected.role === "supplier"} />
           ))}
           {customers.map((c, i) => (
             <Node key={`c${i}`} x={c.x} y={c.y} label={c.name} note={c.note} pct={c.revenue_pct}
                   color={COL.customer} onClick={() => pick(c, "customer")}
                   verified={c.confidence === "verified"} dimmed={!matchesFilter(c)}
+                  onHover={(e) => showTip(e, c, "customer")} onLeave={hideTip}
                   selected={selected?.name === c.name && selected.role === "customer"} />
           ))}
           {competitors.map((c, i) => (
             <Node key={`k${i}`} x={c.x} y={c.y} label={c.name} note={c.note}
                   color={COL.competitor} onClick={() => pick(c, "competitor")}
                   verified={c.confidence === "verified"} dimmed={!matchesFilter(c)}
+                  onHover={(e) => showTip(e, c, "competitor")} onLeave={hideTip}
                   selected={selected?.name === c.name && selected.role === "competitor"} />
           ))}
         </svg>
+
+        {/* Hover tooltip — the FULL label/note/exposure, which the node box
+            truncates at 20/26 chars. HTML (not SVG) so it wraps normally and
+            isn't clipped by the viewBox; pointer-events:none so it can never
+            steal the hover it's describing. */}
+        {hover && (
+          <div role="tooltip"
+               className="absolute z-20 pointer-events-none max-w-[280px] rounded border
+                          border-line2 bg-bg/95 backdrop-blur-sm px-2.5 py-2 shadow-panel"
+               style={{
+                 left: hover.flipX ? undefined : hover.cx + 14,
+                 right: hover.flipX ? `calc(100% - ${hover.cx - 14}px)` : undefined,
+                 top: hover.flipY ? undefined : hover.cy + 14,
+                 bottom: hover.flipY ? `calc(100% - ${hover.cy - 14}px)` : undefined,
+               }}>
+            <div className="flex items-center gap-1.5 mb-1">
+              <span style={{ color: COL[hover.role] }}>●</span>
+              <span className="text-[10px] uppercase tracking-wider text-mut">{hover.role}</span>
+              {hover.node.confidence === "verified"
+                ? <span className="text-[9px] text-green border border-green/50 rounded px-1">✓ verified</span>
+                : <span className="text-[9px] text-amber border border-amber/40 rounded px-1">AI est.</span>}
+            </div>
+            <div className="text-xs font-semibold text-txt break-words">{hover.node.name}</div>
+            {hover.node.revenue_pct != null && (
+              <div className="text-[11px] text-amber mt-0.5">
+                ≈{fmtNum(hover.node.revenue_pct, 1)}%{" "}
+                {hover.role === "supplier" ? "of input costs" : "of revenue"} (est.)
+              </div>
+            )}
+            {hover.node.note && (
+              <div className="text-[11px] text-mut mt-1 break-words">{hover.node.note}</div>
+            )}
+            {hover.node.ticker && (
+              <div className="text-[10px] text-mut mt-1">Ticker hint: <span className="text-txt">{hover.node.ticker}</span></div>
+            )}
+            <div className="text-[9.5px] text-mut/70 mt-1.5">Click for drill-down</div>
+          </div>
+        )}
 
         {/* Minimap: whole-graph overview + current viewport rectangle. Click
             anywhere on it to centre the view there. Only worth the pixels
