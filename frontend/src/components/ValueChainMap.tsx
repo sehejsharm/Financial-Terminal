@@ -1,12 +1,15 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useCallback, useEffect, useRef, useState } from "react";
-import { ChevronRight, Download, ExternalLink, Flag, Pin, PinOff, X } from "lucide-react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { ChevronRight, Download, ExternalLink, Flag, Maximize2, Pin, PinOff, X } from "lucide-react";
 
 import { DataAge } from "@/components/DataAge";
 import { StatusBadge } from "@/components/StatusBadge";
 import { api, type ChainNode, type Quote, type ValueChain, type VcHistoryEntry } from "@/lib/api";
+import {
+  clamp, CX, CY, DEFAULT_VIEW, fitView, H, MAX_W, MIN_W, W, zoomAt, type View,
+} from "@/lib/valueChainGraph";
 import { fmtNum, fmtPct } from "@/lib/utils";
 
 /**
@@ -22,11 +25,7 @@ import { fmtNum, fmtPct } from "@/lib/utils";
  * can re-center recursively with a breadcrumb trail, maps can be pinned and
  * exported, and wrong relationships can be reported to a review queue.
  */
-const W = 1200;
-const H = 780;
-const CX = W / 2;
-const CY = 340;
-
+// Canvas geometry + view maths live in @/lib/valueChainGraph (unit-tested).
 const COL = {
   company: "#ffb000",
   supplier: "#3b82f6",
@@ -46,6 +45,11 @@ function edgeWidth(pct?: number | null): number {
 function edgeOpacity(pct?: number | null): number {
   return pct != null ? Math.min(0.9, 0.3 + pct / 80) : 0.35;
 }
+
+/** Pointer travel (px) past which a press counts as a pan, not a node click. */
+const DRAG_SLOP = 4;
+
+type Placed = ChainNode & { x: number; y: number };
 
 // ── ticker resolution (market-biased, cached per node) ─────────────────────
 const _resolveCache = new Map<string, Cand[]>();
@@ -373,8 +377,18 @@ export function ValueChainMap({ ticker }: { ticker: string }) {
   const [history, setHistory] = useState<VcHistoryEntry[]>([]);
   const [snapshotTs, setSnapshotTs] = useState<string | null>(null); // viewing a prior version
   const [graphFilter, setGraphFilter] = useState("");
-  const [view, setView] = useState({ x: 0, y: 0, w: W, h: H });
+  const [view, setView] = useState<View>({ ...DEFAULT_VIEW });
   const panRef = useRef<{ sx: number; sy: number; vx: number; vy: number } | null>(null);
+  const containerRef = useRef<HTMLDivElement | null>(null);
+  // Latest view for the NATIVE wheel listener (which closes over its own scope).
+  const viewRef = useRef(view);
+  useEffect(() => { viewRef.current = view; }, [view]);
+  // Active pointers, for two-finger pinch-zoom.
+  const ptrsRef = useRef<Map<number, { x: number; y: number }>>(new Map());
+  const pinchRef = useRef<{ dist: number; w: number } | null>(null);
+  // Set once a press travels past DRAG_SLOP, so releasing a pan doesn't also
+  // "click" whatever node the drag happened to start on.
+  const draggedRef = useRef(false);
 
   // Request-id guard: a slow generation for a previously-shown node must not
   // overwrite the map after the user re-centered or switched ticker.
@@ -383,7 +397,7 @@ export function ValueChainMap({ ticker }: { ticker: string }) {
   const load = useCallback((t: string, refresh = false) => {
     const reqId = ++loadReqRef.current;
     setBusy(true); setErr(null); setData(null); setSelected(null); setPinnedAt(null);
-    setSnapshotTs(null); setView({ x: 0, y: 0, w: W, h: H });
+    setSnapshotTs(null); setView({ ...DEFAULT_VIEW });
     const pin = !refresh && loadPin(t);
     if (pin) {
       setData(pin.data); setFetchedAt(pin.pinnedAt); setPinnedAt(pin.pinnedAt); setBusy(false);
@@ -404,27 +418,80 @@ export function ValueChainMap({ ticker }: { ticker: string }) {
     setData(entry.data); setSnapshotTs(entry.generated_at); setSelected(null);
   }
 
-  // Zoom (wheel) + pan (drag) on the SVG viewBox.
-  function onWheel(e: React.WheelEvent) {
-    e.preventDefault();
-    const factor = e.deltaY > 0 ? 1.15 : 1 / 1.15;
-    setView((v) => {
-      const w = Math.min(W * 2, Math.max(W / 6, v.w * factor));
-      const h = w * (H / W);
-      return { x: v.x + (v.w - w) / 2, y: v.y + (v.h - h) / 2, w, h };
-    });
-  }
+  // ── zoom: NATIVE non-passive wheel listener ────────────────────────────
+  // React attaches wheel handlers passively at the root, so a synthetic
+  // onWheel's preventDefault() is ignored and the PAGE scrolls while you try
+  // to zoom. A native listener with {passive:false} is the only thing that
+  // actually keeps the wheel inside the canvas. Zoom is anchored to the
+  // cursor (the point under the pointer stays put) rather than the centre.
+  useEffect(() => {
+    const el = containerRef.current;
+    if (!el) return;
+    const onWheelNative = (e: WheelEvent) => {
+      e.preventDefault();
+      const v = viewRef.current;
+      const rect = el.getBoundingClientRect();
+      if (!rect.width || !rect.height) return;
+      const fx = (e.clientX - rect.left) / rect.width;
+      const fy = (e.clientY - rect.top) / rect.height;
+      setView(zoomAt(v, e.deltaY > 0 ? 1.15 : 1 / 1.15, fx, fy));
+    };
+    el.addEventListener("wheel", onWheelNative, { passive: false });
+    return () => el.removeEventListener("wheel", onWheelNative);
+    // Re-attach when the canvas (re)mounts after a load.
+  }, [data]);
+
+  // ── pan (1 pointer) + pinch-zoom (2 pointers) ──────────────────────────
   function onPointerDown(e: React.PointerEvent) {
+    ptrsRef.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    draggedRef.current = false;
+    if (ptrsRef.current.size === 2) {
+      const [a, b] = [...ptrsRef.current.values()];
+      pinchRef.current = { dist: Math.hypot(a.x - b.x, a.y - b.y), w: view.w };
+      panRef.current = null;
+      return;
+    }
     panRef.current = { sx: e.clientX, sy: e.clientY, vx: view.x, vy: view.y };
+    // Text selection is killed by user-select:none on the container (see the
+    // JSX), NOT by preventDefault() here — preventDefault on pointerdown
+    // suppresses the compatibility mouse events, which would stop node
+    // clicks from registering at all.
+    // Capture on e.target (not the container): pointer capture retargets the
+    // derived click event, so capturing on the container would break node
+    // selection. Events from the captured node still bubble to this handler.
     (e.target as Element).setPointerCapture?.(e.pointerId);
   }
+
   function onPointerMove(e: React.PointerEvent) {
+    if (ptrsRef.current.has(e.pointerId)) {
+      ptrsRef.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    }
+    // Pinch: viewBox width scales with the inverse of finger separation.
+    const pinch = pinchRef.current;
+    if (pinch && ptrsRef.current.size >= 2) {
+      const [a, b] = [...ptrsRef.current.values()];
+      const dist = Math.hypot(a.x - b.x, a.y - b.y);
+      if (dist > 0) {
+        draggedRef.current = true;
+        const w = clamp(pinch.w * (pinch.dist / dist), MIN_W, MAX_W);
+        const h = w * (H / W);
+        setView((v) => ({ x: v.x + (v.w - w) / 2, y: v.y + (v.h - h) / 2, w, h }));
+      }
+      return;
+    }
     const p = panRef.current;
-    if (!p || !svgRef.current) return;
-    const scale = view.w / svgRef.current.clientWidth;
-    setView((v) => ({ ...v, x: p.vx - (e.clientX - p.sx) * scale, y: p.vy - (e.clientY - p.sy) * scale }));
+    if (!p || !containerRef.current) return;
+    const dx = e.clientX - p.sx, dy = e.clientY - p.sy;
+    if (!draggedRef.current && Math.hypot(dx, dy) > DRAG_SLOP) draggedRef.current = true;
+    const scale = view.w / (containerRef.current.clientWidth || W);
+    setView((v) => ({ ...v, x: p.vx - dx * scale, y: p.vy - dy * scale }));
   }
-  function onPointerUp() { panRef.current = null; }
+
+  function onPointerUp(e: React.PointerEvent) {
+    ptrsRef.current.delete(e.pointerId);
+    if (ptrsRef.current.size < 2) pinchRef.current = null;
+    if (ptrsRef.current.size === 0) panRef.current = null;
+  }
 
   const matchesFilter = (n: ChainNode) => {
     const f = graphFilter.trim().toLowerCase();
@@ -443,27 +510,46 @@ export function ValueChainMap({ ticker }: { ticker: string }) {
     setPinnedAt(Date.now());
   }
 
+  // Layout is computed ABOVE the early returns so the fit-to-view control and
+  // the minimap (which need node coordinates) can be plain hooks.
+  const layout = useMemo(() => {
+    if (!data) return null;
+    const supList = (data.suppliers ?? []).slice(0, 10);
+    const cusList = (data.customers ?? []).slice(0, 12);
+    const cmpList = (data.competitors ?? []).slice(0, 8);
+    const sGap = Math.min(70, (H - 140) / Math.max(supList.length, 1));
+    const cGap = Math.min(60, (H - 140) / Math.max(cusList.length, 1));
+    return {
+      suppliers: supList.map((it, i): Placed => ({ ...it, x: 170, y: 70 + i * sGap })),
+      customers: cusList.map((it, i): Placed => ({ ...it, x: W - 170, y: 70 + i * cGap })),
+      competitors: cmpList.map((it, i, arr): Placed => ({
+        ...it,
+        x: CX + (i - (arr.length - 1) / 2) * Math.min(180, (W - 200) / Math.max(arr.length, 1)),
+        y: H - 60,
+      })),
+    };
+  }, [data]);
+
+  /** Frame every node — the escape hatch when a 30-node map runs off-canvas. */
+  const fitToView = useCallback(() => {
+    if (!layout) { setView({ ...DEFAULT_VIEW }); return; }
+    setView(fitView([
+      ...layout.suppliers, ...layout.customers, ...layout.competitors,
+      { x: CX, y: CY },   // always keep the subject company in frame
+    ]));
+  }, [layout]);
+
   if (busy) return <div className="text-mut text-xs">Mapping value chain (AI)…</div>;
   if (err) return <div className="text-red text-sm">{err}</div>;
-  if (!data) return null;
+  if (!data || !layout) return null;
 
-  const supList = (data.suppliers ?? []).slice(0, 10);
-  const cusList = (data.customers ?? []).slice(0, 12);
-  const cmpList = (data.competitors ?? []).slice(0, 8);
+  const { suppliers, customers, competitors } = layout;
 
-  const sGap = Math.min(70, (H - 140) / Math.max(supList.length, 1));
-  const cGap = Math.min(60, (H - 140) / Math.max(cusList.length, 1));
-
-  const suppliers = supList.map((it, i) => ({ ...it, x: 170, y: 70 + i * sGap }));
-  const customers = cusList.map((it, i) => ({ ...it, x: W - 170, y: 70 + i * cGap }));
-  const competitors = cmpList.map((it, i, arr) => ({
-    ...it,
-    x: CX + (i - (arr.length - 1) / 2) * Math.min(180, (W - 200) / Math.max(arr.length, 1)),
-    y: H - 60,
-  }));
-
-  const pick = (n: ChainNode, role: Role) =>
+  const pick = (n: ChainNode, role: Role) => {
+    // A press that panned isn't a selection click.
+    if (draggedRef.current) return;
     setSelected((cur) => (cur?.name === n.name && cur.role === role ? null : { ...n, role }));
+  };
 
   return (
     <div>
@@ -527,7 +613,11 @@ export function ValueChainMap({ ticker }: { ticker: string }) {
             ))}
           </select>
         )}
-        <button onClick={() => setView({ x: 0, y: 0, w: W, h: H })} className="hover:text-amber" title="Reset zoom/pan">
+        <button onClick={fitToView} className="hover:text-amber flex items-center gap-1"
+                title="Zoom/pan so every node is on screen">
+          <Maximize2 size={11} />Fit
+        </button>
+        <button onClick={() => setView({ ...DEFAULT_VIEW })} className="hover:text-amber" title="Reset zoom/pan">
           Reset view
         </button>
         <div className="flex-1" />
@@ -548,9 +638,11 @@ export function ValueChainMap({ ticker }: { ticker: string }) {
         <button onClick={() => svgRef.current && exportPng(svgRef.current, current)} title="Export as PNG" className="hover:text-amber">PNG</button>
       </div>
 
-      <div className="panel overflow-hidden touch-none" onWheel={onWheel}
+      <div ref={containerRef}
+           className="panel overflow-hidden touch-none select-none relative"
            onPointerDown={onPointerDown} onPointerMove={onPointerMove}
-           onPointerUp={onPointerUp} style={{ cursor: "grab" }}>
+           onPointerUp={onPointerUp} onPointerCancel={onPointerUp}
+           style={{ cursor: "grab", WebkitUserSelect: "none", userSelect: "none" }}>
         <svg ref={svgRef} viewBox={`${view.x} ${view.y} ${view.w} ${view.h}`}
              className="w-full" style={{ minWidth: 320, maxHeight: "72vh" }}>
           <defs>
@@ -615,6 +707,43 @@ export function ValueChainMap({ ticker }: { ticker: string }) {
                   selected={selected?.name === c.name && selected.role === "competitor"} />
           ))}
         </svg>
+
+        {/* Minimap: whole-graph overview + current viewport rectangle. Click
+            anywhere on it to centre the view there. Only worth the pixels
+            once the graph is big enough to overflow. */}
+        {suppliers.length + customers.length + competitors.length > 8 && (
+          <div className="absolute bottom-2 right-2 rounded border border-line2 bg-bg/85 backdrop-blur-sm p-1">
+            <svg width={148} height={148 * (H / W)} viewBox={`0 0 ${W} ${H}`}
+                 role="img" aria-label="Graph minimap — click to centre the view"
+                 style={{ cursor: "crosshair", display: "block" }}
+                 onPointerDown={(e) => {
+                   // Own the gesture: don't let it start a canvas pan.
+                   e.stopPropagation();
+                   const r = e.currentTarget.getBoundingClientRect();
+                   const gx = ((e.clientX - r.left) / r.width) * W;
+                   const gy = ((e.clientY - r.top) / r.height) * H;
+                   setView((v) => ({ ...v, x: gx - v.w / 2, y: gy - v.h / 2 }));
+                 }}>
+              <rect x={0} y={0} width={W} height={H} fill="#0c0e12" />
+              {suppliers.map((s, i) => (
+                <rect key={`ms${i}`} x={s.x - 78} y={s.y - 16} width={156} height={32}
+                      fill={COL.supplier} opacity={0.55} />
+              ))}
+              {customers.map((c, i) => (
+                <rect key={`mc${i}`} x={c.x - 78} y={c.y - 16} width={156} height={32}
+                      fill={COL.customer} opacity={0.55} />
+              ))}
+              {competitors.map((c, i) => (
+                <rect key={`mk${i}`} x={c.x - 78} y={c.y - 16} width={156} height={32}
+                      fill={COL.competitor} opacity={0.55} />
+              ))}
+              <rect x={CX - 90} y={CY - 26} width={180} height={52} fill={COL.company} opacity={0.8} />
+              {/* current viewport */}
+              <rect x={view.x} y={view.y} width={view.w} height={view.h}
+                    fill="none" stroke="#ffb000" strokeWidth={8} opacity={0.9} />
+            </svg>
+          </div>
+        )}
       </div>
 
       {selected && (
