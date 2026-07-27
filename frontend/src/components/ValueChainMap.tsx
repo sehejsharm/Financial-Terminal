@@ -2,7 +2,9 @@
 
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ChevronRight, Download, ExternalLink, Flag, Maximize2, Pin, PinOff, X } from "lucide-react";
+import {
+  ChevronRight, Download, ExternalLink, Flag, Maximize2, Pause, Pin, PinOff, Play, X,
+} from "lucide-react";
 
 import { DataAge } from "@/components/DataAge";
 import { StatusBadge } from "@/components/StatusBadge";
@@ -621,6 +623,9 @@ export function ValueChainMap({ ticker }: { ticker: string }) {
   const [edgeMetric, setEdgeMetric] = useState<EdgeMetric>("pctRevenue");
   // "Compare to previous": diff the LIVE map against a chosen prior snapshot.
   const [compareTs, setCompareTs] = useState<string | null>(null);
+  // Time-lapse: step through stored generations oldest → newest.
+  const [playing, setPlaying] = useState(false);
+  const [playIdx, setPlayIdx] = useState(0);
   const [view, setView] = useState<View>({ ...DEFAULT_VIEW });
   const panRef = useRef<{ sx: number; sy: number; vx: number; vy: number } | null>(null);
   const containerRef = useRef<HTMLDivElement | null>(null);
@@ -665,6 +670,7 @@ export function ValueChainMap({ ticker }: { ticker: string }) {
     const reqId = ++loadReqRef.current;
     setBusy(true); setErr(null); setData(null); setSelected(null); setPinnedAt(null);
     setSnapshotTs(null); setCompareTs(null); setView({ ...DEFAULT_VIEW });
+    setPlaying(false); setPlayIdx(0); framedRef.current = null;
     const pin = !refresh && loadPin(t);
     if (pin) {
       setData(pin.data); setFetchedAt(pin.pinnedAt); setPinnedAt(pin.pinnedAt); setBusy(false);
@@ -736,6 +742,35 @@ export function ValueChainMap({ ticker }: { ticker: string }) {
     const id = setInterval(pull, 60_000);
     return () => { alive = false; clearInterval(id); };
   }, [current]);
+
+  // ── time-lapse playback ─────────────────────────────────────────────────
+  // History arrives newest-first; playback runs the other way so the chain
+  // visibly evolves forwards.
+  const chrono = useMemo(() => [...history].reverse(), [history]);
+
+  useEffect(() => {
+    if (!playing) return;
+    if (chrono.length < 2) { setPlaying(false); return; }
+    const id = setInterval(() => {
+      setPlayIdx((i) => {
+        if (i + 1 >= chrono.length) { setPlaying(false); return i; }
+        return i + 1;
+      });
+    }, 1600);
+    return () => clearInterval(id);
+  }, [playing, chrono.length]);
+
+  // Show whichever frame the scrubber/playhead is on.
+  const framedRef = useRef<string | null>(null);
+  useEffect(() => {
+    const entry = chrono[playIdx];
+    if (!entry?.data) return;
+    // Only drive the view while scrubbing/playing, never on first mount.
+    if (framedRef.current === null) { framedRef.current = "init"; return; }
+    setData(entry.data);
+    setSnapshotTs(entry.generated_at);
+    setSelected(null);
+  }, [playIdx, chrono]);
 
   function viewSnapshot(entry: VcHistoryEntry) {
     setData(entry.data); setSnapshotTs(entry.generated_at); setSelected(null);
@@ -973,6 +1008,41 @@ export function ValueChainMap({ ticker }: { ticker: string }) {
           <button onClick={() => setCompareTs(null)} className="underline hover:text-amber">
             Exit diff
           </button>
+        </div>
+      )}
+
+      {/* Time-lapse: watch the chain evolve across stored generations. */}
+      {chrono.length > 1 && (
+        <div className="flex flex-wrap items-center gap-3 mb-3 panel-2 px-3 py-2 text-[11px]">
+          <button onClick={() => {
+                    if (playing) { setPlaying(false); return; }
+                    // Restart from the beginning when parked at the end.
+                    if (playIdx >= chrono.length - 1) setPlayIdx(0);
+                    setPlaying(true);
+                  }}
+                  className="btn-ghost !py-1 flex items-center gap-1.5"
+                  title="Play the chain forward through every stored generation">
+            {playing ? <Pause size={12} /> : <Play size={12} />}
+            {playing ? "Pause" : "Time-lapse"}
+          </button>
+          <input type="range" min={0} max={chrono.length - 1} value={playIdx}
+                 aria-label="Scrub through stored generations"
+                 onChange={(e) => { setPlaying(false); setPlayIdx(parseInt(e.target.value, 10)); }}
+                 className="accent-amber flex-1 min-w-[140px] max-w-[320px]" />
+          <span className="text-mut num whitespace-nowrap">
+            {playIdx + 1}/{chrono.length}
+            {chrono[playIdx]?.generated_at
+              ? ` · ${new Date(chrono[playIdx].generated_at!).toLocaleString()}`
+              : ""}
+          </span>
+          {(playing || snapshotTs) && (
+            <button onClick={() => { setPlaying(false); setPlayIdx(0); framedRef.current = null; load(current); }}
+                    className="underline hover:text-amber">back to live</button>
+          )}
+          <span className="text-mut/70">
+            Frames are past AI generations, not quarterly filings — drift here is the
+            model changing its mind as much as the chain changing.
+          </span>
         </div>
       )}
 
