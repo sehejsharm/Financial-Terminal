@@ -294,76 +294,86 @@ function NodeDetail({ node, parentTicker, chainTicker, onClose, onRecenter }: {
     </>
   );
 
+  // Vertical layout: this panel is docked in a ~340px column beside the
+  // graph, not stretched across the page bottom.
   return (
-    <div className="panel-2 p-3 mt-3 flex items-start gap-3">
-      <span className="mt-1" style={{ color: COL[node.role] }}>●</span>
-      <div className="flex-1 min-w-0">
-        <div className="text-sm font-semibold">{node.name}
-          <span className="text-mut font-normal ml-2 text-[11px] uppercase tracking-wider">{node.role}</span>
-          {node.revenue_pct != null && (
-            <span className="text-amber font-normal ml-2 text-[11px]">≈{fmtNum(node.revenue_pct, 0)}% exposure (AI est.)</span>
-          )}
+    <div className="panel-2 p-3 flex flex-col gap-2 h-full overflow-y-auto">
+      <div className="flex items-start gap-2">
+        <span className="mt-0.5 shrink-0" style={{ color: COL[node.role] }}>●</span>
+        <div className="flex-1 min-w-0">
+          <div className="text-sm font-semibold break-words">{node.name}</div>
+          <div className="text-[11px] uppercase tracking-wider text-mut">{node.role}</div>
         </div>
-        {node.note && <div className="text-xs text-mut mt-0.5">{node.note}</div>}
-        {quote && quote.price != null && best && (
-          <div className="text-xs mt-1">
-            <span className="text-mut">{best}</span>{" "}
-            <span className="num">{fmtNum(quote.price, 2)}</span>{" "}
-            {quote.change_pct != null && (
-              <span className={`num ${quote.change_pct >= 0 ? "text-green" : "text-red"}`}>{fmtPct(quote.change_pct)}</span>
-            )}
-          </div>
-        )}
-        {headlines.length > 0 && (
-          <div className="mt-1.5">
-            {headlines.map((h, i) => (
-              <a key={i} href={h.link} target="_blank" rel="noopener noreferrer"
-                 className="block text-[11px] text-mut hover:text-amber truncate">› {h.title}</a>
-            ))}
-          </div>
-        )}
-        <div className="flex flex-wrap items-center gap-1.5 mt-2">
-          {/* Immediate skeleton — no more staring at stale content while search runs. */}
-          {cands === null && (
-            <>
-              <span className="inline-block h-6 w-28 rounded bg-panel animate-pulse" />
-              <span className="inline-block h-6 w-24 rounded bg-panel animate-pulse" />
-            </>
-          )}
-          {split && split.primary.length === 0 && split.other.length === 0 && (
-            <span className="text-[11px] text-mut">No listed ticker found — likely private or a segment.</span>
-          )}
-          {split && <CandBtns list={split.primary} />}
-          {split && split.other.length > 0 && !showOther && (
-            <button onClick={() => setShowOther(true)} className="text-[11px] text-mut hover:text-txt underline">
-              {split.other.length} other market{split.other.length > 1 ? "s" : ""}…
-            </button>
-          )}
-          {split && showOther && <CandBtns list={split.other} />}
-        </div>
+        <button onClick={onClose} title="Close panel"
+                className="text-mut hover:text-txt shrink-0"><X size={14} /></button>
       </div>
-      <div className="flex flex-col gap-1 shrink-0">
-        {best && (
+
+      {node.revenue_pct != null && (
+        <div className="text-[11px] text-amber">
+          ≈{fmtNum(node.revenue_pct, 1)}% {node.role === "supplier" ? "of input costs" : "of revenue"} (AI est.)
+        </div>
+      )}
+      {node.note && <div className="text-xs text-mut break-words">{node.note}</div>}
+
+      {quote && quote.price != null && best && (
+        <div className="text-xs">
+          <span className="text-mut">{best}</span>{" "}
+          <span className="num">{fmtNum(quote.price, 2)}</span>{" "}
+          {quote.change_pct != null && (
+            <span className={`num ${quote.change_pct >= 0 ? "text-green" : "text-red"}`}>{fmtPct(quote.change_pct)}</span>
+          )}
+        </div>
+      )}
+
+      {headlines.length > 0 && (
+        <div className="flex flex-col gap-0.5">
+          {headlines.map((h, i) => (
+            <a key={i} href={h.link} target="_blank" rel="noopener noreferrer"
+               className="block text-[11px] text-mut hover:text-amber line-clamp-2">› {h.title}</a>
+          ))}
+        </div>
+      )}
+
+      <div className="flex flex-wrap items-center gap-1.5">
+        {/* Immediate skeleton — no more staring at stale content while search runs. */}
+        {cands === null && (
           <>
-            <button onClick={() => router.push(`/terminal?t=${encodeURIComponent(best)}&fn=SPLC`)}
-                    className="btn-ghost text-[11px] whitespace-nowrap" title="Open this counterparty's own value-chain map">
-              Their value chain
-            </button>
-            <button onClick={watchCounterparty} disabled={watchState !== "idle"}
-                    className={`btn-ghost text-[11px] whitespace-nowrap ${watchState === "saved" ? "!text-green" : ""}`}
-                    title="Create an alert: notify me when this counterparty moves >=5% in a day">
-              {watchState === "saved" ? "Watching ✓" : watchState === "saving" ? "…" : "Watch ≥5% move"}
-            </button>
+            <span className="inline-block h-6 w-28 rounded bg-panel animate-pulse" />
+            <span className="inline-block h-6 w-24 rounded bg-panel animate-pulse" />
           </>
         )}
+        {split && split.primary.length === 0 && split.other.length === 0 && (
+          <span className="text-[11px] text-mut">No listed ticker found — likely private or a segment.</span>
+        )}
+        {split && <CandBtns list={split.primary} />}
+        {split && split.other.length > 0 && !showOther && (
+          <button onClick={() => setShowOther(true)} className="text-[11px] text-mut hover:text-txt underline">
+            {split.other.length} other market{split.other.length > 1 ? "s" : ""}…
+          </button>
+        )}
+        {split && showOther && <CandBtns list={split.other} />}
       </div>
+
+      {best && (
+        <div className="flex flex-col gap-1">
+          <button onClick={() => router.push(`/terminal?t=${encodeURIComponent(best)}&fn=SPLC`)}
+                  className="btn-ghost text-[11px]" title="Open this counterparty's own value-chain map">
+            Their value chain
+          </button>
+          <button onClick={watchCounterparty} disabled={watchState !== "idle"}
+                  className={`btn-ghost text-[11px] ${watchState === "saved" ? "!text-green" : ""}`}
+                  title="Create an alert: notify me when this counterparty moves >=5% in a day">
+            {watchState === "saved" ? "Watching ✓" : watchState === "saving" ? "…" : "Watch ≥5% move"}
+          </button>
+        </div>
+      )}
+
       <button onClick={flag} disabled={reported || reporting}
               title="Flag this relationship as wrong — goes to the admin review queue"
-              className={`flex items-center gap-1 text-[11px] whitespace-nowrap ${reported ? "text-green" : "text-mut hover:text-red"}`}>
+              className={`flex items-center gap-1 text-[11px] mt-auto pt-1 ${reported ? "text-green" : "text-mut hover:text-red"}`}>
         <Flag size={12} />
         {reported ? "Reported" : reporting ? "…" : "Report"}
       </button>
-      <button onClick={onClose} className="text-mut hover:text-txt"><X size={14} /></button>
     </div>
   );
 }
@@ -673,8 +683,12 @@ export function ValueChainMap({ ticker }: { ticker: string }) {
         <button onClick={() => svgRef.current && exportPng(svgRef.current, current)} title="Export as PNG" className="hover:text-amber">PNG</button>
       </div>
 
+      {/* Graph + docked detail panel. The panel sits BESIDE the canvas on
+          large screens so selecting a node never scrolls the graph out of
+          view; below ~1024px it stacks underneath (still adjacent). */}
+      <div className={`grid gap-3 ${selected ? "lg:grid-cols-[minmax(0,1fr)_340px]" : "grid-cols-1"}`}>
       <div ref={containerRef}
-           className="panel overflow-hidden touch-none select-none relative"
+           className="panel overflow-hidden touch-none select-none relative min-w-0"
            onPointerDown={onPointerDown} onPointerMove={onPointerMove}
            onPointerUp={onPointerUp} onPointerCancel={onPointerUp}
            style={{ cursor: "grab", WebkitUserSelect: "none", userSelect: "none" }}>
@@ -822,10 +836,13 @@ export function ValueChainMap({ ticker }: { ticker: string }) {
         )}
       </div>
 
-      {selected && (
-        <NodeDetail node={selected} parentTicker={current} chainTicker={current}
-                    onClose={() => setSelected(null)} onRecenter={recenter} />
-      )}
+        {selected && (
+          <div className="min-w-0 lg:max-h-[72vh]">
+            <NodeDetail node={selected} parentTicker={current} chainTicker={current}
+                        onClose={() => setSelected(null)} onRecenter={recenter} />
+          </div>
+        )}
+      </div>
 
       <div className="text-[10.5px] text-mut mt-2">
         Illustrative map generated by AI ({data.source || "LLM"})
