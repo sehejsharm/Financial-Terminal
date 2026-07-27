@@ -12,8 +12,9 @@ import {
 } from "@/lib/api";
 import {
   clamp, CX, CY, DEFAULT_VIEW, EDGE_METRIC_LABEL, edgeOpacityFor, edgeWidthFor,
-  fitView, fmtUsd, H, lookupReportCount, MAX_W, maxUsd, mergeEntities, MIN_W,
-  resolveMetric, W, zoomAt,
+  diffChains, fitView, fmtUsd, H, lookupReportCount, MAX_W, maxUsd, mergeEntities,
+  MIN_W, resolveMetric, W, zoomAt,
+  type ChainDiff,
   type EdgeMetric, type MergedEntity, type Role, type View,
 } from "@/lib/valueChainGraph";
 import { fmtNum, fmtPct } from "@/lib/utils";
@@ -205,10 +206,11 @@ function YoyMark({ x, y, yoy }: { x: number; y: number; yoy: number | null }) {
 
 // ── node box ────────────────────────────────────────────────────────────────
 function Node({ x, y, label, note, pct, color, onClick, selected, verified, dimmed,
-                onHover, onLeave, roles = [], disputed = 0 }: {
+                onHover, onLeave, roles = [], disputed = 0, diffStatus }: {
   x: number; y: number; label: string; note?: string; pct?: number | null;
   color: string; onClick: () => void; selected: boolean;
   verified?: boolean; dimmed?: boolean; roles?: Role[]; disputed?: number;
+  diffStatus?: "added" | "removed" | "changed" | "same";
   onHover?: (e: React.MouseEvent | React.FocusEvent) => void;
   onLeave?: () => void;
 }) {
@@ -226,6 +228,14 @@ function Node({ x, y, label, note, pct, color, onClick, selected, verified, dimm
        onKeyDown={(e) => {
          if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onClick(); }
        }}>
+      {/* Diff halo: added = green, removed = red, changed = amber. */}
+      {diffStatus && diffStatus !== "same" && (
+        <rect x={x - 83} y={y - 21} width={166} height={42} rx={7}
+              fill="none" strokeWidth={2}
+              stroke={diffStatus === "added" ? "#1fd286"
+                    : diffStatus === "removed" ? "#ff4d4f" : "#ffb000"}
+              strokeDasharray={diffStatus === "removed" ? "4 3" : undefined} />
+      )}
       <rect x={x - 78} y={y - 16} width={156} height={32} rx={5}
             fill={selected ? "#1c2129" : "#11151b"} stroke={verified ? "#1fd286" : color}
             strokeWidth={selected ? 2.4 : verified ? 2 : 1.4} />
@@ -528,6 +538,8 @@ export function ValueChainMap({ ticker }: { ticker: string }) {
   const [graphFilter, setGraphFilter] = useState("");
   // Which quantitative measure drives edge thickness/intensity.
   const [edgeMetric, setEdgeMetric] = useState<EdgeMetric>("pctRevenue");
+  // "Compare to previous": diff the LIVE map against a chosen prior snapshot.
+  const [compareTs, setCompareTs] = useState<string | null>(null);
   const [view, setView] = useState<View>({ ...DEFAULT_VIEW });
   const panRef = useRef<{ sx: number; sy: number; vx: number; vy: number } | null>(null);
   const containerRef = useRef<HTMLDivElement | null>(null);
@@ -571,7 +583,7 @@ export function ValueChainMap({ ticker }: { ticker: string }) {
   const load = useCallback((t: string, refresh = false) => {
     const reqId = ++loadReqRef.current;
     setBusy(true); setErr(null); setData(null); setSelected(null); setPinnedAt(null);
-    setSnapshotTs(null); setView({ ...DEFAULT_VIEW });
+    setSnapshotTs(null); setCompareTs(null); setView({ ...DEFAULT_VIEW });
     const pin = !refresh && loadPin(t);
     if (pin) {
       setData(pin.data); setFetchedAt(pin.pinnedAt); setPinnedAt(pin.pinnedAt); setBusy(false);
@@ -670,7 +682,7 @@ export function ValueChainMap({ ticker }: { ticker: string }) {
     if (ptrsRef.current.size === 0) panRef.current = null;
   }
 
-  const matchesFilter = (n: ChainNode) => {
+  const matchesFilter = (n: { name: string; note?: string }) => {
     const f = graphFilter.trim().toLowerCase();
     if (!f) return true;
     return n.name.toLowerCase().includes(f) || (n.note ?? "").toLowerCase().includes(f);
@@ -742,6 +754,16 @@ export function ValueChainMap({ ticker }: { ticker: string }) {
     n.roles.filter((r) => r !== "competitor").map((r) => edgeOf(n, r)));
   const missingMetric = flowEdges.filter((e) => e.value == null || e.fellBack).length;
 
+  // Diff against the selected baseline snapshot (null = compare mode off).
+  const diff: ChainDiff | null = (() => {
+    if (!compareTs || !data) return null;
+    const baseEntry = history.find((h) => h.generated_at === compareTs);
+    return baseEntry?.data ? diffChains(data, baseEntry.data, 5) : null;
+  })();
+  const DIFF_COL: Record<string, string> = {
+    added: "#1fd286", removed: "#ff4d4f", changed: "#ffb000",
+  };
+
   const pick = (n: Placed) => {
     // A press that panned isn't a selection click.
     if (draggedRef.current) return;
@@ -786,6 +808,24 @@ export function ValueChainMap({ ticker }: { ticker: string }) {
         )}
       </div>
 
+      {diff && (
+        <div className="border border-line2 rounded-md px-3 py-2 mb-3 flex flex-wrap items-center gap-x-4 gap-y-1 text-[11px]">
+          <span className="text-amber font-bold uppercase tracking-wider">Diff mode</span>
+          <span className="text-mut">
+            vs {new Date(compareTs!).toLocaleString()}
+          </span>
+          <span style={{ color: DIFF_COL.added }}>● {diff.added.length} added</span>
+          <span style={{ color: DIFF_COL.removed }}>● {diff.removed.length} removed</span>
+          <span style={{ color: DIFF_COL.changed }}>
+            ● {diff.changed.length} changed (weight move ≥{diff.threshold}pp or role change)
+          </span>
+          <div className="flex-1" />
+          <button onClick={() => setCompareTs(null)} className="underline hover:text-amber">
+            Exit diff
+          </button>
+        </div>
+      )}
+
       <div className="flex flex-wrap items-center gap-4 mb-3 text-[11px] text-mut">
         <span><span style={{ color: COL.supplier }}>●</span> Suppliers</span>
         <span><span style={{ color: COL.company }}>●</span> {data.name}</span>
@@ -823,6 +863,18 @@ export function ValueChainMap({ ticker }: { ticker: string }) {
             {history.map((h) => (
               <option key={h.generated_at ?? ""} value={h.generated_at ?? ""}>
                 {h.generated_at ? new Date(h.generated_at).toLocaleString() : "unknown"}
+              </option>
+            ))}
+          </select>
+        )}
+        {history.length > 1 && !snapshotTs && (
+          <select value={compareTs ?? ""} title="Highlight what changed since a previous generation"
+                  className="input-bare !py-1 !px-2 text-[11px] cursor-pointer w-48"
+                  onChange={(e) => setCompareTs(e.target.value || null)}>
+            <option value="">Compare to previous…</option>
+            {history.filter((h) => h.generated_at && h.generated_at !== data.generated_at).map((h) => (
+              <option key={h.generated_at ?? ""} value={h.generated_at ?? ""}>
+                vs {h.generated_at ? new Date(h.generated_at).toLocaleString() : "unknown"}
               </option>
             ))}
           </select>
@@ -923,12 +975,33 @@ export function ValueChainMap({ ticker }: { ticker: string }) {
             </text>
           </g>
 
+          {/* Entities the previous generation had and this one dropped. They
+              have no position in the current layout, so they're shown as a
+              ghost row across the top rather than silently vanishing. */}
+          {diff && diff.removed.map((r, i, arr) => {
+            const gx = CX + (i - (arr.length - 1) / 2) * Math.min(180, (W - 200) / Math.max(arr.length, 1));
+            return (
+              <g key={`rm${r.key}`} opacity={0.75}>
+                <title>{`Removed since the compared snapshot: ${r.name}`}</title>
+                <rect x={gx - 78} y={9} width={156} height={32} rx={5}
+                      fill="#11151b" stroke="#ff4d4f" strokeWidth={1.4} strokeDasharray="4 3" />
+                <text x={gx} y={24} textAnchor="middle" fontSize={11} fill="#ff4d4f"
+                      fontFamily="JetBrains Mono, monospace"
+                      style={{ textDecoration: "line-through" }}>
+                  {r.name.length > 20 ? r.name.slice(0, 19) + "…" : r.name}
+                </text>
+                <text x={gx} y={36} textAnchor="middle" fontSize={7.5} fill="#7d8694"
+                      fontFamily="JetBrains Mono, monospace">removed</text>
+              </g>
+            );
+          })}
           {allNodes.map((n) => (
             <Node key={n.key} x={n.x} y={n.y} label={n.name} note={n.note}
                   pct={n.primaryRole === "competitor" ? null : n.revenue_pct}
                   color={COL[n.primaryRole]} onClick={() => pick(n)} roles={n.roles}
                   verified={n.confidence === "verified"} dimmed={!matchesFilter(n)}
                   disputed={lookupReportCount(reportCounts, n.key)}
+                  diffStatus={diff?.byKey.get(n.key)?.status}
                   onHover={(e) => showTip(e, n, n.primaryRole)} onLeave={hideTip}
                   selected={selected?.key === n.key} />
           ))}
@@ -989,6 +1062,27 @@ export function ValueChainMap({ ticker }: { ticker: string }) {
                 ⚑ Flagged as wrong by {lookupReportCount(reportCounts, hover.node.key)} reports
               </div>
             )}
+            {(() => {
+              const d = diff?.byKey.get(hover.node.key);
+              if (!d || d.status === "same") return null;
+              return (
+                <div className="mt-1 text-[10px]" style={{ color: DIFF_COL[d.status] }}>
+                  {d.status === "added" && "＋ New since the compared snapshot"}
+                  {d.status === "removed" && "－ Removed since the compared snapshot"}
+                  {d.status === "changed" && (
+                    <>
+                      ~ Changed:
+                      {d.weightDelta != null && (
+                        <> weight {d.weightDelta >= 0 ? "+" : ""}{fmtNum(d.weightDelta, 1)}pp
+                          {d.weightRole ? ` (${d.weightRole})` : ""}</>
+                      )}
+                      {d.rolesAdded.length > 0 && <> · gained {d.rolesAdded.join(", ")}</>}
+                      {d.rolesRemoved.length > 0 && <> · lost {d.rolesRemoved.join(", ")}</>}
+                    </>
+                  )}
+                </div>
+              );
+            })()}
             <div className="text-[9.5px] text-mut/70 mt-1.5">Click for drill-down</div>
           </div>
         )}

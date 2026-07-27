@@ -338,3 +338,114 @@ export function lookupReportCount(
   }
   return total;
 }
+
+// ── snapshot diff ──────────────────────────────────────────────────────────
+// The history dropdown already lets you VIEW a prior generation; comparing
+// tells you what the model actually changed between them.
+
+export type DiffStatus = "added" | "removed" | "changed" | "same";
+
+export type EntityDiff = {
+  key: string;
+  name: string;
+  status: DiffStatus;
+  roles: Role[];
+  /** Roles gained / lost since the baseline (a re-classification). */
+  rolesAdded: Role[];
+  rolesRemoved: Role[];
+  /** Largest absolute weight move across roles, in percentage points. */
+  weightDelta: number | null;
+  weightRole: Role | null;
+};
+
+export type ChainDiff = {
+  byKey: Map<string, EntityDiff>;
+  added: EntityDiff[];
+  removed: EntityDiff[];
+  changed: EntityDiff[];
+  /** Percentage-point move counted as "changed". */
+  threshold: number;
+};
+
+/** Best available weight for an entity in a given role, in percentage points
+ *  (dollar-only edges have no comparable pp weight and return null). */
+function weightOf(e: MergedEntity, role: Role): number | null {
+  const m = e.metricsByRole[role];
+  if (!m) return null;
+  return m.pctRevenue ?? m.pctCOGS ?? null;
+}
+
+/**
+ * Compare the CURRENT map against a BASELINE (older) snapshot.
+ * Entities are matched with the same identity rules used for merging, so a
+ * rename between generations doesn't read as remove+add.
+ */
+export function diffChains(
+  current: Pick<ValueChain, "suppliers" | "customers" | "competitors">,
+  baseline: Pick<ValueChain, "suppliers" | "customers" | "competitors">,
+  threshold = 5,
+): ChainDiff {
+  const cur = mergeEntities(current);
+  const base = mergeEntities(baseline);
+  const baseByKey = new Map(base.map((e) => [e.key, e]));
+  const byKey = new Map<string, EntityDiff>();
+
+  const findBase = (key: string): MergedEntity | undefined => {
+    const exact = baseByKey.get(key);
+    if (exact) return exact;
+    const alias = findAliasKey(key, baseByKey.keys());
+    return alias ? baseByKey.get(alias) : undefined;
+  };
+
+  const matchedBaseKeys = new Set<string>();
+
+  for (const e of cur) {
+    const b = findBase(e.key);
+    if (!b) {
+      byKey.set(e.key, {
+        key: e.key, name: e.name, status: "added", roles: e.roles,
+        rolesAdded: e.roles, rolesRemoved: [], weightDelta: null, weightRole: null,
+      });
+      continue;
+    }
+    matchedBaseKeys.add(b.key);
+    const rolesAdded = e.roles.filter((r) => !b.roles.includes(r));
+    const rolesRemoved = b.roles.filter((r) => !e.roles.includes(r));
+    // Biggest weight move across the roles they share.
+    let weightDelta: number | null = null;
+    let weightRole: Role | null = null;
+    for (const r of e.roles) {
+      const cw = weightOf(e, r), bw = weightOf(b, r);
+      if (cw == null || bw == null) continue;
+      const d = cw - bw;
+      if (weightDelta == null || Math.abs(d) > Math.abs(weightDelta)) {
+        weightDelta = d; weightRole = r;
+      }
+    }
+    const moved = weightDelta != null && Math.abs(weightDelta) >= threshold;
+    byKey.set(e.key, {
+      key: e.key, name: e.name,
+      status: (moved || rolesAdded.length || rolesRemoved.length) ? "changed" : "same",
+      roles: e.roles, rolesAdded, rolesRemoved, weightDelta, weightRole,
+    });
+  }
+
+  // Anything in the baseline we never matched has been dropped.
+  for (const b of base) {
+    if (matchedBaseKeys.has(b.key)) continue;
+    if (byKey.has(b.key)) continue;
+    byKey.set(b.key, {
+      key: b.key, name: b.name, status: "removed", roles: b.roles,
+      rolesAdded: [], rolesRemoved: b.roles, weightDelta: null, weightRole: null,
+    });
+  }
+
+  const all = [...byKey.values()];
+  return {
+    byKey,
+    added: all.filter((d) => d.status === "added"),
+    removed: all.filter((d) => d.status === "removed"),
+    changed: all.filter((d) => d.status === "changed"),
+    threshold,
+  };
+}

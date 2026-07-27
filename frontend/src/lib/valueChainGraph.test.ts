@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   clamp, DEFAULT_VIEW, fitView, H, MAX_W, MIN_W, W, zoomAt,
-  entityKey, findAliasKey, mergeEntities,
+  diffChains, entityKey, findAliasKey, mergeEntities,
   edgeOpacityFor, edgeWidthFor, fmtUsd, lookupReportCount, maxUsd, readMetrics, resolveMetric,
 } from "./valueChainGraph";
 
@@ -284,5 +284,66 @@ describe("lookupReportCount", () => {
   });
   it("is zero for an unflagged entity", () => {
     expect(lookupReportCount({}, "acme")).toBe(0);
+  });
+});
+
+describe("diffChains", () => {
+  const base = {
+    suppliers: [{ name: "Acme", revenue_pct: 20 }],
+    customers: [{ name: "Globex", revenue_pct: 30 }, { name: "Initech", revenue_pct: 10 }],
+    competitors: [{ name: "Umbrella" }],
+  };
+
+  it("flags entities added since the baseline", () => {
+    const d = diffChains({ ...base, suppliers: [...base.suppliers, { name: "NewCo" }] }, base);
+    expect(d.added.map((a) => a.name)).toEqual(["NewCo"]);
+    expect(d.byKey.get(entityKey("NewCo"))?.status).toBe("added");
+  });
+
+  it("flags entities removed since the baseline", () => {
+    const d = diffChains({ ...base, customers: [{ name: "Globex", revenue_pct: 30 }] }, base);
+    expect(d.removed.map((r) => r.name)).toEqual(["Initech"]);
+  });
+
+  it("flags a weight move beyond the threshold, and ignores one below it", () => {
+    const big = { ...base, customers: [{ name: "Globex", revenue_pct: 45 }, { name: "Initech", revenue_pct: 10 }] };
+    const small = { ...base, customers: [{ name: "Globex", revenue_pct: 32 }, { name: "Initech", revenue_pct: 10 }] };
+    const dBig = diffChains(big, base, 5);
+    expect(dBig.changed.map((c) => c.name)).toContain("Globex");
+    expect(dBig.byKey.get(entityKey("Globex"))?.weightDelta).toBe(15);
+    const dSmall = diffChains(small, base, 5);
+    expect(dSmall.changed.map((c) => c.name)).not.toContain("Globex");
+    expect(dSmall.byKey.get(entityKey("Globex"))?.status).toBe("same");
+  });
+
+  it("treats a re-classification as changed, not add+remove", () => {
+    // Umbrella goes from competitor to ALSO being a customer.
+    const cur = { ...base, customers: [...base.customers, { name: "Umbrella" }] };
+    const d = diffChains(cur, base);
+    const u = d.byKey.get(entityKey("Umbrella"));
+    expect(u?.status).toBe("changed");
+    expect(u?.rolesAdded).toContain("customer");
+    expect(d.added).toHaveLength(0);
+    expect(d.removed).toHaveLength(0);
+  });
+
+  it("does not read a name variant as remove+add", () => {
+    const cur = { ...base, suppliers: [{ name: "Acme Corporation", revenue_pct: 20 }] };
+    const d = diffChains(cur, base);
+    expect(d.added).toHaveLength(0);
+    expect(d.removed).toHaveLength(0);
+  });
+
+  it("reports an unchanged map as all-same", () => {
+    const d = diffChains(base, base);
+    expect(d.added).toHaveLength(0);
+    expect(d.removed).toHaveLength(0);
+    expect(d.changed).toHaveLength(0);
+  });
+
+  it("handles an empty baseline (everything is new)", () => {
+    const d = diffChains(base, { suppliers: [], customers: [], competitors: [] });
+    expect(d.added).toHaveLength(4);
+    expect(d.removed).toHaveLength(0);
   });
 });
