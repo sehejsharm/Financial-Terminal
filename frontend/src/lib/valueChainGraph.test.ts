@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   clamp, DEFAULT_VIEW, fitView, H, MAX_W, MIN_W, W, zoomAt,
-  diffChains, entityKey, findAliasKey, mergeEntities,
+  diffChains, entityKey, findAliasKey, fragilityScore, mergeEntities,
   edgeOpacityFor, edgeWidthFor, fmtUsd, lookupReportCount, maxUsd, readMetrics, resolveMetric,
 } from "./valueChainGraph";
 
@@ -345,5 +345,72 @@ describe("diffChains", () => {
     const d = diffChains(base, { suppliers: [], customers: [], competitors: [] });
     expect(d.added).toHaveLength(4);
     expect(d.removed).toHaveLength(0);
+  });
+});
+
+describe("fragilityScore", () => {
+  const mk = (sup: [string, number | null][], cus: [string, number | null][] = []) =>
+    mergeEntities({
+      suppliers: sup.map(([name, pct]) => ({ name, revenue_pct: pct })),
+      customers: cus.map(([name, pct]) => ({ name, revenue_pct: pct })),
+      competitors: [],
+    });
+
+  it("scores a single-source chain as fragile", () => {
+    const f = fragilityScore(mk([["OnlySupplier", 90]]));
+    expect(f.score).toBeGreaterThanOrEqual(70);
+    expect(f.band).toBe("fragile");
+    expect(f.drivers.join(" ")).toMatch(/input costs|few suppliers/);
+  });
+
+  it("scores a well-spread chain as resilient", () => {
+    const f = fragilityScore(mk(
+      [["A", 10], ["B", 10], ["C", 10], ["D", 10], ["E", 10], ["F", 10]],
+      [["X", 10], ["Y", 10], ["Z", 10], ["W", 10], ["V", 10]],
+    ));
+    expect(f.score).toBeLessThan(30);
+    expect(f.band).toBe("resilient");
+  });
+
+  it("is monotonic: concentrating the same chain raises the score", () => {
+    const spread = fragilityScore(mk([["A", 25], ["B", 25], ["C", 25], ["D", 25]]));
+    const concentrated = fragilityScore(mk([["A", 70], ["B", 10], ["C", 10], ["D", 10]]));
+    expect(concentrated.score).toBeGreaterThan(spread.score);
+  });
+
+  it("reports coverage so an unquantified chain is not passed off as measured", () => {
+    const none = fragilityScore(mk([["A", null], ["B", null]]));
+    expect(none.coverage).toBe(0);
+    expect(none.score).toBe(0);        // nothing to score, not "resilient by luck"
+    const half = fragilityScore(mk([["A", 40], ["B", null]]));
+    expect(half.coverage).toBeCloseTo(0.5, 5);
+  });
+
+  it("ignores competitors — they are not a dependency", () => {
+    const withRivals = mergeEntities({
+      suppliers: [{ name: "A", revenue_pct: 50 }, { name: "B", revenue_pct: 50 }],
+      customers: [],
+      competitors: [{ name: "Rival1" }, { name: "Rival2" }, { name: "Rival3" }],
+    });
+    const withoutRivals = mergeEntities({
+      suppliers: [{ name: "A", revenue_pct: 50 }, { name: "B", revenue_pct: 50 }],
+      customers: [], competitors: [],
+    });
+    expect(fragilityScore(withRivals).score).toBe(fragilityScore(withoutRivals).score);
+  });
+
+  it("handles an empty chain without dividing by zero", () => {
+    const f = fragilityScore([]);
+    expect(f.score).toBe(0);
+    expect(f.coverage).toBe(0);
+    expect(Number.isFinite(f.score)).toBe(true);
+  });
+
+  it("stays within 0-100", () => {
+    for (const pct of [1, 25, 50, 99, 100]) {
+      const f = fragilityScore(mk([["A", pct]]));
+      expect(f.score).toBeGreaterThanOrEqual(0);
+      expect(f.score).toBeLessThanOrEqual(100);
+    }
   });
 });

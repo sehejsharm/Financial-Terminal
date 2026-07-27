@@ -449,3 +449,99 @@ export function diffChains(
     threshold,
   };
 }
+
+// ── Chain Fragility Score ──────────────────────────────────────────────────
+// A single 0-100 read on how brittle a company's mapped chain looks.
+// HIGHER = MORE FRAGILE. Built from three things the map actually knows:
+//   • supplier concentration  (Herfindahl index over supplier cost shares)
+//   • single-source dependency (biggest single supplier's share)
+//   • customer concentration  (same, on the revenue side)
+// Geographic clustering is deliberately NOT in the score: the map has no
+// reliable country field, and inventing one from ticker suffixes would make
+// the number look more informed than it is. It's reported separately as
+// coverage instead.
+
+export type FragilityScore = {
+  score: number;                 // 0-100, higher = more fragile
+  band: "resilient" | "moderate" | "concentrated" | "fragile";
+  components: {
+    supplierConcentration: number | null;
+    singleSource: number | null;
+    customerConcentration: number | null;
+  };
+  /** Share of edges that carried a usable weight — the score's evidence base. */
+  coverage: number;
+  /** Plain-English drivers, strongest first. */
+  drivers: string[];
+};
+
+/** Normalised Herfindahl (0 = perfectly spread, 1 = single counterparty). */
+function herfindahl(shares: number[]): number | null {
+  const vals = shares.filter((v) => Number.isFinite(v) && v > 0);
+  if (vals.length === 0) return null;
+  if (vals.length === 1) return 1;
+  const total = vals.reduce((a, b) => a + b, 0);
+  if (total <= 0) return null;
+  const h = vals.reduce((acc, v) => acc + (v / total) ** 2, 0);
+  // Rescale so an even spread over n counterparties reads as 0.
+  const min = 1 / vals.length;
+  return clamp((h - min) / (1 - min), 0, 1);
+}
+
+export function fragilityScore(entities: MergedEntity[]): FragilityScore {
+  const supShares: number[] = [];
+  const cusShares: number[] = [];
+  let weighted = 0, flows = 0;
+
+  for (const e of entities) {
+    for (const r of e.roles) {
+      if (r === "competitor") continue;
+      flows++;
+      const m = e.metricsByRole[r];
+      const v = r === "supplier" ? (m?.pctCOGS ?? null) : (m?.pctRevenue ?? null);
+      if (v != null && v > 0) {
+        weighted++;
+        (r === "supplier" ? supShares : cusShares).push(v);
+      }
+    }
+  }
+
+  const supHhi = herfindahl(supShares);
+  const cusHhi = herfindahl(cusShares);
+  const biggestSupplier = supShares.length ? Math.max(...supShares) : null;
+  // A supplier worth >40% of input costs is the classic single point of
+  // failure; scale that to 0-1 over a 0-60% span.
+  const single = biggestSupplier == null ? null : clamp(biggestSupplier / 60, 0, 1);
+
+  const parts: { w: number; v: number }[] = [];
+  if (supHhi != null) parts.push({ w: 0.4, v: supHhi });
+  if (single != null) parts.push({ w: 0.35, v: single });
+  if (cusHhi != null) parts.push({ w: 0.25, v: cusHhi });
+
+  const wsum = parts.reduce((a, p) => a + p.w, 0);
+  const score = wsum > 0
+    ? Math.round(clamp(parts.reduce((a, p) => a + p.w * p.v, 0) / wsum, 0, 1) * 100)
+    : 0;
+
+  const band: FragilityScore["band"] =
+    score >= 70 ? "fragile" : score >= 50 ? "concentrated"
+    : score >= 30 ? "moderate" : "resilient";
+
+  const drivers: string[] = [];
+  if (biggestSupplier != null && biggestSupplier >= 25) {
+    drivers.push(`one supplier is ≈${Math.round(biggestSupplier)}% of input costs`);
+  }
+  if (supHhi != null && supHhi >= 0.4) drivers.push("supplier base is concentrated");
+  if (cusHhi != null && cusHhi >= 0.4) drivers.push("revenue leans on few customers");
+  if (supShares.length > 0 && supShares.length <= 2) drivers.push("very few suppliers mapped");
+  if (!drivers.length) drivers.push("no single dominant dependency in the mapped chain");
+
+  return {
+    score, band,
+    components: {
+      supplierConcentration: supHhi, singleSource: single, customerConcentration: cusHhi,
+    },
+    coverage: flows > 0 ? weighted / flows : 0,
+    drivers,
+  };
+}

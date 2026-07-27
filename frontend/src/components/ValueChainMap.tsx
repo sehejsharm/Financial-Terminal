@@ -12,8 +12,8 @@ import {
 } from "@/lib/api";
 import {
   clamp, CX, CY, DEFAULT_VIEW, EDGE_METRIC_LABEL, edgeOpacityFor, edgeWidthFor,
-  diffChains, fitView, fmtUsd, H, lookupReportCount, MAX_W, maxUsd, mergeEntities,
-  MIN_W, resolveMetric, W, zoomAt,
+  diffChains, fitView, fmtUsd, fragilityScore, H, lookupReportCount, MAX_W, maxUsd,
+  mergeEntities, MIN_W, resolveMetric, W, zoomAt,
   type ChainDiff,
   type EdgeMetric, type MergedEntity, type Role, type View,
 } from "@/lib/valueChainGraph";
@@ -905,6 +905,11 @@ export function ValueChainMap({ ticker }: { ticker: string }) {
         news: newsItems, seenLinks: seenLinksRef.current,
       })
     : new Map<string, NodeOverlay>();
+  // Chain Fragility Score — the headline read on this chain's brittleness.
+  const fragility = fragilityScore(allNodes);
+  const FRAG_COL = fragility.band === "fragile" ? "#ff4d4f"
+                 : fragility.band === "concentrated" ? "#ffb000"
+                 : fragility.band === "moderate" ? "#c9a25a" : "#1fd286";
   const heldCount = [...overlays.values()].filter((o) => o.held).length;
   const dealCount = [...overlays.values()].filter((o) => o.deals.length).length;
   const newsCount = [...overlays.values()].filter((o) => o.news.length).length;
@@ -970,6 +975,39 @@ export function ValueChainMap({ ticker }: { ticker: string }) {
           </button>
         </div>
       )}
+
+      {/* Chain Fragility Score — a single brandable read on the chain. */}
+      <div className="flex flex-wrap items-center gap-3 mb-3 panel-2 px-3 py-2">
+        <div className="flex items-baseline gap-2">
+          <span className="label-xs">Chain Fragility</span>
+          <span className="num text-2xl font-bold" style={{ color: FRAG_COL }}>
+            {fragility.coverage > 0 ? fragility.score : "—"}
+          </span>
+          <span className="text-[10px] text-mut">/100</span>
+          {fragility.coverage > 0 && (
+            <span className="text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded border"
+                  style={{ color: FRAG_COL, borderColor: `${FRAG_COL}80` }}>
+              {fragility.band}
+            </span>
+          )}
+        </div>
+        {/* Bar */}
+        <div className="h-1.5 w-28 rounded bg-panel overflow-hidden">
+          <div className="h-full rounded" style={{
+            width: `${fragility.coverage > 0 ? fragility.score : 0}%`, background: FRAG_COL }} />
+        </div>
+        <span className="text-[11px] text-mut flex-1 min-w-[200px]">
+          {fragility.coverage > 0
+            ? <>Higher = more brittle. Driven by {fragility.drivers.slice(0, 2).join("; ")}.</>
+            : <>Not scoreable — the AI returned no exposure percentages for this chain.</>}
+        </span>
+        {fragility.coverage > 0 && (
+          <span className="text-[10px] text-mut"
+                title="Share of supplier/customer edges that carried a usable exposure weight. A low number means the score rests on thin evidence.">
+            evidence {Math.round(fragility.coverage * 100)}% of edges
+          </span>
+        )}
+      </div>
 
       {/* Toolbar. Split into SELF-CONTAINED groups: each group is an
           inline-flex that never breaks internally, and the container wraps
