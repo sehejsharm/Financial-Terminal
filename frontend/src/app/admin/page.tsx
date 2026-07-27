@@ -82,6 +82,7 @@ export default function AdminPage() {
                     <th className="text-left px-3 py-2 font-medium">Map</th>
                     <th className="text-left px-3 py-2 font-medium">Node</th>
                     <th className="text-left px-3 py-2 font-medium">Role</th>
+                    <th className="text-left px-3 py-2 font-medium">Category</th>
                     <th className="text-left px-3 py-2 font-medium">Reason</th>
                     <th className="px-3 py-2"></th>
                   </tr>
@@ -94,6 +95,12 @@ export default function AdminPage() {
                       <td className="px-3 py-2 text-amber">{r.ticker}</td>
                       <td className="px-3 py-2">{r.node_name}</td>
                       <td className="px-3 py-2 uppercase text-mut">{r.role}</td>
+                      <td className="px-3 py-2">
+                        {/* Records predating categories read as 'unspecified'. */}
+                        <span className={r.category && r.category !== "unspecified" ? "text-amber" : "text-mut"}>
+                          {(r.category ?? "unspecified").replace(/_/g, " ")}
+                        </span>
+                      </td>
                       <td className="px-3 py-2 text-mut">{r.reason || "—"}</td>
                       <td className="px-3 py-2">
                         <button className="btn-ghost text-[11px]"

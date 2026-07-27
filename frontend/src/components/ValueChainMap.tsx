@@ -6,10 +6,14 @@ import { ChevronRight, Download, ExternalLink, Flag, Maximize2, Pin, PinOff, X }
 
 import { DataAge } from "@/components/DataAge";
 import { StatusBadge } from "@/components/StatusBadge";
-import { api, type ChainNode, type Quote, type ValueChain, type VcHistoryEntry } from "@/lib/api";
+import {
+  api, type ChainNode, type Quote, type ValueChain, type VcHistoryEntry,
+  type VcReportCount,
+} from "@/lib/api";
 import {
   clamp, CX, CY, DEFAULT_VIEW, EDGE_METRIC_LABEL, edgeOpacityFor, edgeWidthFor,
-  fitView, fmtUsd, H, MAX_W, maxUsd, mergeEntities, MIN_W, resolveMetric, W, zoomAt,
+  fitView, fmtUsd, H, lookupReportCount, MAX_W, maxUsd, mergeEntities, MIN_W,
+  resolveMetric, W, zoomAt,
   type EdgeMetric, type MergedEntity, type Role, type View,
 } from "@/lib/valueChainGraph";
 import { fmtNum, fmtPct } from "@/lib/utils";
@@ -38,6 +42,15 @@ const COL = {
 
 type Selected = MergedEntity & { role: Role };
 type Cand = { symbol: string; name: string; source: string };
+
+/** Report reasons — mirrors REPORT_CATEGORIES in backend/routes/value_chain.py. */
+const REPORT_CATEGORIES = [
+  { value: "wrong_entity", label: "Wrong entity" },
+  { value: "wrong_weight", label: "Wrong weight / percentage" },
+  { value: "outdated", label: "Outdated relationship" },
+  { value: "duplicate", label: "Duplicate node" },
+  { value: "other", label: "Other" },
+] as const;
 
 /** Pointer travel (px) past which a press counts as a pan, not a node click. */
 const DRAG_SLOP = 4;
@@ -192,10 +205,10 @@ function YoyMark({ x, y, yoy }: { x: number; y: number; yoy: number | null }) {
 
 // ── node box ────────────────────────────────────────────────────────────────
 function Node({ x, y, label, note, pct, color, onClick, selected, verified, dimmed,
-                onHover, onLeave, roles = [] }: {
+                onHover, onLeave, roles = [], disputed = 0 }: {
   x: number; y: number; label: string; note?: string; pct?: number | null;
   color: string; onClick: () => void; selected: boolean;
-  verified?: boolean; dimmed?: boolean; roles?: Role[];
+  verified?: boolean; dimmed?: boolean; roles?: Role[]; disputed?: number;
   onHover?: (e: React.MouseEvent | React.FocusEvent) => void;
   onLeave?: () => void;
 }) {
@@ -235,14 +248,27 @@ function Node({ x, y, label, note, pct, color, onClick, selected, verified, dimm
           <title>{r}</title>
         </circle>
       ))}
+      {/* Disputed badge — only once MORE THAN ONE person has flagged this
+          relationship. A single flag is one opinion; repeats are a signal. */}
+      {disputed > 1 && (
+        <g>
+          <title>{`Flagged as wrong by ${disputed} reports`}</title>
+          <circle cx={x - 70} cy={y - 11} r={6} fill="#0c0e12" stroke="#ff4d4f" strokeWidth={1.2} />
+          <text x={x - 70} y={y - 8.4} textAnchor="middle" fontSize={7.5} fill="#ff4d4f"
+                fontWeight={700} fontFamily="JetBrains Mono, monospace">
+            {disputed > 9 ? "9+" : disputed}
+          </text>
+        </g>
+      )}
     </g>
   );
 }
 
 // ── drill-down panel ────────────────────────────────────────────────────────
-function NodeDetail({ node, parentTicker, chainTicker, onClose, onRecenter }: {
+function NodeDetail({ node, parentTicker, chainTicker, onClose, onRecenter, onReported }: {
   node: Selected; parentTicker: string; chainTicker: string;
   onClose: () => void; onRecenter: (symbol: string, name: string) => void;
+  onReported?: () => void;
 }) {
   const router = useRouter();
   const [cands, setCands] = useState<Cand[] | null>(null);
@@ -250,10 +276,14 @@ function NodeDetail({ node, parentTicker, chainTicker, onClose, onRecenter }: {
   const [quote, setQuote] = useState<Quote | null>(null);
   const [reported, setReported] = useState(false);
   const [reporting, setReporting] = useState(false);
+  const [reportOpen, setReportOpen] = useState(false);
+  const [reportCat, setReportCat] = useState<string>("wrong_entity");
+  const [reportText, setReportText] = useState("");
 
   useEffect(() => {
     let alive = true;
     setCands(null); setQuote(null); setShowOther(false); setReported(false);
+    setReportOpen(false); setReportCat("wrong_entity"); setReportText("");
     resolveNode(node).then((cs) => { if (alive) setCands(cs); });
     return () => { alive = false; };
   }, [node]);
@@ -296,8 +326,11 @@ function NodeDetail({ node, parentTicker, chainTicker, onClose, onRecenter }: {
       const src = node.sources[node.role] ?? node.sources[node.primaryRole];
       await api.reportValueChain(chainTicker, {
         node_name: src?.name ?? node.name, role: node.role ?? node.primaryRole,
+        category: reportCat, reason: reportText.trim(),
       });
       setReported(true);
+      setReportOpen(false);
+      onReported?.();
     } catch { /* leave button re-tryable */ } finally {
       setReporting(false);
     }
@@ -427,12 +460,45 @@ function NodeDetail({ node, parentTicker, chainTicker, onClose, onRecenter }: {
         </div>
       )}
 
-      <button onClick={flag} disabled={reported || reporting}
-              title="Flag this relationship as wrong — goes to the admin review queue"
-              className={`flex items-center gap-1 text-[11px] mt-auto pt-1 ${reported ? "text-green" : "text-mut hover:text-red"}`}>
-        <Flag size={12} />
-        {reported ? "Reported" : reporting ? "…" : "Report"}
-      </button>
+      <div className="mt-auto pt-1 relative">
+        <button onClick={() => setReportOpen((v) => !v)} disabled={reported}
+                aria-expanded={reportOpen} aria-haspopup="dialog"
+                title="Flag this relationship as wrong — goes to the admin review queue"
+                className={`flex items-center gap-1 text-[11px] ${reported ? "text-green" : "text-mut hover:text-red"}`}>
+          <Flag size={12} />
+          {reported ? "Reported ✓" : "Report"}
+        </button>
+        {reportOpen && !reported && (
+          <div role="dialog" aria-label="Report this relationship"
+               className="absolute bottom-full left-0 mb-2 w-[260px] z-30 panel-2 p-2.5
+                          border border-line2 shadow-panel rounded">
+            <div className="label-xs mb-1.5">What&apos;s wrong?</div>
+            <div className="flex flex-col gap-1">
+              {REPORT_CATEGORIES.map((c) => (
+                <label key={c.value} className="flex items-center gap-1.5 text-[11px] cursor-pointer">
+                  <input type="radio" name="vc-report-cat" value={c.value}
+                         checked={reportCat === c.value}
+                         onChange={() => setReportCat(c.value)}
+                         className="accent-amber" />
+                  {c.label}
+                </label>
+              ))}
+            </div>
+            <textarea value={reportText} onChange={(e) => setReportText(e.target.value)}
+                      rows={2} maxLength={500}
+                      placeholder={reportCat === "other" ? "Tell us what's wrong (required)" : "Extra detail (optional)"}
+                      className="input-bare w-full mt-2 text-[11px] resize-y" />
+            <div className="flex items-center gap-2 mt-2">
+              <button onClick={flag}
+                      disabled={reporting || (reportCat === "other" && !reportText.trim())}
+                      className="btn-primary text-[11px] disabled:opacity-50">
+                {reporting ? "Sending…" : "Submit"}
+              </button>
+              <button onClick={() => setReportOpen(false)} className="btn-ghost text-[11px]">Cancel</button>
+            </div>
+          </div>
+        )}
+      </div>
     </div>
   );
 }
@@ -457,6 +523,8 @@ export function ValueChainMap({ ticker }: { ticker: string }) {
   // History snapshots + zoom/pan + in-graph filter (flagship upgrades).
   const [history, setHistory] = useState<VcHistoryEntry[]>([]);
   const [snapshotTs, setSnapshotTs] = useState<string | null>(null); // viewing a prior version
+  // Aggregate flags per entity (normalised name -> count), for the disputed badge.
+  const [reportCounts, setReportCounts] = useState<Record<string, VcReportCount>>({});
   const [graphFilter, setGraphFilter] = useState("");
   // Which quantitative measure drives edge thickness/intensity.
   const [edgeMetric, setEdgeMetric] = useState<EdgeMetric>("pctRevenue");
@@ -516,6 +584,9 @@ export function ValueChainMap({ ticker }: { ticker: string }) {
     api.vcHistory(t)
       .then((h) => { if (loadReqRef.current === reqId) setHistory(h); })
       .catch(() => { if (loadReqRef.current === reqId) setHistory([]); });
+    api.vcReportCounts(t)
+      .then((r) => { if (loadReqRef.current === reqId) setReportCounts(r.counts ?? {}); })
+      .catch(() => { if (loadReqRef.current === reqId) setReportCounts({}); });
   }, []);
 
   useEffect(() => { load(current); }, [current, load]);
@@ -857,6 +928,7 @@ export function ValueChainMap({ ticker }: { ticker: string }) {
                   pct={n.primaryRole === "competitor" ? null : n.revenue_pct}
                   color={COL[n.primaryRole]} onClick={() => pick(n)} roles={n.roles}
                   verified={n.confidence === "verified"} dimmed={!matchesFilter(n)}
+                  disputed={lookupReportCount(reportCounts, n.key)}
                   onHover={(e) => showTip(e, n, n.primaryRole)} onLeave={hideTip}
                   selected={selected?.key === n.key} />
           ))}
@@ -912,6 +984,11 @@ export function ValueChainMap({ ticker }: { ticker: string }) {
             {hover.node.ticker && (
               <div className="text-[10px] text-mut mt-1">Ticker hint: <span className="text-txt">{hover.node.ticker}</span></div>
             )}
+            {lookupReportCount(reportCounts, hover.node.key) > 1 && (
+              <div className="text-[10px] text-red mt-1">
+                ⚑ Flagged as wrong by {lookupReportCount(reportCounts, hover.node.key)} reports
+              </div>
+            )}
             <div className="text-[9.5px] text-mut/70 mt-1.5">Click for drill-down</div>
           </div>
         )}
@@ -957,7 +1034,13 @@ export function ValueChainMap({ ticker }: { ticker: string }) {
         {selected && (
           <div className="min-w-0 lg:max-h-[72vh]">
             <NodeDetail node={selected} parentTicker={current} chainTicker={current}
-                        onClose={() => setSelected(null)} onRecenter={recenter} />
+                        onClose={() => setSelected(null)} onRecenter={recenter}
+                        onReported={() => {
+                          // Refresh badges so the new flag counts immediately.
+                          api.vcReportCounts(current)
+                            .then((r) => setReportCounts(r.counts ?? {}))
+                            .catch(() => {});
+                        }} />
           </div>
         )}
       </div>

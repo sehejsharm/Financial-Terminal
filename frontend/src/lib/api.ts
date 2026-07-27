@@ -249,6 +249,12 @@ export type AIResp = { ticker: string; markdown: string };
 export type VcReport = {
   ts: string; user: string | null; ticker: string;
   node_name: string; role: string; reason: string;
+  /** Absent on records written before categories existed. */
+  category?: string;
+};
+/** Aggregate flags for one entity, keyed by normalised name. */
+export type VcReportCount = {
+  count: number; categories: Record<string, number>; roles: string[];
 };
 
 // ── Phase 6 types ───────────────────────────────────────────────────────────
@@ -466,7 +472,10 @@ export const api = {
     apiFetch<{ ok: boolean }>(`/api/v1/value-chain/${encodeURIComponent(ticker)}/override`, {
       method: "PUT", body: JSON.stringify(o),
     }),
-  reportValueChain: (ticker: string, payload: { node_name: string; role: string; reason?: string }) =>
+  vcReportCounts: (ticker: string) =>
+    apiFetch<{ ticker: string; counts: Record<string, VcReportCount> }>(
+      `/api/v1/value-chain/${encodeURIComponent(ticker)}/report-counts`),
+  reportValueChain: (ticker: string, payload: { node_name: string; role: string; reason?: string; category?: string }) =>
     apiFetch<{ ok: boolean }>(`/api/v1/value-chain/${encodeURIComponent(ticker)}/report`, {
       method: "POST", body: JSON.stringify({ reason: "", ...payload }),
     }),

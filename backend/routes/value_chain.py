@@ -17,12 +17,21 @@ router = APIRouter(prefix="/value-chain", tags=["value-chain"])
 REPORTS_PATH = DATA_DIR / "vc_reports.jsonl"
 
 
+# What's actually wrong with a flagged relationship. Kept as a closed set so
+# the review queue can be sorted/counted; "other" carries the free text.
+REPORT_CATEGORIES = ("wrong_entity", "wrong_weight", "outdated",
+                     "duplicate", "other")
+
+
 class ChainReport(BaseModel):
     """User flag: a generated relationship looks wrong. Feeds a review queue
     (Admin page) instead of silently trusting the LLM forever."""
     node_name: str = Field(..., max_length=120)
     role: str = Field(..., max_length=20)          # supplier|customer|competitor
     reason: str = Field("", max_length=500)
+    # Older clients don't send this; those records read as "unspecified"
+    # rather than breaking the existing queue.
+    category: str = Field("unspecified", max_length=32)
 
 
 OVERRIDES_PATH = DATA_DIR / "vc_overrides.json"
@@ -76,6 +85,20 @@ def _norm_entity(name: str) -> str:
                       for c in (name or "").lower())
     words = [w for w in cleaned.split() if w not in suffixes]
     return " ".join(words) or (name or "").strip().lower()
+
+
+def _alias_key(key: str, existing) -> str | None:
+    """Whole-word prefix match, mirroring findAliasKey() on the client, so
+    'Samsung' and 'Samsung Electronics' aggregate together while 'Tata Motors'
+    and 'Tata Steel' never do."""
+    if len(key) < 4:
+        return None
+    for k in existing:
+        if k == key:
+            return k
+        if len(k) >= 4 and (k.startswith(key + " ") or key.startswith(k + " ")):
+            return k
+    return None
 
 
 def _annotate_roles(data: dict) -> dict:
@@ -253,12 +276,14 @@ def report(ticker: str, body: ChainReport,
            user: dict = Depends(auth.current_user)):
     """Append a wrong-relationship flag to the review queue (JSONL on the
     persistent data volume; listed on the Admin page)."""
+    category = body.category if body.category in REPORT_CATEGORIES else "unspecified"
     rec = {
         "ts": datetime.now(timezone.utc).isoformat(timespec="seconds"),
         "user": (user or {}).get("username"),
         "ticker": ticker.upper(),
         "node_name": body.node_name,
         "role": body.role,
+        "category": category,
         "reason": body.reason,
     }
     try:
@@ -268,6 +293,45 @@ def report(ticker: str, body: ChainReport,
     except Exception:
         raise HTTPException(500, "Could not record the report.")
     return {"ok": True}
+
+
+@router.get("/{ticker}/report-counts")
+def report_counts(ticker: str, _user: dict = Depends(auth.current_user)):
+    """How many times each relationship in THIS map has been flagged, plus a
+    per-category breakdown. Drives the 'disputed' badge on nodes — a single
+    flag is one person's opinion, repeated flags are a signal."""
+    if not REPORTS_PATH.exists():
+        return {"ticker": ticker.upper(), "counts": {}}
+    counts: dict[str, dict] = {}
+    try:
+        with open(REPORTS_PATH, "r", encoding="utf-8") as fh:
+            for ln in fh:
+                try:
+                    rec = json.loads(ln)
+                except Exception:
+                    continue
+                if rec.get("ticker") != ticker.upper():
+                    continue
+                # Key on the normalised entity so flags against 'Samsung' and
+                # 'Samsung Electronics' aggregate onto the same merged node.
+                key = _norm_entity(rec.get("node_name") or "")
+                if not key:
+                    continue
+                # Fold name variants onto one key, exactly as the client folds
+                # them onto one node — otherwise a node that merged two
+                # spellings would show an undercounted badge.
+                key = _alias_key(key, counts.keys()) or key
+                slot = counts.setdefault(key, {"count": 0, "categories": {},
+                                               "roles": []})
+                slot["count"] += 1
+                cat = rec.get("category") or "unspecified"
+                slot["categories"][cat] = slot["categories"].get(cat, 0) + 1
+                role = rec.get("role")
+                if role and role not in slot["roles"]:
+                    slot["roles"].append(role)
+    except Exception:
+        return {"ticker": ticker.upper(), "counts": {}}
+    return {"ticker": ticker.upper(), "counts": counts}
 
 
 @router.get("/reports/all")

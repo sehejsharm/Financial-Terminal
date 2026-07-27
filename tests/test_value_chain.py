@@ -86,3 +86,54 @@ def test_norm_entity_matches_frontend_rules():
     assert _norm_entity("Reliance Industries Limited") == _norm_entity("Reliance Industries")
     assert _norm_entity("Tata Motors") != _norm_entity("Tata Steel")
     assert _norm_entity("Ltd") != ""     # never collapse to empty
+
+
+# ── categorised reports + aggregate counts ────────────────────────────────
+
+def test_report_categories_closed_set():
+    """Unknown categories degrade to 'unspecified' rather than polluting the
+    review queue with arbitrary strings."""
+    from backend.routes.value_chain import REPORT_CATEGORIES
+    assert "wrong_entity" in REPORT_CATEGORIES
+    assert "wrong_weight" in REPORT_CATEGORIES
+    assert "outdated" in REPORT_CATEGORIES
+    assert "duplicate" in REPORT_CATEGORIES
+    assert "other" in REPORT_CATEGORIES
+
+
+def test_report_count_aggregation(tmp_path, monkeypatch):
+    """Counts aggregate per NORMALISED entity so flags against 'Samsung' and
+    'Samsung Electronics Ltd' land on the same merged node."""
+    import json as _json
+    from backend.routes import value_chain as vc_routes
+
+    path = tmp_path / "vc_reports.jsonl"
+    rows = [
+        {"ticker": "AAPL", "node_name": "Samsung", "role": "customer",
+         "category": "wrong_weight"},
+        {"ticker": "AAPL", "node_name": "Samsung Electronics Ltd", "role": "competitor",
+         "category": "duplicate"},
+        {"ticker": "AAPL", "node_name": "Bosch", "role": "supplier"},   # no category
+        {"ticker": "MSFT", "node_name": "Samsung", "role": "customer",
+         "category": "outdated"},                                       # other ticker
+    ]
+    path.write_text("\n".join(_json.dumps(r) for r in rows) + "\n")
+    monkeypatch.setattr(vc_routes, "REPORTS_PATH", path)
+
+    out = vc_routes.report_counts("aapl", _user={"username": "t"})
+    counts = out["counts"]
+    samsung = counts[vc_routes._norm_entity("Samsung")]
+    assert samsung["count"] == 2                       # both spellings merged
+    assert samsung["categories"]["wrong_weight"] == 1
+    assert samsung["categories"]["duplicate"] == 1
+    assert sorted(samsung["roles"]) == ["competitor", "customer"]
+    # A single flag still records, but the UI only badges at >1.
+    assert counts[vc_routes._norm_entity("Bosch")]["count"] == 1
+    # Other tickers are excluded.
+    assert sum(c["count"] for c in counts.values()) == 3
+
+
+def test_report_counts_missing_file_is_empty(tmp_path, monkeypatch):
+    from backend.routes import value_chain as vc_routes
+    monkeypatch.setattr(vc_routes, "REPORTS_PATH", tmp_path / "nope.jsonl")
+    assert vc_routes.report_counts("AAPL", _user={"username": "t"})["counts"] == {}

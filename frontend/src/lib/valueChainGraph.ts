@@ -316,3 +316,25 @@ export function fmtUsd(v: number | null | undefined): string {
   }
   return `$${v.toFixed(0)}`;
 }
+
+/**
+ * Look up aggregate report counts for a merged entity.
+ *
+ * The server keys counts by normalised name; a merged entity's own key is
+ * whichever spelling was ingested first. Rather than trusting those to match,
+ * sum every count key that alias-matches this entity — so a node that merged
+ * "Samsung" and "Samsung Electronics" shows the combined flag count instead
+ * of silently dropping half of it.
+ */
+export function lookupReportCount(
+  counts: Record<string, { count: number }>, key: string,
+): number {
+  let total = 0;
+  for (const [k, v] of Object.entries(counts)) {
+    const match = k === key
+      || (key.length >= 4 && k.length >= 4
+          && (k.startsWith(`${key} `) || key.startsWith(`${k} `)));
+    if (match) total += v?.count ?? 0;
+  }
+  return total;
+}

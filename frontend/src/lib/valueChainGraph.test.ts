@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   clamp, DEFAULT_VIEW, fitView, H, MAX_W, MIN_W, W, zoomAt,
   entityKey, findAliasKey, mergeEntities,
-  edgeOpacityFor, edgeWidthFor, fmtUsd, maxUsd, readMetrics, resolveMetric,
+  edgeOpacityFor, edgeWidthFor, fmtUsd, lookupReportCount, maxUsd, readMetrics, resolveMetric,
 } from "./valueChainGraph";
 
 describe("clamp", () => {
@@ -270,5 +270,19 @@ describe("maxUsd / fmtUsd", () => {
     expect(fmtUsd(2.4e9)).toBe("$2.4B");
     expect(fmtUsd(3.5e6)).toBe("$3.5M");
     expect(fmtUsd(null)).toBe("—");
+  });
+});
+
+describe("lookupReportCount", () => {
+  it("sums counts across name variants of the same entity", () => {
+    const counts = { "samsung": { count: 2 }, "samsung electronics": { count: 3 } };
+    expect(lookupReportCount(counts, "samsung")).toBe(5);
+  });
+  it("does not borrow counts from a sibling company", () => {
+    const counts = { "tata motors": { count: 4 } };
+    expect(lookupReportCount(counts, "tata steel")).toBe(0);
+  });
+  it("is zero for an unflagged entity", () => {
+    expect(lookupReportCount({}, "acme")).toBe(0);
   });
 });
