@@ -826,14 +826,25 @@ export function ValueChainMap({ ticker }: { ticker: string }) {
         </div>
       )}
 
-      <div className="flex flex-wrap items-center gap-4 mb-3 text-[11px] text-mut">
-        <span><span style={{ color: COL.supplier }}>●</span> Suppliers</span>
-        <span><span style={{ color: COL.company }}>●</span> {data.name}</span>
-        <span><span style={{ color: COL.customer }}>●</span> Customers</span>
-        <span><span style={{ color: COL.competitor }}>●</span> Competitors</span>
-        <span className="opacity-80">solid ✓ = admin-verified · others = AI-estimated</span>
-        {/* Which measure drives edge thickness/intensity. */}
-        <span className="inline-flex items-center gap-1">
+      {/* Toolbar. Split into SELF-CONTAINED groups: each group is an
+          inline-flex that never breaks internally, and the container wraps
+          group-by-group. The old single row used a flex-1 spacer, which on a
+          narrow viewport ate a whole line and orphaned the export buttons
+          onto a disconnected row. Groups are separated by a subtle divider so
+          the reflow still reads as structure, not scatter. */}
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-2 mb-3 text-[11px] text-mut">
+        {/* legend */}
+        <span className="inline-flex items-center gap-3 whitespace-nowrap">
+          <span><span style={{ color: COL.supplier }}>●</span> Suppliers</span>
+          <span className="max-w-[160px] truncate"><span style={{ color: COL.company }}>●</span> {data.name}</span>
+          <span><span style={{ color: COL.customer }}>●</span> Customers</span>
+          <span><span style={{ color: COL.competitor }}>●</span> Competitors</span>
+        </span>
+        <span className="hidden sm:inline text-line2">|</span>
+        <span className="opacity-80 whitespace-nowrap">solid ✓ = verified · dashed = AI-estimated</span>
+
+        {/* edge-weight metric */}
+        <span className="inline-flex items-center gap-1 whitespace-nowrap">
           <span className="label-xs">Weight by</span>
           {(["pctRevenue", "pctCOGS", "estUSDValue"] as EdgeMetric[]).map((m) => (
             <button key={m} onClick={() => setEdgeMetric(m)}
@@ -845,63 +856,78 @@ export function ValueChainMap({ ticker }: { ticker: string }) {
           ))}
         </span>
         {missingMetric > 0 && (
-          <span className="text-amber/90" title="These edges are drawn from another measure (or at base weight) because the AI didn't return the selected one — they are NOT necessarily small.">
+          <span className="text-amber/90 whitespace-nowrap" title="These edges are drawn from another measure (or at base weight) because the AI didn't return the selected one — they are NOT necessarily small.">
             {missingMetric} edge{missingMetric > 1 ? "s" : ""} lack this measure
           </span>
         )}
-        <input value={graphFilter} onChange={(e) => setGraphFilter(e.target.value)}
-               placeholder="Find in graph…" className="input-bare !py-1 !px-2 text-[11px] w-32" />
-        {history.length > 1 && (
-          <select value={snapshotTs ?? ""} className="input-bare !py-1 !px-2 text-[11px] cursor-pointer w-44"
-                  onChange={(e) => {
-                    const ts = e.target.value;
-                    if (!ts) { load(current); return; }
-                    const entry = history.find((h) => h.generated_at === ts);
-                    if (entry) viewSnapshot(entry);
-                  }}>
-            <option value="">Latest (live)</option>
-            {history.map((h) => (
-              <option key={h.generated_at ?? ""} value={h.generated_at ?? ""}>
-                {h.generated_at ? new Date(h.generated_at).toLocaleString() : "unknown"}
-              </option>
-            ))}
-          </select>
-        )}
-        {history.length > 1 && !snapshotTs && (
-          <select value={compareTs ?? ""} title="Highlight what changed since a previous generation"
-                  className="input-bare !py-1 !px-2 text-[11px] cursor-pointer w-48"
-                  onChange={(e) => setCompareTs(e.target.value || null)}>
-            <option value="">Compare to previous…</option>
-            {history.filter((h) => h.generated_at && h.generated_at !== data.generated_at).map((h) => (
-              <option key={h.generated_at ?? ""} value={h.generated_at ?? ""}>
-                vs {h.generated_at ? new Date(h.generated_at).toLocaleString() : "unknown"}
-              </option>
-            ))}
-          </select>
-        )}
-        <button onClick={fitToView} className="hover:text-amber flex items-center gap-1"
-                title="Zoom/pan so every node is on screen">
-          <Maximize2 size={11} />Fit
-        </button>
-        <button onClick={() => setView({ ...DEFAULT_VIEW })} className="hover:text-amber" title="Reset zoom/pan">
-          Reset view
-        </button>
-        <div className="flex-1" />
-        {pinnedAt && (
-          <span className="text-amber border border-amber/50 rounded px-1.5 py-0.5 text-[9px] uppercase tracking-wider">
-            Pinned {new Date(pinnedAt).toLocaleDateString()}
-          </span>
-        )}
-        <DataAge at={data.generated_at ?? fetchedAt} prefix="Generated" />
-        <button onClick={togglePin} title={pinnedAt ? "Unpin — go back to live AI generations" : "Pin this exact map so AI regeneration can't silently change it"}
-                className="hover:text-amber flex items-center gap-1">
-          {pinnedAt ? <PinOff size={12} /> : <Pin size={12} />}{pinnedAt ? "Unpin" : "Pin"}
-        </button>
-        <button onClick={() => exportCsv(data)} title="Export nodes + edges as CSV" className="hover:text-amber flex items-center gap-1">
-          <Download size={12} />CSV
-        </button>
-        <button onClick={() => svgRef.current && exportSvg(svgRef.current, current)} title="Export as SVG" className="hover:text-amber">SVG</button>
-        <button onClick={() => svgRef.current && exportPng(svgRef.current, current)} title="Export as PNG" className="hover:text-amber">PNG</button>
+
+        {/* search + snapshots */}
+        <span className="inline-flex items-center gap-1.5 flex-wrap">
+          <input value={graphFilter} onChange={(e) => setGraphFilter(e.target.value)}
+                 placeholder="Find in graph…" aria-label="Find in graph"
+                 className="input-bare !py-1 !px-2 text-[11px] w-32" />
+          {history.length > 1 && (
+            <select value={snapshotTs ?? ""} aria-label="View a prior snapshot"
+                    className="input-bare !py-1 !px-2 text-[11px] cursor-pointer w-40"
+                    onChange={(e) => {
+                      const ts = e.target.value;
+                      if (!ts) { load(current); return; }
+                      const entry = history.find((h) => h.generated_at === ts);
+                      if (entry) viewSnapshot(entry);
+                    }}>
+              <option value="">Latest (live)</option>
+              {history.map((h) => (
+                <option key={h.generated_at ?? ""} value={h.generated_at ?? ""}>
+                  {h.generated_at ? new Date(h.generated_at).toLocaleString() : "unknown"}
+                </option>
+              ))}
+            </select>
+          )}
+          {history.length > 1 && !snapshotTs && (
+            <select value={compareTs ?? ""} aria-label="Compare to a previous snapshot"
+                    title="Highlight what changed since a previous generation"
+                    className="input-bare !py-1 !px-2 text-[11px] cursor-pointer w-44"
+                    onChange={(e) => setCompareTs(e.target.value || null)}>
+              <option value="">Compare to previous…</option>
+              {history.filter((h) => h.generated_at && h.generated_at !== data.generated_at).map((h) => (
+                <option key={h.generated_at ?? ""} value={h.generated_at ?? ""}>
+                  vs {h.generated_at ? new Date(h.generated_at).toLocaleString() : "unknown"}
+                </option>
+              ))}
+            </select>
+          )}
+        </span>
+
+        {/* view controls */}
+        <span className="inline-flex items-center gap-2 whitespace-nowrap">
+          <button onClick={fitToView} className="hover:text-amber flex items-center gap-1"
+                  title="Zoom/pan so every node is on screen">
+            <Maximize2 size={11} />Fit
+          </button>
+          <button onClick={() => setView({ ...DEFAULT_VIEW })} className="hover:text-amber" title="Reset zoom/pan">
+            Reset view
+          </button>
+        </span>
+
+        {/* status + actions — ml-auto only once there is room for a right
+            edge; below that it simply flows as the next wrapped group. */}
+        <span className="inline-flex items-center gap-2 whitespace-nowrap lg:ml-auto">
+          {pinnedAt && (
+            <span className="text-amber border border-amber/50 rounded px-1.5 py-0.5 text-[9px] uppercase tracking-wider">
+              Pinned {new Date(pinnedAt).toLocaleDateString()}
+            </span>
+          )}
+          <DataAge at={data.generated_at ?? fetchedAt} prefix="Generated" />
+          <button onClick={togglePin} title={pinnedAt ? "Unpin — go back to live AI generations" : "Pin this exact map so AI regeneration can't silently change it"}
+                  className="hover:text-amber flex items-center gap-1">
+            {pinnedAt ? <PinOff size={12} /> : <Pin size={12} />}{pinnedAt ? "Unpin" : "Pin"}
+          </button>
+          <button onClick={() => exportCsv(data)} title="Export nodes + edges as CSV" className="hover:text-amber flex items-center gap-1">
+            <Download size={12} />CSV
+          </button>
+          <button onClick={() => svgRef.current && exportSvg(svgRef.current, current)} title="Export as SVG" className="hover:text-amber">SVG</button>
+          <button onClick={() => svgRef.current && exportPng(svgRef.current, current)} title="Export as PNG" className="hover:text-amber">PNG</button>
+        </span>
       </div>
 
       {/* Graph + docked detail panel. The panel sits BESIDE the canvas on
