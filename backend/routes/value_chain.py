@@ -58,6 +58,50 @@ def _apply_overrides(ticker: str, data: dict) -> dict:
     return data
 
 
+_ROLE_SINGULAR = {"suppliers": "supplier", "customers": "customer",
+                  "competitors": "competitor"}
+_ROLE_ORDER = ["supplier", "customer", "competitor"]
+
+
+def _norm_entity(name: str) -> str:
+    """Identity key for cross-role matching — mirrors entityKey() in
+    frontend/src/lib/valueChainGraph.ts (case/punctuation/corporate-suffix
+    insensitive) so client and server agree on what 'the same company' means."""
+    suffixes = {
+        "inc", "incorporated", "ltd", "limited", "llc", "llp", "plc", "corp",
+        "corporation", "co", "company", "sa", "ag", "nv", "spa", "gmbh", "ab",
+        "as", "oyj", "pte", "pvt", "group", "holdings", "holding", "the",
+    }
+    cleaned = "".join(c if (c.isalnum() or c.isspace()) else " "
+                      for c in (name or "").lower())
+    words = [w for w in cleaned.split() if w not in suffixes]
+    return " ".join(words) or (name or "").strip().lower()
+
+
+def _annotate_roles(data: dict) -> dict:
+    """Stamp every node with `roles: [...]` — the full set of roles that
+    entity plays in this map.
+
+    The wire format keeps the three positional arrays (history snapshots,
+    admin overrides and CSV exports are all keyed by role, and old pinned
+    maps must keep working), so `roles` is ADDITIVE: it tells the client
+    which occurrences are the same company, letting it render one node with
+    several badges instead of duplicates."""
+    by_key: dict[str, list[str]] = {}
+    for arr, role in _ROLE_SINGULAR.items():
+        for node in data.get(arr) or []:
+            key = _norm_entity(node.get("name") or "")
+            if not key:
+                continue
+            if role not in by_key.setdefault(key, []):
+                by_key[key].append(role)
+    for arr, role in _ROLE_SINGULAR.items():
+        for node in data.get(arr) or []:
+            roles = by_key.get(_norm_entity(node.get("name") or ""), [role])
+            node["roles"] = sorted(roles, key=_ROLE_ORDER.index)
+    return data
+
+
 def _append_history(ticker: str, data: dict) -> None:
     try:
         DATA_DIR.mkdir(parents=True, exist_ok=True)
@@ -126,6 +170,7 @@ def chain(ticker: str, refresh: bool = False,
                             "The AI did not return a valid structured map "
                             "after a retry — use Regenerate to try again.")
     data = _apply_overrides(canonical, dict(data))
+    data = _annotate_roles(data)
     out = {"ticker": canonical, "name": company_name, "sector": sector, **data}
     if nonce or refresh:
         _append_history(canonical, out)

@@ -8,7 +8,8 @@ import { DataAge } from "@/components/DataAge";
 import { StatusBadge } from "@/components/StatusBadge";
 import { api, type ChainNode, type Quote, type ValueChain, type VcHistoryEntry } from "@/lib/api";
 import {
-  clamp, CX, CY, DEFAULT_VIEW, fitView, H, MAX_W, MIN_W, W, zoomAt, type View,
+  clamp, CX, CY, DEFAULT_VIEW, fitView, H, MAX_W, mergeEntities, MIN_W, W, zoomAt,
+  type MergedEntity, type Role, type View,
 } from "@/lib/valueChainGraph";
 import { fmtNum, fmtPct } from "@/lib/utils";
 
@@ -33,8 +34,8 @@ const COL = {
   competitor: "#a78bfa",
 };
 
-type Role = "supplier" | "customer" | "competitor";
-type Selected = ChainNode & { role: Role };
+
+type Selected = MergedEntity & { role: Role };
 type Cand = { symbol: string; name: string; source: string };
 
 // Materiality → edge visuals: thicker/brighter edges for relationships the
@@ -49,7 +50,7 @@ function edgeOpacity(pct?: number | null): number {
 /** Pointer travel (px) past which a press counts as a pan, not a node click. */
 const DRAG_SLOP = 4;
 
-type Placed = ChainNode & { x: number; y: number };
+type Placed = MergedEntity & { x: number; y: number };
 
 // ── ticker resolution (market-biased, cached per node) ─────────────────────
 const _resolveCache = new Map<string, Cand[]>();
@@ -79,7 +80,7 @@ function splitByMarket(cands: Cand[], parentTicker: string): { primary: Cand[]; 
   return { primary, other };
 }
 
-async function resolveNode(node: ChainNode): Promise<Cand[]> {
+async function resolveNode(node: { name: string; ticker?: string | null }): Promise<Cand[]> {
   const key = `${node.name}|${node.ticker ?? ""}`;
   const hit = _resolveCache.get(key);
   if (hit) return hit;
@@ -113,10 +114,14 @@ function exportCsv(data: ValueChain) {
   };
   // confidence column: "estimated" (AI) vs "verified" (admin-published) —
   // provenance is part of the data model, exported distinctly.
-  const lines = ["role,name,note,revenue_pct,ticker_hint,confidence,verified_at"];
+  // `roles` lists EVERY role the entity plays (so a customer+competitor is
+  // identifiable in the export); one row per role occurrence is kept for
+  // back-compat with anything already parsing this file.
+  const lines = ["role,roles,name,note,revenue_pct,ticker_hint,confidence,verified_at"];
   const push = (role: Role, ns?: ChainNode[]) =>
     (ns ?? []).forEach((n) => lines.push(
-      [role, esc(n.name), esc(n.note), n.revenue_pct ?? "", esc(n.ticker),
+      [role, esc((n.roles ?? [role]).join("|")), esc(n.name), esc(n.note),
+       n.revenue_pct ?? "", esc(n.ticker),
        n.confidence ?? "estimated", esc(n.verified_at ?? "")].join(","),
     ));
   push("supplier", data.suppliers);
@@ -176,10 +181,10 @@ function clearPin(ticker: string) {
 
 // ── node box ────────────────────────────────────────────────────────────────
 function Node({ x, y, label, note, pct, color, onClick, selected, verified, dimmed,
-                onHover, onLeave }: {
+                onHover, onLeave, roles = [] }: {
   x: number; y: number; label: string; note?: string; pct?: number | null;
   color: string; onClick: () => void; selected: boolean;
-  verified?: boolean; dimmed?: boolean;
+  verified?: boolean; dimmed?: boolean; roles?: Role[];
   onHover?: (e: React.MouseEvent | React.FocusEvent) => void;
   onLeave?: () => void;
 }) {
@@ -210,6 +215,15 @@ function Node({ x, y, label, note, pct, color, onClick, selected, verified, dimm
           {sub.length > 26 ? sub.slice(0, 25) + "…" : sub}
         </text>
       )}
+      {/* Role badges — one dot per role this company plays. A single-role
+          node gets none (the column already says it); a merged entity shows
+          e.g. green+violet for "customer AND competitor". */}
+      {roles.length > 1 && roles.map((r, i) => (
+        <circle key={r} cx={x + 70 - i * 9} cy={y - 11} r={3.2}
+                fill={COL[r]} stroke="#0c0e12" strokeWidth={0.8}>
+          <title>{r}</title>
+        </circle>
+      ))}
     </g>
   );
 }
@@ -266,7 +280,12 @@ function NodeDetail({ node, parentTicker, chainTicker, onClose, onRecenter }: {
   async function flag() {
     setReporting(true);
     try {
-      await api.reportValueChain(chainTicker, { node_name: node.name, role: node.role });
+      // Address the report at the ORIGINAL per-role node the backend stored
+      // (a merged entity may display a longer name than the array entry).
+      const src = node.sources[node.role] ?? node.sources[node.primaryRole];
+      await api.reportValueChain(chainTicker, {
+        node_name: src?.name ?? node.name, role: node.role ?? node.primaryRole,
+      });
       setReported(true);
     } catch { /* leave button re-tryable */ } finally {
       setReporting(false);
@@ -299,21 +318,40 @@ function NodeDetail({ node, parentTicker, chainTicker, onClose, onRecenter }: {
   return (
     <div className="panel-2 p-3 flex flex-col gap-2 h-full overflow-y-auto">
       <div className="flex items-start gap-2">
-        <span className="mt-0.5 shrink-0" style={{ color: COL[node.role] }}>●</span>
+        <span className="mt-0.5 shrink-0" style={{ color: COL[node.primaryRole] }}>●</span>
         <div className="flex-1 min-w-0">
           <div className="text-sm font-semibold break-words">{node.name}</div>
-          <div className="text-[11px] uppercase tracking-wider text-mut">{node.role}</div>
+          {/* Every role this company plays — a merged entity lists them all. */}
+          <div className="flex flex-wrap items-center gap-1 mt-0.5">
+            {node.roles.map((r) => (
+              <span key={r} className="text-[9px] uppercase tracking-wider rounded px-1 border"
+                    style={{ color: COL[r], borderColor: `${COL[r]}80` }}>{r}</span>
+            ))}
+          </div>
         </div>
         <button onClick={onClose} title="Close panel"
                 className="text-mut hover:text-txt shrink-0"><X size={14} /></button>
       </div>
 
-      {node.revenue_pct != null && (
-        <div className="text-[11px] text-amber">
-          ≈{fmtNum(node.revenue_pct, 1)}% {node.role === "supplier" ? "of input costs" : "of revenue"} (AI est.)
+      {/* Exposure is stated PER ROLE — the supplier number is a share of
+          input costs, the customer number a share of revenue. Never blended. */}
+      {node.roles.some((r) => node.pctByRole[r] != null) && (
+        <div className="flex flex-col gap-0.5">
+          {node.roles.map((r) => node.pctByRole[r] != null && (
+            <div key={r} className="text-[11px] text-amber">
+              ≈{fmtNum(node.pctByRole[r], 1)}% {r === "supplier" ? "of input costs" : "of revenue"}
+              <span className="text-mut"> ({r}, AI est.)</span>
+            </div>
+          ))}
         </div>
       )}
-      {node.note && <div className="text-xs text-mut break-words">{node.note}</div>}
+      {/* Per-role notes, so a customer note and a competitor note both show. */}
+      {node.roles.map((r) => node.notesByRole[r] && (
+        <div key={r} className="text-xs text-mut break-words">
+          {node.roles.length > 1 && <span className="uppercase text-[9px] mr-1" style={{ color: COL[r] }}>{r}</span>}
+          {node.notesByRole[r]}
+        </div>
+      ))}
 
       {quote && quote.price != null && best && (
         <div className="text-xs">
@@ -557,11 +595,14 @@ export function ValueChainMap({ ticker }: { ticker: string }) {
 
   // Layout is computed ABOVE the early returns so the fit-to-view control and
   // the minimap (which need node coordinates) can be plain hooks.
+  // De-duplicated model: one node per COMPANY (with all its roles), not one
+  // per role occurrence. Columns are then filled by primary role.
   const layout = useMemo(() => {
     if (!data) return null;
-    const supList = (data.suppliers ?? []).slice(0, 10);
-    const cusList = (data.customers ?? []).slice(0, 12);
-    const cmpList = (data.competitors ?? []).slice(0, 8);
+    const merged = mergeEntities(data);
+    const supList = merged.filter((e) => e.primaryRole === "supplier").slice(0, 10);
+    const cusList = merged.filter((e) => e.primaryRole === "customer").slice(0, 12);
+    const cmpList = merged.filter((e) => e.primaryRole === "competitor").slice(0, 8);
     const sGap = Math.min(70, (H - 140) / Math.max(supList.length, 1));
     const cGap = Math.min(60, (H - 140) / Math.max(cusList.length, 1));
     return {
@@ -589,11 +630,14 @@ export function ValueChainMap({ ticker }: { ticker: string }) {
   if (!data || !layout) return null;
 
   const { suppliers, customers, competitors } = layout;
+  // One flat list — edges are keyed off each entity's ROLES, not the column
+  // it happens to be drawn in.
+  const allNodes: Placed[] = [...suppliers, ...customers, ...competitors];
 
-  const pick = (n: ChainNode, role: Role) => {
+  const pick = (n: Placed) => {
     // A press that panned isn't a selection click.
     if (draggedRef.current) return;
-    setSelected((cur) => (cur?.name === n.name && cur.role === role ? null : { ...n, role }));
+    setSelected((cur) => (cur?.key === n.key ? null : { ...n, role: n.primaryRole }));
   };
 
   return (
@@ -701,29 +745,32 @@ export function ValueChainMap({ ticker }: { ticker: string }) {
             </marker>
           </defs>
 
-          {/* Edge styling encodes BOTH exposure (width/opacity) and
-              provenance tier: verified = solid, AI-estimated = dashed. */}
-          {suppliers.map((s, i) => (
+          {/* Edges are drawn PER ROLE, not per column, so a merged entity
+              that both supplies and buys gets an inbound AND an outbound
+              arrow. Styling encodes exposure (width/opacity) and provenance
+              (verified = solid, AI-estimated = dashed). */}
+          {allNodes.filter((n) => n.roles.includes("supplier")).map((s, i) => (
             <line key={`se${i}`} x1={s.x + 78} y1={s.y} x2={CX - 90} y2={CY}
                   stroke={s.confidence === "verified" ? "#1fd286" : COL.supplier}
-                  strokeOpacity={s.confidence === "verified" ? 0.9 : edgeOpacity(s.revenue_pct)}
-                  strokeWidth={s.confidence === "verified" ? Math.max(2, edgeWidth(s.revenue_pct)) : edgeWidth(s.revenue_pct)}
+                  strokeOpacity={s.confidence === "verified" ? 0.9 : edgeOpacity(s.pctByRole.supplier)}
+                  strokeWidth={s.confidence === "verified" ? Math.max(2, edgeWidth(s.pctByRole.supplier)) : edgeWidth(s.pctByRole.supplier)}
                   strokeDasharray={s.confidence === "verified" ? undefined : "6 4"}
                   opacity={matchesFilter(s) ? 1 : 0.12}
                   markerEnd="url(#arrow)" />
           ))}
-          {customers.map((c, i) => (
+          {allNodes.filter((n) => n.roles.includes("customer")).map((c, i) => (
             <line key={`ce${i}`} x1={CX + 90} y1={CY} x2={c.x - 78} y2={c.y}
                   stroke={c.confidence === "verified" ? "#1fd286" : COL.customer}
-                  strokeOpacity={c.confidence === "verified" ? 0.9 : edgeOpacity(c.revenue_pct)}
-                  strokeWidth={c.confidence === "verified" ? Math.max(2, edgeWidth(c.revenue_pct)) : edgeWidth(c.revenue_pct)}
+                  strokeOpacity={c.confidence === "verified" ? 0.9 : edgeOpacity(c.pctByRole.customer)}
+                  strokeWidth={c.confidence === "verified" ? Math.max(2, edgeWidth(c.pctByRole.customer)) : edgeWidth(c.pctByRole.customer)}
                   strokeDasharray={c.confidence === "verified" ? undefined : "6 4"}
                   opacity={matchesFilter(c) ? 1 : 0.12}
                   markerEnd="url(#arrow)" />
           ))}
-          {competitors.map((c, i) => (
+          {allNodes.filter((n) => n.roles.includes("competitor")).map((c, i) => (
             <line key={`ke${i}`} x1={CX} y1={CY + 26} x2={c.x} y2={c.y - 18}
-                  stroke={COL.competitor} strokeOpacity={0.3} strokeWidth={1.1} strokeDasharray="4 3" />
+                  stroke={COL.competitor} strokeOpacity={0.3} strokeWidth={1.1}
+                  opacity={matchesFilter(c) ? 1 : 0.12} strokeDasharray="4 3" />
           ))}
 
           <g>
@@ -737,26 +784,13 @@ export function ValueChainMap({ ticker }: { ticker: string }) {
             </text>
           </g>
 
-          {suppliers.map((s, i) => (
-            <Node key={`s${i}`} x={s.x} y={s.y} label={s.name} note={s.note} pct={s.revenue_pct}
-                  color={COL.supplier} onClick={() => pick(s, "supplier")}
-                  verified={s.confidence === "verified"} dimmed={!matchesFilter(s)}
-                  onHover={(e) => showTip(e, s, "supplier")} onLeave={hideTip}
-                  selected={selected?.name === s.name && selected.role === "supplier"} />
-          ))}
-          {customers.map((c, i) => (
-            <Node key={`c${i}`} x={c.x} y={c.y} label={c.name} note={c.note} pct={c.revenue_pct}
-                  color={COL.customer} onClick={() => pick(c, "customer")}
-                  verified={c.confidence === "verified"} dimmed={!matchesFilter(c)}
-                  onHover={(e) => showTip(e, c, "customer")} onLeave={hideTip}
-                  selected={selected?.name === c.name && selected.role === "customer"} />
-          ))}
-          {competitors.map((c, i) => (
-            <Node key={`k${i}`} x={c.x} y={c.y} label={c.name} note={c.note}
-                  color={COL.competitor} onClick={() => pick(c, "competitor")}
-                  verified={c.confidence === "verified"} dimmed={!matchesFilter(c)}
-                  onHover={(e) => showTip(e, c, "competitor")} onLeave={hideTip}
-                  selected={selected?.name === c.name && selected.role === "competitor"} />
+          {allNodes.map((n) => (
+            <Node key={n.key} x={n.x} y={n.y} label={n.name} note={n.note}
+                  pct={n.primaryRole === "competitor" ? null : n.revenue_pct}
+                  color={COL[n.primaryRole]} onClick={() => pick(n)} roles={n.roles}
+                  verified={n.confidence === "verified"} dimmed={!matchesFilter(n)}
+                  onHover={(e) => showTip(e, n, n.primaryRole)} onLeave={hideTip}
+                  selected={selected?.key === n.key} />
           ))}
         </svg>
 

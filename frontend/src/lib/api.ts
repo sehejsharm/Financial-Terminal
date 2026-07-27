@@ -206,6 +206,12 @@ export type ChainNode = {
   confidence?: "estimated" | "verified";
   verified_at?: string | null;
   locked?: boolean;
+  /** EVERY role this entity plays in the map — a company can be both a
+   *  customer and a competitor. Server-annotated; absent on maps generated
+   *  before this field existed (old pins/snapshots), in which case the client
+   *  derives it. Role stays positionally encoded on the wire for
+   *  back-compat; this field is what lets the UI merge duplicates. */
+  roles?: ("supplier" | "customer" | "competitor")[];
 };
 export type ResolveRec = { symbol: string; name: string; exchange: string; isin?: string };
 export type ResolveResult = {
