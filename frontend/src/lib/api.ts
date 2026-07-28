@@ -252,6 +252,14 @@ export type VcReport = {
   /** Absent on records written before categories existed. */
   category?: string;
 };
+/** Shortest connecting path across every value-chain map ever generated. */
+export type ContagionPath = {
+  found: boolean;
+  degrees?: number;
+  nodes?: string[];
+  hops: { frm: string; to: string; role: string; via_ticker: string }[];
+  note?: string;
+};
 /** Aggregate flags for one entity, keyed by normalised name. */
 export type VcReportCount = {
   count: number; categories: Record<string, number>; roles: string[];
@@ -472,6 +480,11 @@ export const api = {
     apiFetch<{ ok: boolean }>(`/api/v1/value-chain/${encodeURIComponent(ticker)}/override`, {
       method: "PUT", body: JSON.stringify(o),
     }),
+  vcPath: (source: string, target: string) =>
+    apiFetch<ContagionPath>(
+      `/api/v1/value-chain/graph/path?source=${encodeURIComponent(source)}&target=${encodeURIComponent(target)}`),
+  vcGraphStats: () =>
+    apiFetch<{ companies: number; connections: number }>("/api/v1/value-chain/graph/stats"),
   vcReportCounts: (ticker: string) =>
     apiFetch<{ ticker: string; counts: Record<string, VcReportCount> }>(
       `/api/v1/value-chain/${encodeURIComponent(ticker)}/report-counts`),

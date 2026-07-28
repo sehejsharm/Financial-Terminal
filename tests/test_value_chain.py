@@ -1,4 +1,5 @@
 """Value-chain helpers + figure construction (no network)."""
+import pytest
 from lib.value_chain import _rgba, _trunc, build_chain_figure
 
 
@@ -137,3 +138,104 @@ def test_report_counts_missing_file_is_empty(tmp_path, monkeypatch):
     from backend.routes import value_chain as vc_routes
     monkeypatch.setattr(vc_routes, "REPORTS_PATH", tmp_path / "nope.jsonl")
     assert vc_routes.report_counts("AAPL", _user={"username": "t"})["counts"] == {}
+
+
+# ── contagion path finder (aggregate graph over every generated map) ───────
+
+def _seed_history(tmp_path, monkeypatch, maps):
+    """Write a fake vc_history.jsonl and point the route at it."""
+    import json as _json
+    from backend.routes import value_chain as vc_routes
+    path = tmp_path / "vc_history.jsonl"
+    lines = []
+    for ticker, name, sup, cus in maps:
+        lines.append(_json.dumps({
+            "ticker": ticker, "generated_at": "2026-01-01T00:00:00",
+            "data": {"name": name,
+                     "suppliers": [{"name": n} for n in sup],
+                     "customers": [{"name": n} for n in cus],
+                     "competitors": []},
+        }))
+    path.write_text("\n".join(lines) + "\n")
+    monkeypatch.setattr(vc_routes, "HISTORY_PATH", path)
+    monkeypatch.setattr(vc_routes, "_GRAPH_CACHE", None)
+    return vc_routes
+
+
+def test_contagion_direct_link(tmp_path, monkeypatch):
+    vc_routes = _seed_history(tmp_path, monkeypatch, [
+        ("NVDA", "Nvidia", ["TSMC"], ["Microsoft"]),
+    ])
+    out = vc_routes.contagion_path(source="Nvidia", target="TSMC",
+                                   _user={"username": "t"})
+    assert out["found"] is True
+    assert out["degrees"] == 1
+    assert out["hops"][0]["to"] == "TSMC"
+
+
+def test_contagion_multi_hop_across_separate_maps(tmp_path, monkeypatch):
+    """The whole point: two companies that never appear in the SAME map are
+    still connected through the aggregate graph."""
+    vc_routes = _seed_history(tmp_path, monkeypatch, [
+        ("NVDA", "Nvidia", ["TSMC"], []),
+        ("TSM", "TSMC", ["Shin-Etsu Chemical"], []),
+        ("RELIANCE.NS", "Reliance Industries", ["Shin-Etsu Chemical"], []),
+    ])
+    out = vc_routes.contagion_path(source="Nvidia", target="Reliance Industries",
+                                   _user={"username": "t"})
+    assert out["found"] is True
+    # Nvidia -> TSMC -> Shin-Etsu -> Reliance
+    assert out["degrees"] == 3
+    assert "TSMC" in out["nodes"]
+    assert "Shin-Etsu Chemical" in out["nodes"]
+
+
+def test_contagion_traverses_both_directions(tmp_path, monkeypatch):
+    """Contagion travels upstream AND downstream, so the graph is undirected."""
+    vc_routes = _seed_history(tmp_path, monkeypatch, [
+        ("A", "Alpha", ["Bravo"], []),
+    ])
+    out = vc_routes.contagion_path(source="Bravo", target="Alpha",
+                                   _user={"username": "t"})
+    assert out["found"] is True and out["degrees"] == 1
+
+
+def test_contagion_reports_no_path_rather_than_inventing_one(tmp_path, monkeypatch):
+    vc_routes = _seed_history(tmp_path, monkeypatch, [
+        ("A", "Alpha", ["Bravo"], []),
+        ("C", "Charlie", ["Delta"], []),
+    ])
+    out = vc_routes.contagion_path(source="Alpha", target="Charlie",
+                                   _user={"username": "t"})
+    assert out["found"] is False
+    assert out["hops"] == []
+
+
+def test_contagion_unknown_company_is_a_clear_404(tmp_path, monkeypatch):
+    from fastapi import HTTPException
+    vc_routes = _seed_history(tmp_path, monkeypatch, [("A", "Alpha", ["Bravo"], [])])
+    with pytest.raises(HTTPException) as ei:
+        vc_routes.contagion_path(source="Nonexistent Co", target="Alpha",
+                                 _user={"username": "t"})
+    assert ei.value.status_code == 404
+
+
+def test_contagion_respects_hop_limit(tmp_path, monkeypatch):
+    vc_routes = _seed_history(tmp_path, monkeypatch, [
+        ("A", "Alpha", ["Bravo"], []),
+        ("B", "Bravo", ["Charlie"], []),
+        ("C", "Charlie", ["Delta"], []),
+    ])
+    assert vc_routes.contagion_path(source="Alpha", target="Delta", max_hops=1,
+                                    _user={"username": "t"})["found"] is False
+    assert vc_routes.contagion_path(source="Alpha", target="Delta", max_hops=6,
+                                    _user={"username": "t"})["found"] is True
+
+
+def test_graph_stats_counts_the_aggregate(tmp_path, monkeypatch):
+    vc_routes = _seed_history(tmp_path, monkeypatch, [
+        ("A", "Alpha", ["Bravo", "Charlie"], []),
+    ])
+    st = vc_routes.graph_stats(_user={"username": "t"})
+    assert st["companies"] == 3          # Alpha + 2 suppliers
+    assert st["connections"] == 2

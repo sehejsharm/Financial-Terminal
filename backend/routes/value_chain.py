@@ -37,6 +37,10 @@ class ChainReport(BaseModel):
 OVERRIDES_PATH = DATA_DIR / "vc_overrides.json"
 HISTORY_PATH = DATA_DIR / "vc_history.jsonl"
 
+# (mtime, adjacency, labels) — the aggregate graph is rebuilt only when the
+# append-only history file changes.
+_GRAPH_CACHE: tuple | None = None
+
 
 def _load_overrides() -> dict:
     try:
@@ -332,6 +336,146 @@ def report_counts(ticker: str, _user: dict = Depends(auth.current_user)):
     except Exception:
         return {"ticker": ticker.upper(), "counts": {}}
     return {"ticker": ticker.upper(), "counts": counts}
+
+
+class PathHop(BaseModel):
+    """One step along a contagion path."""
+    frm: str
+    to: str
+    role: str          # the TO node's role relative to FRM
+    via_ticker: str    # the map this edge came from
+
+
+@router.get("/graph/path")
+def contagion_path(source: str, target: str, max_hops: int = 6,
+                   _user: dict = Depends(auth.current_user)):
+    """Shortest connecting path between ANY two companies across the
+    aggregate of every value-chain map ever generated (vc_history.jsonl).
+
+    'Degrees of separation' for supply chains: Nvidia → TSMC → a chemicals
+    supplier → something you hold. Breadth-first, so the first path found is
+    a shortest one. Every hop names the map it came from, because the whole
+    graph is assembled from AI-generated maps and a path is only ever as
+    trustworthy as the weakest edge in it."""
+    adj, labels = _aggregate_graph()
+    if not adj:
+        raise HTTPException(404, "No value-chain maps have been generated yet — "
+                                 "open a few companies first to build the graph.")
+
+    s_key, t_key = _norm_entity(source), _norm_entity(target)
+    s_key = _closest_node(s_key, adj) or s_key
+    t_key = _closest_node(t_key, adj) or t_key
+    if s_key not in adj:
+        raise HTTPException(404, f"'{source}' isn't in any generated map yet.")
+    if t_key not in adj:
+        raise HTTPException(404, f"'{target}' isn't in any generated map yet.")
+    if s_key == t_key:
+        return {"found": True, "hops": [], "nodes": [labels.get(s_key, source)],
+                "degrees": 0}
+
+    # BFS — unweighted, so the first time we reach the target is via a
+    # shortest path.
+    from collections import deque
+    prev: dict[str, tuple[str, dict]] = {}
+    seen = {s_key}
+    q = deque([(s_key, 0)])
+    while q:
+        node, depth = q.popleft()
+        if depth >= max_hops:
+            continue
+        for nxt, meta in adj.get(node, {}).items():
+            if nxt in seen:
+                continue
+            seen.add(nxt)
+            prev[nxt] = (node, meta)
+            if nxt == t_key:
+                q.clear()
+                break
+            q.append((nxt, depth + 1))
+        if t_key in prev:
+            break
+
+    if t_key not in prev:
+        return {"found": False, "hops": [], "nodes": [],
+                "note": f"No path within {max_hops} hops in the maps generated so far."}
+
+    hops, cur = [], t_key
+    while cur != s_key:
+        p, meta = prev[cur]
+        hops.append({"frm": labels.get(p, p), "to": labels.get(cur, cur),
+                     "role": meta.get("role", "related"),
+                     "via_ticker": meta.get("via", "")})
+        cur = p
+    hops.reverse()
+    return {"found": True, "degrees": len(hops), "hops": hops,
+            "nodes": [labels.get(s_key, source)] + [h["to"] for h in hops]}
+
+
+def _closest_node(key: str, adj: dict) -> str | None:
+    """Exact match, else the same conservative whole-word prefix rule the
+    rest of the entity matching uses."""
+    if key in adj:
+        return key
+    return _alias_key(key, adj.keys())
+
+
+def _aggregate_graph() -> tuple[dict, dict]:
+    """Undirected adjacency over EVERY mapped company + counterparty.
+
+    Cached in-process and rebuilt when the history file grows, since it is
+    read on every path query and the file only ever appends."""
+    global _GRAPH_CACHE
+    try:
+        stamp = HISTORY_PATH.stat().st_mtime_ns if HISTORY_PATH.exists() else 0
+    except OSError:
+        stamp = 0
+    if _GRAPH_CACHE and _GRAPH_CACHE[0] == stamp:
+        return _GRAPH_CACHE[1], _GRAPH_CACHE[2]
+
+    adj: dict[str, dict[str, dict]] = {}
+    labels: dict[str, str] = {}
+    if not HISTORY_PATH.exists():
+        _GRAPH_CACHE = (stamp, adj, labels)
+        return adj, labels
+
+    def link(a_key, a_label, b_key, b_label, role, via):
+        if not a_key or not b_key or a_key == b_key:
+            return
+        labels.setdefault(a_key, a_label)
+        labels.setdefault(b_key, b_label)
+        adj.setdefault(a_key, {}).setdefault(b_key, {"role": role, "via": via})
+        # Reverse direction keeps BFS undirected: contagion travels both ways.
+        inv = {"supplier": "customer", "customer": "supplier"}.get(role, role)
+        adj.setdefault(b_key, {}).setdefault(a_key, {"role": inv, "via": via})
+
+    try:
+        with open(HISTORY_PATH, "r", encoding="utf-8") as fh:
+            for ln in fh:
+                try:
+                    rec = json.loads(ln)
+                except Exception:
+                    continue
+                data = rec.get("data") or {}
+                subject = data.get("name") or rec.get("ticker") or ""
+                s_key = _norm_entity(subject)
+                via = rec.get("ticker") or ""
+                for arr, role in _ROLE_SINGULAR.items():
+                    for n in data.get(arr) or []:
+                        nm = n.get("name") or ""
+                        link(s_key, subject, _norm_entity(nm), nm, role, via)
+    except Exception:
+        pass
+    _GRAPH_CACHE = (stamp, adj, labels)
+    return adj, labels
+
+
+@router.get("/graph/stats")
+def graph_stats(_user: dict = Depends(auth.current_user)):
+    """How big the aggregate graph is — shown so users know the path finder's
+    reach is bounded by what has actually been mapped."""
+    adj, _ = _aggregate_graph()
+    edges = sum(len(v) for v in adj.values()) // 2
+    return {"companies": len(adj), "connections": edges}
 
 
 @router.get("/reports/all")
