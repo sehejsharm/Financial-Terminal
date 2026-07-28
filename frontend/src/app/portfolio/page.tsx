@@ -10,6 +10,7 @@ import { ScrollX } from "@/components/ScrollX";
 import { TickerInput } from "@/components/TickerInput";
 import { MetricCard } from "@/components/MetricCard";
 import { Shell } from "@/components/Shell";
+import { StressTest } from "@/components/StressTest";
 import {
   api,
   type PortfolioHistoryPoint,
@@ -475,6 +476,13 @@ export default function PortfolioPage() {
               )}
             </div>
           </div>
+        </div>
+      )}
+
+      {/* Stress test — collapsed by default, it costs a history fetch per holding */}
+      {(data?.positions?.length ?? 0) > 0 && (
+        <div className="mt-6">
+          <StressTest positions={data!.positions} cur={cur} mixedCcy={mixedCcy} />
         </div>
       )}
 
