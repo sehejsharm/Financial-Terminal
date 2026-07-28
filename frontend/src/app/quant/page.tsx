@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 
+import { Backtester } from "@/components/Backtester";
 import { Shell } from "@/components/Shell";
 import { QuantSkeleton } from "@/components/Skeleton";
 import { TickerInput } from "@/components/TickerInput";
@@ -91,7 +92,11 @@ type QuantResult = {
   betas: { ticker: string; b60: number; bfull: number }[] | null;
 };
 
+type Tab = "corr" | "bt";
+
 export default function QuantPage() {
+  const [tab, setTab] = useState<Tab>("corr");
+  const [btOpened, setBtOpened] = useState(false);
   const [watchlists, setWatchlists] = useState<Watchlist[]>([]);
   const [input, setInput] = useState("RELIANCE.NS, TCS.NS, HDFCBANK.NS, INFY.NS, ^NSEI");
   const [bench, setBench] = useState("^NSEI");
@@ -157,8 +162,32 @@ export default function QuantPage() {
 
   const res = result;
 
+  const firstTicker = input.split(/[,\s]+/).map((t) => t.trim().toUpperCase())
+    .filter((t) => t && !t.startsWith("^"))[0];
+
   return (
     <Shell>
+      <div className="flex items-center gap-1 mb-4 border-b border-line">
+        {([["corr", "Correlation & beta"], ["bt", "Backtest"]] as const).map(([id, label]) => (
+          <button key={id}
+                  onClick={() => { setTab(id); if (id === "bt") setBtOpened(true); }}
+                  className={`px-3 py-2 text-xs uppercase tracking-wider border-b-2 -mb-px ${
+                    tab === id
+                      ? "border-amber text-amber"
+                      : "border-transparent text-mut hover:text-txt"}`}>
+            {label}
+          </button>
+        ))}
+      </div>
+
+      {/* Mounted lazily (it fetches history on mount) but kept alive once
+          opened, so flipping tabs doesn't refetch or discard a tuned
+          parameter set. */}
+      <div className={tab === "bt" ? "" : "hidden"}>
+        {btOpened && <Backtester seedTicker={firstTicker} />}
+      </div>
+
+      <div className={tab === "corr" ? "" : "hidden"}>
       <h1 className="heading mb-3">QUANT — CORRELATION & BETA</h1>
       <div className="text-mut text-xs mb-3">
         Pearson correlation of daily returns (1Y, aligned trading days) and rolling
@@ -268,6 +297,7 @@ export default function QuantPage() {
           )}
         </div>
       )}
+      </div>
     </Shell>
   );
 }
