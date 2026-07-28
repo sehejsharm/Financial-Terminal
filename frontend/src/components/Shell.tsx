@@ -4,7 +4,7 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import {
-  Activity, Bell, Briefcase, Eye, Filter, Globe, Home, LayoutGrid,
+  Activity, Bell, Briefcase, Eye, Filter, Globe, Globe2, Home, LayoutGrid,
   LogOut, Menu, Moon, Newspaper, Search, Shield, Sigma, Sun, Terminal, Waves, X,
 } from "lucide-react";
 
@@ -52,6 +52,7 @@ const NAV = [
   { href: "/quant",     label: "Quant",      icon: Sigma },
   { href: "/workspace", label: "Workspace",  icon: LayoutGrid },
   { href: "/alerts",    label: "Alerts",     icon: Bell },
+  { href: "/global",    label: "Global",     icon: Globe2 },
   { href: "/macro",     label: "Macro",      icon: Globe },
   { href: "/news",      label: "News",       icon: Newspaper },
   { href: "/sharks",    label: "Big Sharks", icon: Waves },
