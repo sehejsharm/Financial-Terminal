@@ -8,7 +8,7 @@ import {
   LogOut, Menu, Moon, Newspaper, Search, Shield, Sigma, Sun, Terminal, Waves, X,
 } from "lucide-react";
 
-import { api, token, type AlertEvent, type Quote } from "@/lib/api";
+import { ApiError, api, token, type AlertEvent, type Quote } from "@/lib/api";
 import { useLiveStatus } from "@/lib/useLive";
 import { useStreamStatus } from "@/lib/useQuote";
 import { cn, fmtPct } from "@/lib/utils";
@@ -108,12 +108,40 @@ export function Shell({ children }: { children: React.ReactNode }) {
   // polling (useLive registry). Static pages show STATIC — no fake pulse.
   const { polling } = useLiveStatus();
 
-  // Boot: verify token; bounce to /login if missing/invalid.
+  // Boot: verify the token, and bounce to /login ONLY when it is actually
+  // rejected.
+  //
+  // This used to log the user out on ANY failure, including a timeout — which
+  // apiFetch surfaces as status 0. A slow or briefly unreachable backend
+  // therefore threw away a perfectly good session and dumped the user on the
+  // sign-in screen. A network problem is not an authentication failure, so
+  // transient errors are retried with a short backoff and the token is left
+  // alone.
   useEffect(() => {
     if (!token.get()) { router.replace("/login"); return; }
-    api.me()
-      .then(setMe)
-      .catch(() => { token.clear(); router.replace("/login"); });
+    let alive = true;
+    let attempt = 0;
+
+    const verify = () => {
+      api.me()
+        .then((u) => { if (alive) setMe(u); })
+        .catch((e: unknown) => {
+          if (!alive) return;
+          const status = e instanceof ApiError ? e.status : 0;
+          if (status === 401 || status === 403) {
+            token.clear();
+            router.replace("/login");
+            return;
+          }
+          // Transient (timeout, network, 5xx): keep the session and retry.
+          if (attempt < 3) {
+            attempt += 1;
+            setTimeout(verify, attempt * 1500);
+          }
+        });
+    };
+    verify();
+    return () => { alive = false; };
   }, [router]);
 
   // Header bell: poll triggered-alert events, badge anything newer than the

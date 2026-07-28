@@ -11,14 +11,13 @@ for (const ticker of ["RELIANCE.NS", "AAPL"]) {
     await page.goto(`/terminal?t=${encodeURIComponent(ticker)}`);
     await expect(page).toHaveURL(new RegExp(encodeURIComponent(ticker)));
 
-    // The function selector is the page's stable anchor — it renders in
-    // every data state (loaded, skeleton, not-found).
-    const fnSelect = page.locator("select").first();
-    await expect(fnSelect).toBeVisible();
+    // The function rail is the page's stable anchor — it renders in every
+    // data state (loaded, skeleton, not-found). It replaced the old <select>.
+    await expect(page.getByRole("button", { name: "DES", exact: true })).toBeVisible();
 
-    for (const fn of ["Snapshot", "Technicals & charts", "Financials", "Notes"]) {
-      await fnSelect.selectOption(fn);
-      await page.waitForTimeout(1500); // allow the tab to fetch/render
+    for (const code of ["DES", "GIP", "FA", "NT"]) {
+      await page.getByRole("button", { name: code, exact: true }).click();
+      await page.waitForTimeout(1200);     // allow the screen to fetch/render
       await expect(page.getByText(BOUNDARY_TEXT)).toHaveCount(0);
     }
   });
@@ -28,11 +27,11 @@ test("period buttons toggle active state", async ({ page }) => {
   test.setTimeout(120_000);
   await login(page);
   await page.goto("/terminal?t=RELIANCE.NS");
-  const fnSelect = page.locator("select").first();
-  const ready = await fnSelect.waitFor({ state: "visible", timeout: 60_000 })
+  const gip = page.getByRole("button", { name: "GIP", exact: true });
+  const ready = await gip.waitFor({ state: "visible", timeout: 60_000 })
     .then(() => true).catch(() => false);
   test.skip(!ready, "backend starved by provider timeouts in this environment");
-  await fnSelect.selectOption("Technicals & charts");
+  await gip.click();
   const btn5d = page.getByRole("button", { name: "5D", exact: true }).first();
   // Period buttons render only once quote/snapshot data loads; with market
   // providers unreachable (CI) the page legitimately stays on the skeleton.

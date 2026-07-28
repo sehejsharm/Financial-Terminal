@@ -56,8 +56,12 @@ test("a deep link with a MNEMONIC opens that screen", async ({ page }) => {
 
 test("a deep link with a junk fn leaves the default screen alone", async ({ page }) => {
   await page.goto("/terminal?t=RELIANCE.NS&fn=NOT_A_FUNCTION");
-  await expect(page.getByRole("button", { name: "DES", exact: true }))
-    .toHaveAttribute("aria-current", "page");
+  // Wait for the rail to mount before asserting its state. The Shell gates
+  // rendering on /auth/me, which under a full-suite run can queue behind the
+  // single-worker backend's provider calls.
+  const des = page.getByRole("button", { name: "DES", exact: true });
+  await expect(des).toBeVisible({ timeout: 45_000 });
+  await expect(des).toHaveAttribute("aria-current", "page");
   await expect(page.getByText(BOUNDARY_TEXT)).toHaveCount(0);
 });
 

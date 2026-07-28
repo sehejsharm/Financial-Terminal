@@ -1,6 +1,6 @@
 import { expect, test } from "@playwright/test";
 
-import { ADMIN_USER, login } from "./helpers";
+import { ADMIN_USER, loginViaForm } from "./helpers";
 
 test("bad credentials show an error and stay on /login", async ({ page }) => {
   await page.goto("/login");
@@ -12,7 +12,8 @@ test("bad credentials show an error and stay on /login", async ({ page }) => {
 });
 
 test("good credentials land on the dashboard shell", async ({ page }) => {
-  await login(page);
+  // The one place that must exercise the real form.
+  await loginViaForm(page);
   // Shell nav renders its main links.
   await expect(page.getByRole("link", { name: "Terminal" })).toBeVisible();
   await expect(page.getByRole("link", { name: "Screeners" })).toBeVisible();

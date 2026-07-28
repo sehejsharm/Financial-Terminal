@@ -26,10 +26,13 @@ test("custom screen builder renders and accepts conditions", async ({ page }) =>
   await login(page);
   await page.goto("/screeners");
   await page.getByRole("button", { name: "Custom", exact: true }).click();
-  await expect(page.getByText("Build your own screen")).toBeVisible();
-  await page.getByRole("button", { name: "+ Add condition" }).click();
-  await expect(page.locator("select")).toHaveCount(4); // 2 rows × (metric+op)
-  await page.getByRole("button", { name: "Run custom screen" }).click();
+  // The builder shows a WHERE clause row: field + operator + value.
+  await expect(page.getByText("WHERE")).toBeVisible();
+  await expect(page.getByRole("button", { name: /Condition/ })).toBeVisible();
+  await page.getByRole("button", { name: /Condition/ }).click();
+  // Two clause rows, each a field + operator select, plus the match selector.
+  await expect(page.locator("select")).toHaveCount(5);
+  await page.getByRole("button", { name: /Run screen/ }).click();
   await expect(
     page.getByRole("link", { name: "Open →" }).first()
       .or(page.getByText(/scanned \d+ names/i))
