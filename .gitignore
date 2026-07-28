@@ -39,3 +39,8 @@ venv/
 e2e-data/
 frontend/playwright-report/
 frontend/test-results/
+
+# Playwright run artifacts
+test-results/
+frontend/test-results/
+frontend/playwright-report/

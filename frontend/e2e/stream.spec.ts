@@ -36,8 +36,10 @@ test("dashboard index tile updates when a mock tick arrives", async ({ page }) =
   await login(page);
   await page.goto("/");
 
-  // NIFTY 50 tile paints the snapshot first…
-  const nifty = page.getByText("NIFTY 50", { exact: true }).locator("..");
+  // NIFTY 50 tile paints the snapshot first. Targeted by test id rather than
+  // by walking up from the label text: that coupled the assertion to the
+  // tile's exact DOM shape and broke the moment the tile was redesigned.
+  const nifty = page.getByTestId("tile-^NSEI");
   await expect(nifty.getByText("100.00")).toBeVisible({ timeout: 30_000 });
   // …then the mock delta moves it — the number changed live.
   await expect(page.getByText("24,680.55")).toBeVisible({ timeout: 30_000 });

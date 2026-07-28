@@ -89,6 +89,82 @@ html.light.cb {
   .btn-ghost   { @apply btn bg-panel2 text-txt border border-line2 hover:border-amber; }
 }
 
+/* ── HUD / "flight deck" surface treatment ────────────────────────────────
+   Used by the dashboard. The intent is an instrument panel: hairline grid,
+   corner brackets, a faint scanning sweep on the status rail. All of it is
+   decorative and sits behind content with pointer-events:none, so none of it
+   can ever intercept a click or hurt contrast. Everything degrades to a plain
+   panel if these classes are dropped. */
+
+.hud {
+  position: relative;
+  background:
+    linear-gradient(to bottom, rgb(var(--c-panel2)), rgb(var(--c-panel)));
+  border: 1px solid rgb(var(--c-line));
+  border-radius: 6px;
+}
+/* Corner brackets: two L-shaped marks, drawn with borders on pseudo-elements
+   so there's no extra DOM and no image request. */
+.hud::before,
+.hud::after {
+  content: "";
+  position: absolute;
+  width: 9px; height: 9px;
+  border-color: rgb(var(--c-amber) / 0.45);
+  pointer-events: none;
+}
+.hud::before {
+  top: -1px; left: -1px;
+  border-top: 1px solid; border-left: 1px solid;
+  border-top-left-radius: 6px;
+}
+.hud::after {
+  bottom: -1px; right: -1px;
+  border-bottom: 1px solid; border-right: 1px solid;
+  border-bottom-right-radius: 6px;
+}
+.hud-live::before, .hud-live::after { border-color: rgb(var(--c-green) / 0.6); }
+
+/* Hairline instrument grid, sits *behind* the content of a section header. */
+.hud-grid {
+  background-image:
+    linear-gradient(rgb(var(--c-line) / 0.5) 1px, transparent 1px),
+    linear-gradient(90deg, rgb(var(--c-line) / 0.5) 1px, transparent 1px);
+  background-size: 22px 22px;
+}
+
+/* Amber edge-glow for the active/critical element. Deliberately restrained —
+   a box-shadow, not a neon halo. */
+.hud-glow { box-shadow: 0 0 0 1px rgb(var(--c-amber) / 0.25), 0 0 18px -6px rgb(var(--c-amber) / 0.35); }
+
+/* Slow horizontal sweep across the status rail. Reads as "system live"
+   without pulling the eye away from the numbers. */
+@keyframes hudSweep {
+  0%   { transform: translateX(-100%); }
+  100% { transform: translateX(220%); }
+}
+.hud-sweep { position: relative; overflow: hidden; }
+.hud-sweep > .hud-sweep-bar {
+  position: absolute; inset-block: 0; left: 0;
+  width: 45%;
+  pointer-events: none;
+  background: linear-gradient(90deg, transparent, rgb(var(--c-amber) / 0.055), transparent);
+  animation: hudSweep 7s linear infinite;
+}
+
+/* Session progress: how far through the trading day an exchange is. */
+.hud-track { background: rgb(var(--c-line) / 0.9); border-radius: 999px; overflow: hidden; }
+.hud-fill { background: rgb(var(--c-green)); border-radius: 999px; transition: width 0.6s linear; }
+
+/* Signed change bar behind a tile's number — magnitude at a glance without
+   needing to read the digits. */
+.hud-bar { position: absolute; bottom: 0; left: 0; height: 2px; transition: width 0.5s ease-out; }
+
+@media (prefers-reduced-motion: reduce) {
+  .hud-sweep > .hud-sweep-bar { animation: none; }
+  .hud-fill, .hud-bar { transition: none; }
+}
+
 /* ── Streaming <LiveNumber> tick flash ────────────────────────────────────
    Colours come from the --c-green/--c-red vars, so html.cb (colorblind-safe
    blue/orange) remaps the flash automatically. Respects reduced-motion. */
