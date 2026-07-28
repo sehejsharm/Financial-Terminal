@@ -6,6 +6,10 @@ import {
 import { useEffect, useMemo, useRef, useState } from "react";
 
 import { bollinger, ema, macd, rsi, sma } from "@/lib/indicators";
+import {
+  adx, atr, cci, donchian, ichimoku, keltner, mfi, obv, psar, roc,
+  stochastic, supertrend, vwap, williamsR, type Bar as IBar,
+} from "@/lib/indicatorsPlus";
 import { useQuote } from "@/lib/useQuote";
 
 // yfinance serialises columns capitalised (Date/Close/Open…); Twelve Data uses
@@ -58,8 +62,13 @@ function parseCandles(data: Candle[]): OHLCPoint[] {
 }
 
 export type ChartType = "area" | "candles" | "line";
-export type Overlay = "SMA20" | "SMA50" | "SMA200" | "EMA20" | "BB";
-export type Pane = "none" | "RSI" | "MACD";
+export type Overlay =
+  | "SMA10" | "SMA20" | "SMA50" | "SMA100" | "SMA200"
+  | "EMA9" | "EMA21" | "EMA50"
+  | "BB" | "VWAP" | "PSAR" | "DONCH" | "KELT" | "SUPER" | "ICHI";
+export type Pane =
+  | "none" | "RSI" | "MACD" | "STOCH" | "ATR" | "ADX"
+  | "OBV" | "CCI" | "WILLR" | "MFI" | "ROC";
 
 export type ChartConfig = {
   type: ChartType;
@@ -74,12 +83,43 @@ export const DEFAULT_CHART_CONFIG: ChartConfig = {
 };
 
 const OVERLAY_COLORS: Record<Overlay, string> = {
+  SMA10: "#74c0fc",
   SMA20: "#4dabf7",   // blue
   SMA50: "#b197fc",   // violet
+  SMA100: "#f783ac",
   SMA200: "#ff922b",  // orange
-  EMA20: "#3bc9db",   // cyan
+  EMA9: "#63e6be",
+  EMA21: "#3bc9db",   // cyan
+  EMA50: "#9775fa",
   BB: "#868e96",      // grey band
+  VWAP: "#ffd43b",
+  PSAR: "#e599f7",
+  DONCH: "#8ce99a",
+  KELT: "#ffc078",
+  SUPER: "#69db7c",
+  ICHI: "#a5d8ff",
 };
+
+/** Grouped for the toolbar, so 15 overlays don't render as one long row. */
+export const OVERLAY_GROUPS: [string, Overlay[]][] = [
+  ["MA", ["SMA10", "SMA20", "SMA50", "SMA100", "SMA200", "EMA9", "EMA21", "EMA50"]],
+  ["Bands", ["BB", "DONCH", "KELT"]],
+  ["Trend", ["PSAR", "SUPER", "ICHI"]],
+  ["Volume", ["VWAP"]],
+];
+
+export const PANE_OPTIONS: { id: Pane; label: string; hint: string }[] = [
+  { id: "RSI", label: "RSI", hint: "Relative Strength Index (14)" },
+  { id: "MACD", label: "MACD", hint: "MACD 12/26 with its 9-period signal" },
+  { id: "STOCH", label: "STOCH", hint: "Stochastic %K/%D (14,3,3)" },
+  { id: "ATR", label: "ATR", hint: "Average True Range (14) — volatility in price units" },
+  { id: "ADX", label: "ADX", hint: "Trend strength with +DI / -DI (14)" },
+  { id: "OBV", label: "OBV", hint: "On-Balance Volume — needs volume data" },
+  { id: "CCI", label: "CCI", hint: "Commodity Channel Index (20)" },
+  { id: "WILLR", label: "%R", hint: "Williams %R (14)" },
+  { id: "MFI", label: "MFI", hint: "Money Flow Index (14) — volume-weighted RSI" },
+  { id: "ROC", label: "ROC", hint: "Rate of change over 12 bars, in percent" },
+];
 
 /**
  * TradingView Lightweight Charts price chart with indicator support:
@@ -148,6 +188,11 @@ export function PriceChart({
     chartRef.current = chart;
 
     const closes = points.map((p) => p.close);
+    // OHLC-based indicators need the full bar, not just the close.
+    const bars: IBar[] = points.map((p) => ({
+      time: p.time, open: p.open, high: p.high, low: p.low, close: p.close,
+      volume: p.volume ?? null,
+    }));
 
     // ── main price series ────────────────────────────────────────────────
     let priceSeries: ISeriesApi<"Area"> | ISeriesApi<"Candlestick"> | ISeriesApi<"Line">;
@@ -205,15 +250,52 @@ export function PriceChart({
         .filter((d): d is { time: UTCTimestamp; value: number } => d.value != null));
     };
     for (const ov of config.overlays) {
-      if (ov === "SMA20") addLine(sma(closes, 20), OVERLAY_COLORS.SMA20);
-      if (ov === "SMA50") addLine(sma(closes, 50), OVERLAY_COLORS.SMA50);
-      if (ov === "SMA200") addLine(sma(closes, 200), OVERLAY_COLORS.SMA200, 2);
-      if (ov === "EMA20") addLine(ema(closes, 20), OVERLAY_COLORS.EMA20);
+      const c = OVERLAY_COLORS[ov];
+      if (ov === "SMA10") addLine(sma(closes, 10), c);
+      if (ov === "SMA20") addLine(sma(closes, 20), c);
+      if (ov === "SMA50") addLine(sma(closes, 50), c);
+      if (ov === "SMA100") addLine(sma(closes, 100), c);
+      if (ov === "SMA200") addLine(sma(closes, 200), c, 2);
+      if (ov === "EMA9") addLine(ema(closes, 9), c);
+      if (ov === "EMA21") addLine(ema(closes, 21), c);
+      if (ov === "EMA50") addLine(ema(closes, 50), c);
       if (ov === "BB") {
         const bb = bollinger(closes, 20, 2);
-        addLine(bb.upper, OVERLAY_COLORS.BB, 1, true);
-        addLine(bb.lower, OVERLAY_COLORS.BB, 1, true);
-        addLine(bb.mid, OVERLAY_COLORS.BB);
+        addLine(bb.upper, c, 1, true);
+        addLine(bb.lower, c, 1, true);
+        addLine(bb.mid, c);
+      }
+      if (ov === "VWAP") addLine(vwap(bars), c, 2);
+      if (ov === "DONCH") {
+        const d = donchian(bars, 20);
+        addLine(d.upper, c, 1, true);
+        addLine(d.lower, c, 1, true);
+      }
+      if (ov === "KELT") {
+        const k = keltner(bars, 20, 2, 10);
+        addLine(k.upper, c, 1, true);
+        addLine(k.lower, c, 1, true);
+      }
+      if (ov === "SUPER") addLine(supertrend(bars, 10, 3).line, c, 2);
+      if (ov === "PSAR") {
+        // Dots, not a line: the SAR jumps sides and a connected line would
+        // draw a meaningless diagonal across the flip.
+        const r = psar(bars);
+        const dots = chart.addLineSeries({
+          color: c, lineWidth: 1, lineStyle: LineStyle.Dotted,
+          lastValueVisible: false, priceLineVisible: false,
+          crosshairMarkerVisible: false,
+        });
+        dots.setData(points
+          .map((p, i) => ({ time: p.time, value: r.sar[i] }))
+          .filter((d): d is { time: UTCTimestamp; value: number } => d.value != null));
+      }
+      if (ov === "ICHI") {
+        const ic = ichimoku(bars, 9, 26, 52);
+        addLine(ic.conversion, c);
+        addLine(ic.base, "#4dabf7");
+        addLine(ic.spanA, "#69db7c", 1, true);
+        addLine(ic.spanB, "#ff922b", 1, true);
       }
     }
 
@@ -226,28 +308,70 @@ export function PriceChart({
       });
       paneChartRef.current = pane;
 
-      if (config.pane === "RSI") {
-        const r = rsi(closes, 14);
-        const s = pane.addLineSeries({ color: amber, lineWidth: 2, lastValueVisible: true, priceLineVisible: false });
-        s.setData(points
-          .map((p, i) => ({ time: p.time, value: r[i] }))
+      // One helper for every sub-pane series, so a new indicator is a couple
+      // of lines rather than a copy of the filtering boilerplate.
+      const paneLine = (vals: (number | null)[], color: string, width: 1 | 2 = 1,
+                        showLast = false) => {
+        const s2 = pane!.addLineSeries({
+          color, lineWidth: width, lastValueVisible: showLast,
+          priceLineVisible: false,
+        });
+        s2.setData(points
+          .map((p, i) => ({ time: p.time, value: vals[i] }))
           .filter((d): d is { time: UTCTimestamp; value: number } => d.value != null));
-        s.createPriceLine({ price: 70, color: red, lineWidth: 1, lineStyle: LineStyle.Dashed, axisLabelVisible: true, title: "70" });
-        s.createPriceLine({ price: 30, color: green, lineWidth: 1, lineStyle: LineStyle.Dashed, axisLabelVisible: true, title: "30" });
-      } else {
+        return s2;
+      };
+      const guide = (s2: ReturnType<typeof paneLine>, price: number,
+                     color: string, title: string) =>
+        s2.createPriceLine({
+          price, color, lineWidth: 1, lineStyle: LineStyle.Dashed,
+          axisLabelVisible: true, title,
+        });
+
+      if (config.pane === "RSI") {
+        const s2 = paneLine(rsi(closes, 14), amber, 2, true);
+        guide(s2, 70, red, "70");
+        guide(s2, 30, green, "30");
+      } else if (config.pane === "MACD") {
         const m = macd(closes, 12, 26, 9);
         const hist = pane.addHistogramSeries({ lastValueVisible: false, priceLineVisible: false });
         hist.setData(points
           .map((p, i) => ({ time: p.time, value: m.hist[i], color: (m.hist[i] ?? 0) >= 0 ? themeColor("--c-green", "#1fd286", 0.6) : themeColor("--c-red", "#ff4d4f", 0.6) }))
           .filter((d): d is { time: UTCTimestamp; value: number; color: string } => d.value != null));
-        const lm = pane.addLineSeries({ color: amber, lineWidth: 1, lastValueVisible: false, priceLineVisible: false });
-        lm.setData(points
-          .map((p, i) => ({ time: p.time, value: m.macd[i] }))
-          .filter((d): d is { time: UTCTimestamp; value: number } => d.value != null));
-        const ls = pane.addLineSeries({ color: "#4dabf7", lineWidth: 1, lastValueVisible: false, priceLineVisible: false });
-        ls.setData(points
-          .map((p, i) => ({ time: p.time, value: m.signal[i] }))
-          .filter((d): d is { time: UTCTimestamp; value: number } => d.value != null));
+        paneLine(m.macd, amber, 1);
+        paneLine(m.signal, "#4dabf7", 1);
+      } else if (config.pane === "STOCH") {
+        const st = stochastic(bars, 14, 3, 3);
+        const s2 = paneLine(st.k, amber, 2, true);
+        paneLine(st.d, "#4dabf7", 1);
+        guide(s2, 80, red, "80");
+        guide(s2, 20, green, "20");
+      } else if (config.pane === "ATR") {
+        paneLine(atr(bars, 14), amber, 2, true);
+      } else if (config.pane === "ADX") {
+        const r = adx(bars, 14);
+        const s2 = paneLine(r.adx, amber, 2, true);
+        paneLine(r.plusDi, green, 1);
+        paneLine(r.minusDi, red, 1);
+        // 25 is the conventional "trending vs ranging" threshold.
+        guide(s2, 25, "#868e96", "25");
+      } else if (config.pane === "OBV") {
+        paneLine(obv(bars), amber, 2, true);
+      } else if (config.pane === "CCI") {
+        const s2 = paneLine(cci(bars, 20), amber, 2, true);
+        guide(s2, 100, red, "100");
+        guide(s2, -100, green, "-100");
+      } else if (config.pane === "WILLR") {
+        const s2 = paneLine(williamsR(bars, 14), amber, 2, true);
+        guide(s2, -20, red, "-20");
+        guide(s2, -80, green, "-80");
+      } else if (config.pane === "MFI") {
+        const s2 = paneLine(mfi(bars, 14), amber, 2, true);
+        guide(s2, 80, red, "80");
+        guide(s2, 20, green, "20");
+      } else if (config.pane === "ROC") {
+        const s2 = paneLine(roc(closes, 12), amber, 2, true);
+        guide(s2, 0, "#868e96", "0");
       }
 
       // Two-way visible-range sync so pan/zoom moves both charts together.
@@ -331,6 +455,31 @@ export function useChartConfig(): [ChartConfig, (c: ChartConfig) => void] {
   return [config, update];
 }
 
+const OVERLAY_LABEL: Partial<Record<Overlay, string>> = {
+  BB: "BOLL", DONCH: "DONCH", KELT: "KELT", SUPER: "SUPER", ICHI: "ICHI",
+  PSAR: "PSAR", VWAP: "VWAP",
+};
+
+const OVERLAY_HINT: Partial<Record<Overlay, string>> = {
+  SMA10: "10-period simple moving average",
+  SMA20: "20-period simple moving average",
+  SMA50: "50-period simple moving average",
+  SMA100: "100-period simple moving average",
+  SMA200: "200-period simple moving average",
+  EMA9: "9-period exponential moving average",
+  EMA21: "21-period exponential moving average",
+  EMA50: "50-period exponential moving average",
+  BB: "Bollinger Bands (20, 2σ)",
+  DONCH: "Donchian channel (20) — the highest high and lowest low",
+  KELT: "Keltner channel (EMA 20 ± 2 ATR)",
+  SUPER: "Supertrend (10, 3) — flips side with the trend",
+  ICHI: "Ichimoku: conversion, base and both spans. Spans are drawn where "
+        + "they are computed, not displaced forward.",
+  PSAR: "Parabolic SAR — drawn as dots, since the level jumps sides",
+  VWAP: "Volume-weighted average price, cumulative over the window shown "
+        + "(not an intraday session VWAP)",
+};
+
 export function ChartToolbar({
   config, onChange,
 }: { config: ChartConfig; onChange: (c: ChartConfig) => void }) {
@@ -360,18 +509,34 @@ export function ChartToolbar({
       <Btn on={config.type === "candles"} label="CANDLES" onClick={() => onChange({ ...config, type: "candles" })} />
       <Btn on={config.type === "line"} label="LINE" onClick={() => onChange({ ...config, type: "line" })} />
       <span className="w-2" />
-      <span className="label-xs mr-1">Overlays</span>
-      {(["SMA20", "SMA50", "SMA200", "EMA20", "BB"] as Overlay[]).map((o) => (
-        <Btn key={o} on={config.overlays.includes(o)} label={o === "BB" ? "BOLL" : o}
-             title={o === "BB" ? "Bollinger Bands (20, 2σ)" : undefined}
-             onClick={() => toggleOverlay(o)} />
+
+      {/* 15 overlays would be an unreadable row, so they're grouped and the
+          groups collapse — the ones you're using stay visible. */}
+      {OVERLAY_GROUPS.map(([group, list]) => (
+        <span key={group} className="flex items-center gap-1.5">
+          <span className="label-xs">{group}</span>
+          {list.map((o) => (
+            <Btn key={o} on={config.overlays.includes(o)}
+                 label={OVERLAY_LABEL[o] ?? o}
+                 title={OVERLAY_HINT[o]}
+                 onClick={() => toggleOverlay(o)} />
+          ))}
+        </span>
       ))}
+
+      {config.overlays.length > 0 && (
+        <Btn on={false} label="CLEAR" title="Remove every overlay"
+             onClick={() => onChange({ ...config, overlays: [] })} />
+      )}
+
       <span className="w-2" />
       <span className="label-xs mr-1">Pane</span>
-      <Btn on={config.pane === "RSI"} label="RSI"
-           onClick={() => onChange({ ...config, pane: config.pane === "RSI" ? "none" : "RSI" })} />
-      <Btn on={config.pane === "MACD"} label="MACD"
-           onClick={() => onChange({ ...config, pane: config.pane === "MACD" ? "none" : "MACD" })} />
+      {PANE_OPTIONS.map((p) => (
+        <Btn key={p.id} on={config.pane === p.id} label={p.label} title={p.hint}
+             onClick={() => onChange({
+               ...config, pane: config.pane === p.id ? "none" : p.id,
+             })} />
+      ))}
       <span className="w-2" />
       <Btn on={config.volume} label="VOL" title="Volume bars"
            onClick={() => onChange({ ...config, volume: !config.volume })} />
