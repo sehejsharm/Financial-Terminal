@@ -1,278 +1,455 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
-import { Plus, Save, Trash2, X } from "lucide-react";
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  Grid2x2, LayoutGrid, Plus, RotateCcw, Rows3, Save, Trash2, X,
+} from "lucide-react";
 
-import { News } from "@/components/News";
-import { PriceChart } from "@/components/PriceChart";
 import { Shell } from "@/components/Shell";
-import { TickerInput } from "@/components/TickerInput";
-import { ValueChainMap } from "@/components/ValueChainMap";
-import { api, type Mover, type Snapshot, type WorkspaceLayout, type WorkspacePane } from "@/lib/api";
-import { fmtNum, fmtPct, formatPercent, humanNumber } from "@/lib/utils";
+import { LinkLegend, PaneFrame } from "@/components/workspace/PaneFrame";
+import { api, type WorkspaceLayout } from "@/lib/api";
+import { useQuotes } from "@/lib/useQuote";
+import {
+  activeTickers, addPane, addRow, DEFAULT_TICKER, emptyWorkspace, evenOut,
+  makePane, makeRow,
+  MAX_PANES, MAX_PANES_PER_ROW, MAX_ROWS, movePane, moveRow, newId, normalize,
+  paneCount, removePane, removeRow, resizeColumn, resizeRow, setGroupTicker,
+  setPane, setPaneLink, setTickerFrom, tickerFor, WS_VERSION,
+  type LinkGroup, type Workspace,
+} from "@/lib/workspace";
+import {
+  DESK_PRESETS, WIDGET_IDS, needsTicker, preset, widget,
+} from "@/lib/workspaceWidgets";
 
-/** Multi-pane workspace: 1-4 side-by-side widgets (chart / news / snapshot /
- *  value chain / movers), drag the dividers to resize, save named layouts
- *  per user and restore them on login. */
+/**
+ * The workspace: a tiling grid of live panes with Bloomberg-style ticker
+ * linking.
+ *
+ * Layouts are saved on the SERVER (they're a real artefact of how you work,
+ * and should follow you between machines), while the id of the one you had
+ * open last is remembered locally — that's a per-device thing.
+ */
 
-const WIDGETS = ["chart", "news", "snapshot", "valuechain", "movers"] as const;
-type WidgetKind = typeof WIDGETS[number];
-const WIDGET_LABELS: Record<WidgetKind, string> = {
-  chart: "Chart", news: "News", snapshot: "Snapshot",
-  valuechain: "Value chain", movers: "Movers",
-};
-const NEEDS_TICKER: Record<WidgetKind, boolean> = {
-  chart: true, news: true, snapshot: true, valuechain: true, movers: false,
-};
+const ACTIVE_KEY = "mb_ws_active";
 
-function ChartWidget({ ticker }: { ticker: string }) {
-  const [candles, setCandles] = useState<any[] | null>(null);  // null = loading
-  const [err, setErr] = useState<string | null>(null);
-  const [epoch, setEpoch] = useState(0);                       // bump = retry
-  useEffect(() => {
-    // Stale-response guard: switching a pane's ticker quickly must not let
-    // an older, slower fetch overwrite the newer one (same race as the
-    // Terminal chart).
-    let alive = true;
-    setCandles(null); setErr(null);
-    api.history(ticker, "1Y")
-      .then((h) => { if (alive) setCandles(h?.candles ?? []); })
-      .catch((e) => { if (alive) { setCandles([]); setErr(e?.detail || "Chart data failed to load."); } });
-    return () => { alive = false; };
-  }, [ticker, epoch]);
-  if (candles === null) return <div className="text-mut text-xs animate-pulse">Loading chart…</div>;
-  if (err || candles.length === 0) {
-    return (
-      <div className="panel-2 p-4 text-sm">
-        <div className="text-mut mb-2">{err ?? `No chart data for ${ticker} right now.`}</div>
-        <button onClick={() => setEpoch((n) => n + 1)} className="btn-ghost text-xs">Retry</button>
-      </div>
-    );
+// ── divider ───────────────────────────────────────────────────────────────
+
+/** Drag handle between two panes or two rows. Reports movement as a fraction
+ *  of the container so the pure resize helpers stay unit-agnostic. */
+function Divider({ vertical, onDrag }: {
+  vertical?: boolean; onDrag: (frac: number) => void;
+}) {
+  const last = useRef<number | null>(null);
+
+  function down(e: React.PointerEvent) {
+    last.current = vertical ? e.clientY : e.clientX;
+    // Capture on the element itself so the pointer can leave it mid-drag
+    // without the gesture dying.
+    (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
   }
-  return <PriceChart data={candles} height={320} />;
-}
-
-function SnapshotWidget({ ticker }: { ticker: string }) {
-  const [s, setS] = useState<Snapshot | null>(null);
-  const [failed, setFailed] = useState(false);
-  const [epoch, setEpoch] = useState(0);
-  useEffect(() => {
-    setS(null); setFailed(false);
-    api.snapshot(ticker).then(setS).catch(() => setFailed(true));
-  }, [ticker, epoch]);
-  if (failed) {
-    return (
-      <div className="panel-2 p-3 text-sm">
-        <div className="text-mut mb-2">Snapshot failed to load for {ticker}.</div>
-        <button onClick={() => setEpoch((n) => n + 1)} className="btn-ghost text-xs">Retry</button>
-      </div>
-    );
+  function move(e: React.PointerEvent) {
+    if (last.current == null) return;
+    const el = (e.currentTarget as HTMLElement).parentElement;
+    if (!el) return;
+    const span = vertical ? el.clientHeight : el.clientWidth;
+    if (!span) return;
+    const now = vertical ? e.clientY : e.clientX;
+    onDrag((now - last.current) / span);
+    last.current = now;
   }
-  if (!s) return <div className="text-mut text-xs animate-pulse">Loading…</div>;
-  const rows: [string, string][] = [
-    ["Price", fmtNum(s.price as number, 2)],
-    ["Mkt cap", humanNumber(s.market_cap as number)],
-    ["P/E", fmtNum(s.trailing_pe as number, 1)],
-    ["Beta", fmtNum(s.beta as number, 2)],
-    ["ROE", formatPercent(s.roe as number, { fraction: true })],
-    ["Div yield", formatPercent(s.dividend_yield as number)],
-  ];
+  function up(e: React.PointerEvent) {
+    last.current = null;
+    try { (e.currentTarget as HTMLElement).releasePointerCapture(e.pointerId); }
+    catch { /* already released */ }
+  }
+
   return (
-    <div className="grid grid-cols-2 gap-2">
-      {rows.map(([l, v]) => (
-        <div key={l} className="panel-2 p-2">
-          <div className="label-xs">{l}</div>
-          <div className="num text-sm">{v}</div>
-        </div>
-      ))}
-      <div className="col-span-2 text-xs text-mut">{(s.name as string) ?? ticker} · {(s.sector as string) ?? "—"}</div>
+    <div onPointerDown={down} onPointerMove={move} onPointerUp={up} onPointerCancel={up}
+         title="Drag to resize"
+         className={`group flex items-center justify-center shrink-0 touch-none
+                     ${vertical ? "h-2 cursor-row-resize" : "w-2 cursor-col-resize"}`}>
+      <div className={`rounded bg-line group-hover:bg-amber/70 transition-colors
+                       ${vertical ? "h-[3px] w-14" : "w-[3px] h-14"}`} />
     </div>
   );
 }
 
-function MoversWidget() {
-  const [rows, setRows] = useState<Mover[]>([]);
-  useEffect(() => {
-    api.movers("gainers", 8).then((r) => setRows(Array.isArray(r) ? r : [])).catch(() => setRows([]));
-  }, []);
+// ── layout picker ─────────────────────────────────────────────────────────
+
+function PresetPicker({ onPick, onClose }: {
+  onPick: (id: string) => void; onClose: () => void;
+}) {
   return (
-    <div className="flex flex-col gap-1">
-      {rows.length === 0 && <div className="text-mut text-xs">No data.</div>}
-      {rows.map((m, i) => {
-        const cp = Number(m.change_pct ?? 0);
-        return (
-          <div key={i} className="flex justify-between text-sm px-1 py-0.5">
-            <span className="truncate">{String(m.symbol ?? "")}</span>
-            <span className={`num ${cp >= 0 ? "text-green" : "text-red"}`}>{fmtPct(cp)}</span>
-          </div>
-        );
-      })}
+    <div className="hud p-3 mb-3">
+      <div className="flex items-center gap-2 mb-2.5">
+        <span className="heading">Start from a desk</span>
+        <div className="flex-1" />
+        <button onClick={onClose} className="text-mut hover:text-txt text-xs">close</button>
+      </div>
+      <div className="grid gap-2"
+           style={{ gridTemplateColumns: "repeat(auto-fill, minmax(230px, 1fr))" }}>
+        {DESK_PRESETS.map((p) => (
+          <button key={p.id} onClick={() => onPick(p.id)}
+                  className="text-left px-3 py-2 rounded border border-line2 bg-panel
+                             hover:border-amber hover:bg-panel2 transition-colors group">
+            <div className="flex items-center gap-1.5">
+              <LayoutGrid size={11} className="text-mut group-hover:text-amber" />
+              <span className="text-[12px] text-txt">{p.name}</span>
+              <span className="num text-[10px] text-mut ml-auto">
+                {p.rows.reduce((a, r) => a + r.length, 0)} panes
+              </span>
+            </div>
+            <div className="text-[10.5px] text-mut mt-1 leading-snug">{p.blurb}</div>
+          </button>
+        ))}
+      </div>
+      <div className="text-[10.5px] text-mut mt-3">
+        Picking a desk replaces the current arrangement. Save the one you have
+        first if you want it back.
+      </div>
     </div>
   );
 }
 
-function PaneView({ pane }: { pane: WorkspacePane }) {
-  const t = (pane.ticker || "RELIANCE.NS").toUpperCase();
-  switch (pane.widget as WidgetKind) {
-    case "chart": return <ChartWidget ticker={t} />;
-    case "news": return <News ticker={t} />;
-    case "snapshot": return <SnapshotWidget ticker={t} />;
-    case "valuechain": return <ValueChainMap ticker={t} />;
-    case "movers": return <MoversWidget />;
-    default: return <div className="text-mut text-xs">Unknown widget.</div>;
-  }
-}
+// ── page ──────────────────────────────────────────────────────────────────
 
-const DEFAULT_PANES: WorkspacePane[] = [
-  { widget: "chart", ticker: "RELIANCE.NS" },
-  { widget: "news", ticker: "RELIANCE.NS" },
-];
-
-export default function WorkspacePage() {
-  const [panes, setPanes] = useState<WorkspacePane[]>(DEFAULT_PANES);
-  const [split, setSplit] = useState<number[]>([1, 1]);
+function WorkspaceBody() {
+  const [ws, setWs] = useState<Workspace | null>(null);
   const [layouts, setLayouts] = useState<WorkspaceLayout[]>([]);
   const [saveName, setSaveName] = useState("");
-  const containerRef = useRef<HTMLDivElement | null>(null);
-  const dragRef = useRef<{ idx: number; startX: number; left: number; right: number } | null>(null);
+  const [picking, setPicking] = useState(false);
+  const [maxPane, setMaxPane] = useState<string | null>(null);
+  const [err, setErr] = useState<string | null>(null);
+  const [dirty, setDirty] = useState(false);
+  const [saving, setSaving] = useState(false);
+  /** Epoch ms of the last confirmed save — drives the "saved" tick. */
+  const [savedAt, setSavedAt] = useState<number | null>(null);
 
+  // Boot: restore saved layouts, reopening whichever was last active here.
   useEffect(() => {
-    api.workspaces().then((w) => {
-      setLayouts(w.layouts);
-      if (w.layouts.length) applyLayout(w.layouts[0]);
-    }).catch(() => {});
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    let alive = true;
+    api.workspaces()
+      .then((res) => {
+        if (!alive) return;
+        const list = res.layouts ?? [];
+        setLayouts(list);
+        let wantId: string | null = null;
+        try { wantId = localStorage.getItem(ACTIVE_KEY); } catch { /* ignore */ }
+        const chosen = list.find((l) => l.id === wantId)
+          ?? list.find((l) => l.id === res.active_id)
+          ?? list[0];
+        const restored = chosen ? normalize(chosen, WIDGET_IDS) : null;
+        setWs(restored ?? fromPreset("research"));
+      })
+      .catch(() => { if (alive) setWs(fromPreset("research")); });
+    return () => { alive = false; };
   }, []);
 
-  function applyLayout(l: WorkspaceLayout) {
-    setPanes(l.panes.length ? l.panes : DEFAULT_PANES);
-    setSplit(l.split.length === l.panes.length ? l.split : l.panes.map(() => 1));
+  const update = useCallback((fn: (w: Workspace) => Workspace) => {
+    setWs((prev) => {
+      if (!prev) return prev;
+      const next = fn(prev);
+      if (next !== prev) setDirty(true);
+      return next;
+    });
+  }, []);
+
+  function fromPreset(id: string): Workspace {
+    const p = preset(id);
+    const base = emptyWorkspace(p?.name ?? "Workspace");
+    if (!p) return base;
+    const rows = p.rows.map((row) =>
+      makeRow(row.map(([wid, link]) => makePane(wid, link as LinkGroup))));
+    // Seed every group the preset actually uses. Without this, a two-symbol
+    // desk's second group stays empty: its panes fall back to the default
+    // ticker but the group never appears in the legend, so there's nowhere
+    // obvious to type the second symbol.
+    const groups = { ...base.groups };
+    for (const row of p.rows) {
+      for (const [, link] of row) {
+        if (link !== "none" && !groups[link]) groups[link] = DEFAULT_TICKER;
+      }
+    }
+    return { ...base, id: newId("ws"), name: p.name, rows, groups };
   }
 
-  async function persist(next: WorkspaceLayout[]) {
+  function applyPreset(id: string) {
+    setWs(fromPreset(id));
+    setPicking(false);
+    setMaxPane(null);
+    setDirty(true);
+  }
+
+  async function persist(next: WorkspaceLayout[], activeId?: string | null) {
     setLayouts(next);
-    try { await api.saveWorkspaces(next); } catch { /* keep local */ }
+    await api.saveWorkspaces(next, activeId ?? undefined);
   }
 
-  function saveCurrent() {
-    const name = saveName.trim() || `Layout ${layouts.length + 1}`;
-    const l: WorkspaceLayout = {
-      id: `${Date.now()}`, name, panes, split,
+  /**
+   * Save the current arrangement.
+   *
+   * Awaited, and `dirty` only clears once the SERVER has confirmed. The
+   * earlier version cleared it optimistically, so a rejected save still read
+   * as saved — and navigating straight after clicking could abort the
+   * in-flight request with nothing on screen to say so.
+   */
+  async function saveCurrent() {
+    if (!ws || saving) return;
+    const name = saveName.trim() || ws.name || `Desk ${layouts.length + 1}`;
+    // Saving under an existing name UPDATES it rather than creating a
+    // near-duplicate the user then has to clean up.
+    const existing = layouts.find((l) => l.name === name);
+    const doc: WorkspaceLayout = {
+      id: existing?.id ?? ws.id,
+      name,
+      version: WS_VERSION,
+      rows: ws.rows.map((r) => ({
+        id: r.id, height: r.height, split: r.split,
+        panes: r.panes.map((p) => ({
+          id: p.id, widget: p.widget, link: p.link,
+          ...(p.ticker ? { ticker: p.ticker } : {}),
+        })),
+      })),
+      groups: ws.groups,
     };
-    persist([...layouts.filter((x) => x.name !== name), l]);
-    setSaveName("");
+    const next = [...layouts.filter((l) => l.id !== doc.id), doc];
+
+    setSaving(true); setErr(null);
+    try {
+      await persist(next, doc.id);
+      setWs((w) => (w ? { ...w, id: doc.id, name } : w));
+      setSaveName("");
+      setDirty(false);
+      setSavedAt(Date.now());
+      try { localStorage.setItem(ACTIVE_KEY, doc.id); } catch { /* ignore */ }
+    } catch (e: any) {
+      setErr(e?.detail
+        || "Could not save to the server — your arrangement is still on screen, but it is NOT stored.");
+    } finally {
+      setSaving(false);
+    }
   }
 
-  function setPane(i: number, patch: Partial<WorkspacePane>) {
-    setPanes((ps) => ps.map((p, j) => (j === i ? { ...p, ...patch } : p)));
+  function openLayout(l: WorkspaceLayout) {
+    const restored = normalize(l, WIDGET_IDS);
+    if (!restored) {
+      setErr(`"${l.name}" couldn't be restored — it may have been saved by a newer version.`);
+      return;
+    }
+    setWs(restored);
+    setMaxPane(null);
+    setDirty(false);
+    try { localStorage.setItem(ACTIVE_KEY, l.id); } catch { /* ignore */ }
   }
 
-  function addPane() {
-    if (panes.length >= 4) return;
-    setPanes((ps) => [...ps, { widget: "news", ticker: "RELIANCE.NS" }]);
-    setSplit((s) => [...s, 1]);
+  function deleteLayout(l: WorkspaceLayout) {
+    if (!confirm(`Delete the saved desk "${l.name}"? This cannot be undone.`)) return;
+    persist(layouts.filter((x) => x.id !== l.id))
+      .catch((e: any) => setErr(e?.detail || "Could not delete that desk on the server."));
   }
 
-  function removePane(i: number) {
-    if (panes.length <= 1) return;
-    setPanes((ps) => ps.filter((_, j) => j !== i));
-    setSplit((s) => s.filter((_, j) => j !== i));
+  // Esc leaves the maximized pane — the expected way out of a focus mode.
+  useEffect(() => {
+    if (!maxPane) return;
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") setMaxPane(null); };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [maxPane]);
+
+  const tickers = useMemo(() => (ws ? activeTickers(ws) : []), [ws]);
+  // One bulk subscription for every symbol on the grid; each pane's own
+  // useQuote reads its cell from the shared store.
+  useQuotes(tickers);
+
+  if (!ws) {
+    return <div className="hud p-6 text-mut text-sm animate-pulse">Restoring your workspace…</div>;
   }
 
-  // Divider drag: adjust the two neighboring fractions.
-  const onDragStart = useCallback((idx: number, e: React.PointerEvent) => {
-    dragRef.current = { idx, startX: e.clientX, left: split[idx], right: split[idx + 1] };
-    (e.target as HTMLElement).setPointerCapture(e.pointerId);
-  }, [split]);
+  const total = paneCount(ws);
+  const maximized = maxPane ? ws.rows.flatMap((r) => r.panes).find((p) => p.id === maxPane) : null;
 
-  const onDragMove = useCallback((e: React.PointerEvent) => {
-    const d = dragRef.current;
-    const el = containerRef.current;
-    if (!d || !el) return;
-    const total = d.left + d.right;
-    const frac = (e.clientX - d.startX) / el.clientWidth * split.reduce((a, b) => a + b, 0);
-    const left = Math.min(Math.max(d.left + frac, total * 0.15), total * 0.85);
-    setSplit((s) => s.map((v, i) => (i === d.idx ? left : i === d.idx + 1 ? total - left : v)));
-  }, [split]);
-
-  const onDragEnd = useCallback(() => { dragRef.current = null; }, []);
+  const paneProps = (p: (typeof ws.rows)[number]["panes"][number], row: (typeof ws.rows)[number]) => {
+    const i = row.panes.findIndex((x) => x.id === p.id);
+    return {
+      pane: p,
+      ticker: tickerFor(ws, p),
+      maximized: maxPane === p.id,
+      canMoveLeft: i > 0,
+      canMoveRight: i < row.panes.length - 1,
+      onSetWidget: (w: string) => update((x) => setPane(x, p.id, { widget: w })),
+      onSetLink: (g: LinkGroup) => update((x) => setPaneLink(x, p.id, g)),
+      onSetTicker: (t: string) => update((x) => setTickerFrom(x, p.id, t)),
+      onMove: (d: -1 | 1) => update((x) => movePane(x, p.id, d)),
+      onRemove: () => { setMaxPane(null); update((x) => removePane(x, p.id)); },
+      onToggleMax: () => setMaxPane((cur) => (cur === p.id ? null : p.id)),
+    };
+  };
 
   return (
-    <Shell>
-      <div className="flex flex-wrap items-center gap-2 mb-4">
-        <h1 className="heading flex-1">WORKSPACE</h1>
+    <>
+      {/* ── toolbar ── */}
+      <div className="flex flex-wrap items-center gap-2 mb-3">
+        <h1 className="heading">WORKSPACE</h1>
+        <span className="text-[10px] text-mut num">
+          {total}/{MAX_PANES} panes · {ws.rows.length}/{MAX_ROWS} rows
+        </span>
+        {dirty && !saving && (
+          <span className="text-[10px] uppercase tracking-wider text-amber"
+                title="This arrangement has unsaved changes">
+            unsaved
+          </span>
+        )}
+        {!dirty && savedAt && (
+          <span data-testid="ws-saved"
+                className="text-[10px] uppercase tracking-wider text-green"
+                title="Stored on your account">
+            saved
+          </span>
+        )}
+
+        <div className="flex-1" />
+
         {layouts.map((l) => (
-          <span key={l.id} className="inline-flex items-center gap-1">
-            <button onClick={() => applyLayout(l)} className="btn-ghost text-xs">{l.name}</button>
-            <button onClick={() => {
-                      if (confirm(`Delete saved layout "${l.name}"? This cannot be undone.`))
-                        persist(layouts.filter((x) => x.id !== l.id));
-                    }}
-                    className="text-mut hover:text-red" title={`Delete layout "${l.name}"`}>
-              <Trash2 size={11} />
+          <span key={l.id} className="inline-flex items-center">
+            <button onClick={() => openLayout(l)}
+                    className={`text-[11px] px-2 py-1 rounded-l border border-line2
+                                ${l.id === ws.id ? "bg-panel2 text-amber border-amber/50" : "text-txt hover:border-amber"}`}>
+              {l.name}
+            </button>
+            <button onClick={() => deleteLayout(l)} title={`Delete "${l.name}"`}
+                    className="px-1 py-1 rounded-r border border-l-0 border-line2 text-mut hover:text-red">
+              <Trash2 size={10} />
             </button>
           </span>
         ))}
+
         <input value={saveName} onChange={(e) => setSaveName(e.target.value)}
-               placeholder="Layout name" className="input-bare !py-1 w-32 text-xs" />
-        <button onClick={saveCurrent} className="btn-primary flex items-center gap-1.5 text-xs">
-          <Save size={12} /> Save layout
-        </button>
-        <button onClick={addPane} disabled={panes.length >= 4}
-                className="btn-ghost flex items-center gap-1.5 text-xs">
-          <Plus size={12} /> Pane
+               onKeyDown={(e) => { if (e.key === "Enter") saveCurrent(); }}
+               placeholder={ws.name} className="input-bare !py-1 w-28 text-[11px]" />
+        <button onClick={saveCurrent} disabled={saving}
+                className="btn-primary text-[11px] flex items-center gap-1.5 disabled:opacity-60">
+          <Save size={11} /> {saving ? "Saving…" : "Save"}
         </button>
       </div>
 
-      <div ref={containerRef} className="hidden md:grid gap-0 items-start"
-           style={{ gridTemplateColumns: split.flatMap((f, i) => i < split.length - 1 ? [`${f}fr`, "10px"] : [`${f}fr`]).join(" ") }}>
-        {panes.map((pane, i) => (
-          <div key={i} className="contents">
-            <div className="panel-2 p-3 min-w-0 h-full">
-              <div className="flex items-center gap-2 mb-2">
-                <select value={pane.widget}
-                        onChange={(e) => setPane(i, { widget: e.target.value })}
-                        className="input-bare !py-1 text-xs cursor-pointer w-32">
-                  {WIDGETS.map((w) => <option key={w} value={w}>{WIDGET_LABELS[w]}</option>)}
-                </select>
-                {NEEDS_TICKER[pane.widget as WidgetKind] && (
-                  <div className="flex-1 min-w-0">
-                    <TickerInput value={pane.ticker ?? ""} onCommit={(t) => setPane(i, { ticker: t })}
-                                 placeholder="Ticker" className="input-bare !py-1 text-xs w-full" />
+      <div className="flex flex-wrap items-center gap-2 mb-3">
+        <button onClick={() => setPicking((v) => !v)}
+                className="btn-ghost text-[11px] flex items-center gap-1.5">
+          <Grid2x2 size={11} /> Desks
+        </button>
+        <button onClick={() => update((x) => addRow(x))}
+                disabled={ws.rows.length >= MAX_ROWS || total >= MAX_PANES}
+                className="btn-ghost text-[11px] flex items-center gap-1.5 disabled:opacity-40">
+          <Rows3 size={11} /> Add row
+        </button>
+        <button onClick={() => update(evenOut)}
+                className="btn-ghost text-[11px] flex items-center gap-1.5"
+                title="Reset every pane and row to equal size">
+          <RotateCcw size={11} /> Even out
+        </button>
+        <div className="flex-1" />
+        <LinkLegend groups={ws.groups}
+                    onSet={(g, t) => update((x) => setGroupTicker(x, g, t))} />
+      </div>
+
+      {err && (
+        <div className="hud p-3 mb-3 text-xs text-red flex items-center gap-3">
+          <span className="flex-1">{err}</span>
+          <button onClick={() => setErr(null)} className="text-mut hover:text-txt"><X size={12} /></button>
+        </div>
+      )}
+
+      {picking && <PresetPicker onPick={applyPreset} onClose={() => setPicking(false)} />}
+
+      {/* ── maximized pane ── */}
+      {maximized ? (
+        <div className="h-[calc(100vh-190px)] min-h-[420px]">
+          <PaneFrame {...paneProps(maximized,
+            ws.rows.find((r) => r.panes.some((p) => p.id === maximized.id))!)} />
+        </div>
+      ) : (
+        <>
+          {/* ── the grid (desktop) ── */}
+          <div className="hidden md:flex flex-col h-[calc(100vh-200px)] min-h-[520px]">
+            {ws.rows.map((row, ri) => (
+              // Fragment, NOT a display:contents div: the divider measures its
+              // parentElement, and a contents box reports clientWidth/Height 0,
+              // which silently killed every resize drag.
+              <Fragment key={row.id}>
+                <div className="flex min-h-0" style={{ flex: `${row.height} 1 0%` }}>
+                  {row.panes.map((p, pi) => (
+                    <Fragment key={p.id}>
+                      <div className="min-w-0 flex flex-col" style={{ flex: `${row.split[pi]} 1 0%` }}>
+                        <PaneFrame {...paneProps(p, row)} />
+                      </div>
+                      {pi < row.panes.length - 1 && (
+                        <Divider onDrag={(f) => update((x) => resizeColumn(x, row.id, pi, f))} />
+                      )}
+                    </Fragment>
+                  ))}
+
+                  {/* Per-row controls, tucked to the right edge. */}
+                  <div className="flex flex-col gap-1 justify-start pl-1 pt-1 shrink-0">
+                    <button onClick={() => update((x) => addPane(x, row.id, "news"))}
+                            disabled={row.panes.length >= MAX_PANES_PER_ROW || total >= MAX_PANES}
+                            title="Add a pane to this row"
+                            className="text-mut hover:text-amber disabled:opacity-25 disabled:hover:text-mut">
+                      <Plus size={12} />
+                    </button>
+                    <button onClick={() => update((x) => moveRow(x, row.id, -1))}
+                            disabled={ri === 0} title="Move row up"
+                            className="text-mut hover:text-amber disabled:opacity-25 disabled:hover:text-mut text-[10px]">
+                      ▲
+                    </button>
+                    <button onClick={() => update((x) => moveRow(x, row.id, 1))}
+                            disabled={ri === ws.rows.length - 1} title="Move row down"
+                            className="text-mut hover:text-amber disabled:opacity-25 disabled:hover:text-mut text-[10px]">
+                      ▼
+                    </button>
+                    <button onClick={() => update((x) => removeRow(x, row.id))}
+                            disabled={ws.rows.length <= 1} title="Remove this row"
+                            className="text-mut hover:text-red disabled:opacity-25 disabled:hover:text-mut">
+                      <Trash2 size={11} />
+                    </button>
                   </div>
+                </div>
+                {ri < ws.rows.length - 1 && (
+                  <Divider vertical onDrag={(f) => update((x) => resizeRow(x, ri, f))} />
                 )}
-                <button onClick={() => removePane(i)} className="text-mut hover:text-red" title="Close pane">
-                  <X size={13} />
-                </button>
-              </div>
-              <div className="overflow-auto max-h-[70vh]">
-                <PaneView pane={pane} />
-              </div>
-            </div>
-            {i < panes.length - 1 && (
-              <div
-                onPointerDown={(e) => onDragStart(i, e)}
-                onPointerMove={onDragMove}
-                onPointerUp={onDragEnd}
-                className="cursor-col-resize h-full min-h-[200px] flex items-center justify-center group"
-                title="Drag to resize"
-              >
-                <div className="w-1 h-16 rounded bg-line group-hover:bg-amber/60" />
-              </div>
-            )}
+              </Fragment>
+            ))}
           </div>
-        ))}
-      </div>
 
-      {/* Mobile: panes stack — resizing is a desktop affordance. */}
-      <div className="md:hidden flex flex-col gap-4">
-        {panes.map((pane, i) => (
-          <div key={i} className="panel-2 p-3">
-            <div className="label-xs mb-2">{WIDGET_LABELS[pane.widget as WidgetKind]} {pane.ticker ? `· ${pane.ticker}` : ""}</div>
-            <PaneView pane={pane} />
+          {/* ── mobile: panes stack, full controls kept ── */}
+          <div className="md:hidden flex flex-col gap-3">
+            {ws.rows.flatMap((row) => row.panes.map((p) => (
+              <div key={p.id} style={{ minHeight: widget(p.widget)?.minHeight ?? 240 }}
+                   className="flex flex-col">
+                <PaneFrame {...paneProps(p, row)} />
+              </div>
+            )))}
           </div>
-        ))}
+        </>
+      )}
+
+      <div className="text-[10.5px] text-mut mt-4 leading-relaxed">
+        Panes sharing a link group share a symbol — retype the ticker in any
+        one of them and the rest follow, so a chart, its news, its financials
+        and its value chain all re-point in a single keystroke. Set a pane to
+        <span className="text-txt"> —</span> to unlink it and pin it to its own
+        symbol. Drag the bars between panes and rows to resize; maximize a pane
+        with the expand icon and leave it with <kbd className="px-1 border border-line2 rounded">Esc</kbd>.
+        Desks are saved to your account so they follow you between machines;
+        which one you had open last is remembered per device.
+        {tickers.length > 0 && (
+          <> {tickers.length} symbol{tickers.length === 1 ? "" : "s"} subscribed on the
+          shared socket.</>
+        )}
       </div>
-    </Shell>
+    </>
   );
+}
+
+export default function WorkspacePage() {
+  return <Shell><WorkspaceBody /></Shell>;
 }

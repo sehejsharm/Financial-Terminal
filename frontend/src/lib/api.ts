@@ -306,8 +306,20 @@ export type AlertEvent = {
   delivery?: Record<string, boolean>;
 };
 export type Note = { ticker: string; text: string; updated_at: string | null };
-export type WorkspacePane = { widget: string; ticker?: string | null };
-export type WorkspaceLayout = { id: string; name: string; panes: WorkspacePane[]; split: number[] };
+export type WorkspacePane = {
+  id?: string; widget: string; ticker?: string | null; link?: string | null;
+};
+export type WorkspaceRow = {
+  id?: string; panes: WorkspacePane[]; split: number[]; height: number;
+};
+/** v2 shape. `panes`/`split` are the legacy v1 fields, still read on load so
+ *  a layout saved before the grid existed still restores. */
+export type WorkspaceLayout = {
+  id: string; name: string; version?: number;
+  rows?: WorkspaceRow[];
+  groups?: Record<string, string>;
+  panes?: WorkspacePane[]; split?: number[];
+};
 export type SentimentItem = { title: string; sentiment: "bull" | "bear" | "neutral" };
 export type SentimentResp = {
   ticker: string; items: SentimentItem[]; score: number | null;
@@ -627,10 +639,12 @@ export const api = {
     }),
 
   // workspaces
-  workspaces: () => apiFetch<{ layouts: WorkspaceLayout[] }>("/api/v1/workspaces"),
-  saveWorkspaces: (layouts: WorkspaceLayout[]) =>
+  workspaces: () =>
+    apiFetch<{ layouts: WorkspaceLayout[]; active_id?: string | null }>("/api/v1/workspaces"),
+  saveWorkspaces: (layouts: WorkspaceLayout[], activeId?: string) =>
     apiFetch<{ ok: boolean }>("/api/v1/workspaces", {
-      method: "PUT", body: JSON.stringify({ layouts }),
+      method: "PUT",
+      body: JSON.stringify({ layouts, active_id: activeId ?? null }),
     }),
 
   // sentiment + flow intel + calendar
