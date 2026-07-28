@@ -8,6 +8,7 @@ import {
 
 import { ContagionPathFinder } from "@/components/ContagionPath";
 import { DataAge } from "@/components/DataAge";
+import { Markdown } from "@/components/Markdown";
 import { StatusBadge } from "@/components/StatusBadge";
 import {
   api, type ChainNode, type Quote, type ValueChain, type VcHistoryEntry,
@@ -333,10 +334,11 @@ function Node({ x, y, label, note, pct, color, onClick, selected, verified, dimm
 
 // ── drill-down panel ────────────────────────────────────────────────────────
 function NodeDetail({ node, parentTicker, chainTicker, onClose, onRecenter, onReported,
-                      overlay, evidence }: {
+                      overlay, evidence, chain }: {
   node: Selected; parentTicker: string; chainTicker: string;
   onClose: () => void; onRecenter: (symbol: string, name: string) => void;
   onReported?: () => void; overlay?: NodeOverlay; evidence?: EdgeEvidence[];
+  chain?: ValueChain | null;
 }) {
   const router = useRouter();
   const [cands, setCands] = useState<Cand[] | null>(null);
@@ -345,6 +347,11 @@ function NodeDetail({ node, parentTicker, chainTicker, onClose, onRecenter, onRe
   const [reported, setReported] = useState(false);
   const [reporting, setReporting] = useState(false);
   const [reportOpen, setReportOpen] = useState(false);
+  // Scenario simulator: shock THIS node and cascade it through the chain.
+  const [shock, setShock] = useState(-20);
+  const [scenario, setScenario] = useState<string | null>(null);
+  const [simBusy, setSimBusy] = useState(false);
+  const [simErr, setSimErr] = useState<string | null>(null);
   const [reportCat, setReportCat] = useState<string>("wrong_entity");
   const [reportText, setReportText] = useState("");
 
@@ -352,6 +359,7 @@ function NodeDetail({ node, parentTicker, chainTicker, onClose, onRecenter, onRe
     let alive = true;
     setCands(null); setQuote(null); setShowOther(false); setReported(false);
     setReportOpen(false); setReportCat("wrong_entity"); setReportText("");
+    setScenario(null); setSimErr(null); setShock(-20);
     resolveNode(node).then((cs) => { if (alive) setCands(cs); });
     return () => { alive = false; };
   }, [node]);
@@ -583,6 +591,49 @@ function NodeDetail({ node, parentTicker, chainTicker, onClose, onRecenter, onRe
           </button>
         </div>
       )}
+
+      {/* Scenario simulator — walks the CHAIN, not just the parent ticker. */}
+      <div className="rounded border border-line2 px-2 py-1.5">
+        <div className="label-xs mb-1">Scenario</div>
+        <div className="flex items-center gap-1.5 flex-wrap">
+          <span className="text-[11px] text-mut">If output</span>
+          <select value={shock} onChange={(e) => setShock(parseFloat(e.target.value))}
+                  className="input-bare !py-0.5 !px-1 text-[11px] cursor-pointer">
+            {[-50, -30, -20, -10, 10, 20, 50].map((v) => (
+              <option key={v} value={v}>{v > 0 ? `+${v}` : v}%</option>
+            ))}
+          </select>
+          <button
+            onClick={async () => {
+              setSimBusy(true); setSimErr(null); setScenario(null);
+              try {
+                const r = await api.vcScenario({
+                  ticker: chainTicker, company: chain?.name || chainTicker,
+                  node_name: node.name, node_role: node.role ?? node.primaryRole,
+                  shock_pct: shock,
+                  context: {
+                    suppliers: chain?.suppliers ?? [], customers: chain?.customers ?? [],
+                    competitors: chain?.competitors ?? [],
+                  },
+                });
+                setScenario(r.markdown);
+              } catch (e: any) {
+                setSimErr(e?.detail || "Scenario generation failed.");
+              } finally { setSimBusy(false); }
+            }}
+            disabled={simBusy}
+            className="btn-ghost text-[11px] disabled:opacity-50">
+            {simBusy ? "Simulating…" : "Simulate"}
+          </button>
+        </div>
+        {simErr && <div className="text-red text-[11px] mt-1">{simErr}</div>}
+        {scenario && (
+          <div className="mt-2 border-t border-line pt-2">
+            <div className="mb-1"><StatusBadge kind="ai" /></div>
+            <div className="max-h-64 overflow-y-auto"><Markdown>{scenario}</Markdown></div>
+          </div>
+        )}
+      </div>
 
       <div className="mt-auto pt-1 relative">
         <button onClick={() => setReportOpen((v) => !v)} disabled={reported}
@@ -1498,7 +1549,7 @@ export function ValueChainMap({ ticker }: { ticker: string }) {
             <NodeDetail node={selected} parentTicker={current} chainTicker={current}
                         onClose={() => setSelected(null)} onRecenter={recenter}
                         overlay={overlayFor(overlays, selected.key)}
-                        evidence={evidence.get(selected.key)}
+                        evidence={evidence.get(selected.key)} chain={data}
                         onReported={() => {
                           // Refresh badges so the new flag counts immediately.
                           api.vcReportCounts(current)

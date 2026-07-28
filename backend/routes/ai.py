@@ -5,6 +5,8 @@ from fastapi import APIRouter, Depends, HTTPException, status
 
 from backend import auth
 from backend.cache import cached
+from pydantic import BaseModel, Field
+
 from backend.schemas import AIRequest
 from lib import ai_analyst
 from lib.market_data import get_stock_fundamentals
@@ -198,3 +200,98 @@ def _sentiment_history(ticker: str, limit: int = 60) -> list[dict]:
     except Exception:
         return []
     return out[-limit:]
+
+
+# ── value-chain scenario simulator ────────────────────────────────────────
+
+class ScenarioRequest(BaseModel):
+    """'What happens to X if this supplier's output drops 20%?' — analysed
+    against the company's actual mapped chain, not the ticker in isolation."""
+    ticker: str = Field(..., max_length=24)
+    company: str = Field(..., max_length=160)
+    node_name: str = Field(..., max_length=160)
+    node_role: str = Field(..., max_length=20)
+    shock_pct: float = Field(..., ge=-100, le=500,
+                             description="Change in the node's output/demand, e.g. -20")
+    # The caller passes the chain it is actually showing, so the narrative is
+    # grounded in the same numbers on screen rather than the model's memory.
+    context: dict = Field(default_factory=dict)
+
+
+_SCENARIO_PROMPT = """You are a supply-chain risk analyst working inside a
+research terminal. Analyse ONE specific shock and walk the company's ACTUAL
+mapped value chain.
+
+SUBJECT: {company} ({ticker})
+SHOCK: {node_name} (a {node_role} of the subject) sees its output/volume
+change by {shock_pct:+.0f}%.
+
+THE SUBJECT'S MAPPED CHAIN (the only relationship data you may rely on):
+{chain}
+
+Write a cascading analysis with these sections, in markdown:
+
+## Direct impact
+What this specifically does to {company} — reference the exposure percentage
+from the chain data above if one is given, and say plainly if none is given.
+
+## Second-order effects
+Which OTHER nodes in the chain above are affected and how. Name them exactly
+as they appear in the data. If a competitor benefits, say so.
+
+## What would absorb it
+Substitution, inventory, contracted pricing, alternative suppliers PRESENT IN
+THE DATA ABOVE. If the chain shows no alternative supplier, say that is the
+core risk.
+
+## What to watch
+Concrete observable signals — a disclosure, a price series, a volume figure.
+
+HARD RULES:
+- Use ONLY the relationships in the chain data above. Do NOT introduce
+  companies that do not appear in it.
+- The chain data is AI-ESTIMATED, not filing-sourced. Never state a
+  percentage as fact; write "the map estimates ~X%".
+- Do NOT invent financial figures (revenue, EBIT, contract values) that are
+  not in the data above. Qualitative direction is fine; fabricated magnitudes
+  are not.
+- No investment recommendation. Educational analysis only.
+- Be concise: roughly 250-350 words total.
+"""
+
+
+def _chain_for_prompt(context: dict) -> str:
+    """Flatten the client's chain into compact, unambiguous prompt lines."""
+    out = []
+    for role in ("suppliers", "customers", "competitors"):
+        for n in (context.get(role) or [])[:12]:
+            name = (n or {}).get("name")
+            if not name:
+                continue
+            bits = [f"- {role[:-1]}: {name}"]
+            pct = n.get("revenue_pct")
+            if pct is not None:
+                unit = "of input costs" if role == "suppliers" else "of revenue"
+                bits.append(f"(~{pct}% {unit}, AI-estimated)")
+            if n.get("note"):
+                bits.append(f"— {n['note']}")
+            out.append(" ".join(bits))
+    return "\n".join(out) or "(no relationships mapped)"
+
+
+@router.post("/value-chain-scenario")
+def value_chain_scenario(body: ScenarioRequest,
+                         _user: dict = Depends(auth.current_user)):
+    """Cascading what-if across the mapped chain."""
+    _guard()
+    prompt = _SCENARIO_PROMPT.format(
+        company=body.company, ticker=body.ticker,
+        node_name=body.node_name, node_role=body.node_role,
+        shock_pct=body.shock_pct, chain=_chain_for_prompt(body.context),
+    )
+    try:
+        text = ai_analyst._call(prompt, max_tokens=1200)
+    except ai_analyst.AnalystError as e:
+        raise HTTPException(status.HTTP_502_BAD_GATEWAY, str(e))
+    return {"ticker": body.ticker, "node": body.node_name,
+            "shock_pct": body.shock_pct, "markdown": text}

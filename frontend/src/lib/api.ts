@@ -480,6 +480,12 @@ export const api = {
     apiFetch<{ ok: boolean }>(`/api/v1/value-chain/${encodeURIComponent(ticker)}/override`, {
       method: "PUT", body: JSON.stringify(o),
     }),
+  vcScenario: (body: {
+    ticker: string; company: string; node_name: string; node_role: string;
+    shock_pct: number; context: unknown;
+  }) => apiFetch<{ ticker: string; node: string; shock_pct: number; markdown: string }>(
+      "/api/v1/ai/value-chain-scenario", { method: "POST", body: JSON.stringify(body) },
+      { timeoutMs: 60_000 }),
   vcPath: (source: string, target: string) =>
     apiFetch<ContagionPath>(
       `/api/v1/value-chain/graph/path?source=${encodeURIComponent(source)}&target=${encodeURIComponent(target)}`),
