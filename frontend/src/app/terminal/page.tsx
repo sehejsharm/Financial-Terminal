@@ -15,6 +15,7 @@ import { Financials } from "@/components/Financials";
 import { MetricCard } from "@/components/MetricCard";
 import { News } from "@/components/News";
 import { Notes } from "@/components/Notes";
+import { OptionBuilder } from "@/components/OptionBuilder";
 import { OptionsChain } from "@/components/OptionsChain";
 import { Ownership } from "@/components/Ownership";
 import { ChartToolbar, PriceChart, useChartConfig } from "@/components/PriceChart";
@@ -380,7 +381,16 @@ function TerminalInner() {
       {!loading && !err && fn === "Street ratings" && <StreetRatings ticker={ticker} currency={inferCurrency(ticker, snap?.currency as string)} />}
       {!loading && !err && fn === "WACC model" && <Wacc ticker={ticker} snap={snap} />}
       {!loading && !err && fn === "Value-chain map" && <ValueChainMap ticker={ticker} />}
-      {!loading && !err && fn === "Options & Greeks" && <OptionsChain ticker={ticker} />}
+      {!loading && !err && fn === "Options & Greeks" && (
+        <>
+          <OptionsChain ticker={ticker} />
+          {/* The chain needs a live option feed the free path doesn't have;
+              the builder works from theory alone, so it's always useful. */}
+          <div className="mt-6 pt-6 border-t border-line">
+            <OptionBuilder ticker={ticker} spot={price} />
+          </div>
+        </>
+      )}
       {!loading && !err && fn === "AI deep-dive" && <AIPanel ticker={ticker} />}
       {!loading && !err && fn === "Recent news" && <News ticker={ticker} />}
       {!loading && !err && fn === "Notes" && <Notes ticker={ticker} />}
