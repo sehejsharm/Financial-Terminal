@@ -36,6 +36,7 @@ from backend.routes import (
     ai,
     alerts,
     auth,
+    data_api,
     deals,
     fundamentals,
     health,
@@ -109,7 +110,8 @@ _V1 = "/api/v1"
 for r in (auth.router, market.router, fundamentals.router, screens.router,
           options.router, value_chain.router, ai.router, watchlists.router,
           macro.router, deals.router, admin.router, portfolio.router,
-          alerts.router, notes.router, workspaces.router, stream.router):
+          alerts.router, notes.router, workspaces.router, stream.router,
+          data_api.router):
     app.include_router(r, prefix=_V1)
 
 

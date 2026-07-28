@@ -286,6 +286,11 @@ export type PortfolioSummary = {
   factors: { beta: number | null; dividend_yield: number | null; top_weight: number | null } | null;
 };
 export type PortfolioInfo = { id: string; name: string; positions: number };
+/** DAPI token metadata. The secret itself is only ever in the create response. */
+export type ApiTokenInfo = {
+  id: string; label: string; prefix: string;
+  created_at: string; last_used_at: string | null;
+};
 export type PortfolioHistoryPoint = {
   date: string; value: number; cost: number; unrealized: number; realized_cum: number;
 };
@@ -486,6 +491,14 @@ export const api = {
   }) => apiFetch<{ ticker: string; node: string; shock_pct: number; markdown: string }>(
       "/api/v1/ai/value-chain-scenario", { method: "POST", body: JSON.stringify(body) },
       { timeoutMs: 60_000 }),
+  // ── DAPI: personal read-only API tokens ──
+  listApiTokens: () => apiFetch<ApiTokenInfo[]>("/api/v1/data/tokens"),
+  createApiToken: (label: string) =>
+    apiFetch<ApiTokenInfo & { token: string; note: string }>(
+      "/api/v1/data/tokens", { method: "POST", body: JSON.stringify({ label }) }),
+  revokeApiToken: (id: string) =>
+    apiFetch<void>(`/api/v1/data/tokens/${encodeURIComponent(id)}`, { method: "DELETE" }),
+
   /** Ask Motherboard — answered strictly from the caller's own modules. */
   ask: (question: string, contextTicker?: string | null) =>
     apiFetch<{ question: string; sources: string[]; markdown: string }>(

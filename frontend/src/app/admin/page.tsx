@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { Trash2 } from "lucide-react";
 
+import { ApiTokens } from "@/components/ApiTokens";
 import { Shell } from "@/components/Shell";
 import { Pager, SortableTh, TableToolbar, useTableControls } from "@/components/tableControls";
 import { api, type AdminUser, type AuditEvent, type VcReport } from "@/lib/api";
@@ -218,6 +219,10 @@ export default function AdminPage() {
           )}
         </>
       )}
+
+      {/* Data API tokens — available to every logged-in user, not just
+          master admins, so it sits outside the admin-only block above. */}
+      <ApiTokens apiBase={process.env.NEXT_PUBLIC_API_URL || ""} />
     </Shell>
   );
 }
