@@ -7,7 +7,8 @@ import { DataAge } from "@/components/DataAge";
 import { Shell } from "@/components/Shell";
 import { StatusBadge } from "@/components/StatusBadge";
 import { Pager, SortableTh, TableToolbar, useTableControls } from "@/components/tableControls";
-import { api, type ScreenResult } from "@/lib/api";
+import { ScreenBuilder } from "@/components/screeners/ScreenBuilder";
+import { api, type ScreenClause, type ScreenResult } from "@/lib/api";
 
 type ScreenDef = {
   label: string;
@@ -58,29 +59,6 @@ function exportCsv(name: string, cols: string[], rows: any[]) {
   URL.revokeObjectURL(url);
 }
 
-// Metric keys the backend's custom-filter engine understands
-// (lib/screens.py FILTER_METRICS).
-const CUSTOM_METRICS: { key: string; label: string }[] = [
-  { key: "mcap_cr", label: "Market cap (₹ cr)" },
-  { key: "eps_growth", label: "EPS growth (%)" },
-  { key: "sales_growth", label: "Sales growth (%)" },
-  { key: "peg", label: "PEG ratio" },
-  { key: "de", label: "Debt / Equity" },
-  { key: "roce", label: "ROCE (%)" },
-  { key: "promoter", label: "Promoter/insider holding (%)" },
-  { key: "pe", label: "P/E" },
-  { key: "roe", label: "ROE (%)" },
-];
-
-type CustomFilter = { key: string; op: ">" | "<"; value: number };
-type SavedScreen = { name: string; filters: CustomFilter[] };
-const SAVED_KEY = "mb_custom_screens";
-
-function loadSaved(): SavedScreen[] {
-  try { return JSON.parse(localStorage.getItem(SAVED_KEY) || "[]"); }
-  catch { return []; }
-}
-
 function tickerOf(r: any): string {
   const t = String(r.ticker ?? r.symbol ?? "").toUpperCase();
   if (!t) return "";
@@ -95,24 +73,28 @@ export default function ScreenersPage() {
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
-  // ── custom screen builder ────────────────────────────────────────────
-  const [filters, setFilters] = useState<CustomFilter[]>(
-    [{ key: "mcap_cr", op: ">", value: 20000 }]);
-  const [saved, setSaved] = useState<SavedScreen[]>([]);
-  useEffect(() => { setSaved(loadSaved()); }, []);
-
-  function persistSaved(next: SavedScreen[]) {
-    setSaved(next);
-    try { localStorage.setItem(SAVED_KEY, JSON.stringify(next)); } catch { /* noop */ }
+  /** Run the builder's screen. Kept separate from run(i) so the builder owns
+   *  its own filter state and this page just relays the result. */
+  async function runCustom(
+    filters: ScreenClause[], match: "all" | "any", sectors: string[],
+  ) {
+    setActive(-1);
+    setBusy(true); setErr(null); setResult(null);
+    try {
+      setResult(await api.customScreen(
+        filters.filter((f) => f.value != null), match, sectors));
+    } catch (e: any) {
+      setErr(e?.detail || "Screen failed. The data backend may be waking up — try again.");
+    } finally {
+      setBusy(false);
+    }
   }
 
   async function run(i = active) {
     setActive(i);
     setBusy(true); setErr(null); setResult(null);
     try {
-      setResult(i === -1
-        ? await api.customScreen(filters.filter((f) => Number.isFinite(f.value)))
-        : await SCREENS[i].run());
+      setResult(await SCREENS[i].run());
     } catch (e: any) {
       setErr(e?.detail || "Screen failed. The data backend may be waking up — try again in a few seconds.");
     } finally {
@@ -122,7 +104,10 @@ export default function ScreenersPage() {
 
   // Auto-run the default preset on load — the server keeps the universe scan
   // warm in the background, so this returns in ms instead of a 13s cold scan.
-  useEffect(() => { run(0); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, []);
+  useEffect(() => {
+    run(0);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const rows = result?.rows ?? null;
   const cols = rows && rows.length
@@ -157,85 +142,8 @@ export default function ScreenersPage() {
       </div>
 
       {active === -1 && (
-        <div className="panel-2 p-3 mb-4">
-          <div className="label-xs mb-2">Build your own screen — all conditions must pass (AND)</div>
-          <div className="flex flex-col gap-2">
-            {filters.map((f, i) => (
-              <div key={i} className="flex flex-wrap items-center gap-2">
-                <select value={f.key}
-                        onChange={(e) => setFilters(filters.map((x, j) => j === i ? { ...x, key: e.target.value } : x))}
-                        className="input-bare cursor-pointer !py-1 text-xs w-56">
-                  {CUSTOM_METRICS.map((m) => <option key={m.key} value={m.key}>{m.label}</option>)}
-                </select>
-                <select value={f.op}
-                        onChange={(e) => setFilters(filters.map((x, j) => j === i ? { ...x, op: e.target.value as ">" | "<" } : x))}
-                        className="input-bare cursor-pointer !py-1 text-xs w-16">
-                  <option value=">">&gt;</option>
-                  <option value="<">&lt;</option>
-                </select>
-                <input type="number" value={Number.isFinite(f.value) ? f.value : ""}
-                       onChange={(e) => setFilters(filters.map((x, j) => j === i ? { ...x, value: parseFloat(e.target.value) } : x))}
-                       className="input-bare !py-1 text-xs w-32" />
-                {filters.length > 1 && (
-                  <button onClick={() => setFilters(filters.filter((_, j) => j !== i))}
-                          className="text-mut hover:text-red text-xs" title="Remove condition">✕</button>
-                )}
-              </div>
-            ))}
-          </div>
-          <div className="flex flex-wrap items-center gap-2 mt-3">
-            <button onClick={() => setFilters([...filters, { key: "pe", op: "<", value: 25 }])}
-                    className="btn-ghost text-xs">+ Add condition</button>
-            <button onClick={() => run(-1)} disabled={busy} className="btn-primary text-xs">
-              {busy ? "Scanning…" : "Run custom screen"}
-            </button>
-            <button
-              onClick={() => {
-                const name = window.prompt("Save this screen as…");
-                if (!name?.trim()) return;
-                persistSaved([...saved.filter((s) => s.name !== name.trim()),
-                              { name: name.trim(), filters }]);
-              }}
-              className="btn-ghost text-xs">Save screen</button>
-            {saved.length > 0 && <span className="label-xs ml-2">Saved:</span>}
-            {saved.map((s) => (
-              <span key={s.name} className="inline-flex items-center gap-1">
-                <button onClick={() => { setFilters(s.filters); }}
-                        className="btn-ghost text-xs">{s.name}</button>
-                <button onClick={() => {
-                          if (confirm(`Delete saved screen "${s.name}"?`))
-                            persistSaved(saved.filter((x) => x.name !== s.name));
-                        }}
-                        className="text-mut hover:text-red text-[10px]" title="Delete saved screen">✕</button>
-              </span>
-            ))}
-          </div>
-          <div className="text-[10.5px] text-mut mt-2">
-            Growth / ROCE / PEG coverage is limited on free data — screens using
-            them may match fewer names than expected. Saved screens live in this
-            browser.
-          </div>
-        </div>
+        <ScreenBuilder busy={busy} onRun={runCustom} />
       )}
-
-      <div className="flex items-center gap-3 mb-4">
-        <div className="text-mut text-xs flex-1">
-          {active === -1
-            ? `Custom screen — ${filters.length} condition${filters.length === 1 ? "" : "s"}.`
-            : SCREENS[active].desc}
-        </div>
-        <StatusBadge kind="delayed" />
-        {result?.as_of && <DataAge at={result.as_of} prefix="Scan data" />}
-        {rows && rows.length > 0 && (
-          <button onClick={() => exportCsv(active === -1 ? "Custom" : SCREENS[active].label, cols, rows)}
-                  className="btn-ghost">
-            Export CSV
-          </button>
-        )}
-        <button onClick={() => run()} disabled={busy} className="btn-primary">
-          {busy ? "Scanning…" : "Run screen"}
-        </button>
-      </div>
 
       {err && <div className="text-red text-sm mb-3">{err}</div>}
 

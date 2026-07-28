@@ -16,12 +16,16 @@ from fastapi import APIRouter, Depends, HTTPException
 
 from backend import auth, providers
 from backend.cache import cached
+from pydantic import BaseModel, Field
+
 from backend.schemas import (
     BuffettScreenRequest,
     CustomScreenRequest,
     ETFScreenRequest,
+    FilterClause,
     GrahamScreenRequest,
 )
+from backend.storage import get_storage
 from lib import screens
 
 router = APIRouter(prefix="/screens", tags=["screens"])
@@ -82,11 +86,79 @@ def preset(name: str, _user: dict = Depends(auth.current_user)):
 @router.post("/custom")
 def custom(body: CustomScreenRequest,
            _user: dict = Depends(auth.current_user)):
+    bad = [f.key for f in body.filters if f.key not in screens.FIELD_KEYS]
+    if bad:
+        raise HTTPException(400, f"Unknown field(s): {', '.join(sorted(set(bad)))}")
+    bad_ops = [f.op for f in body.filters if f.op not in screens.OPS]
+    if bad_ops:
+        raise HTTPException(400, f"Unknown operator(s): {', '.join(sorted(set(bad_ops)))}")
+
     scan = _scan_cached()
-    matched = screens.apply_filters(scan["rows"],
-                                    [f.model_dump() for f in body.filters])
+    rows = scan["rows"]
+    matched = screens.apply_filters(
+        rows, [f.model_dump() for f in body.filters],
+        match=body.match, sectors=body.sectors)
+
+    # Coverage travels WITH the result. The most confusing screener outcome
+    # is a filter on a field the free providers barely populate: it returns
+    # nothing, and without this it reads as "no company qualifies" rather
+    # than "we don't have that number for most of them".
+    used = [f.key for f in body.filters]
+    cov = screens.coverage(rows)
+    thin = [k for k in used if cov.get(k, 0) < max(1, len(rows) * 0.4)]
+    note = None
+    if not matched and thin:
+        labels = {f["key"]: f["label"] for f in screens.FIELDS}
+        note = ("No matches — but " + ", ".join(
+            f"{labels.get(k, k)} is only populated for {cov.get(k, 0)} of "
+            f"{len(rows)} scanned names" for k in thin)
+            + ". A filter on a thinly-covered field excludes everything it "
+              "can't evaluate, so try removing it before loosening the others.")
+
     return _envelope(matched, scanned=_UNIVERSE_SIZE,
-                     evaluable=len(scan["rows"]), as_of=scan["as_of"])
+                     evaluable=len(rows), note=note, as_of=scan["as_of"])
+
+
+@router.get("/fields")
+def fields(_user: dict = Depends(auth.current_user)):
+    """Filterable fields, operators, sectors, and per-field coverage."""
+    scan = _scan_cached()
+    rows = scan["rows"]
+    return {
+        "fields": screens.FIELDS,
+        "ops": sorted(screens.OPS),
+        "sectors": screens.sectors_in(rows),
+        "coverage": screens.coverage(rows),
+        "evaluable": len(rows),
+        "scanned": _UNIVERSE_SIZE,
+        "as_of": scan["as_of"],
+    }
+
+
+# ── saved screens ─────────────────────────────────────────────────────────
+
+class SavedScreen(BaseModel):
+    id: str = Field(..., max_length=60)
+    name: str = Field(..., max_length=60)
+    filters: list[FilterClause] = Field(default_factory=list, max_length=12)
+    match: str = Field("all", max_length=4)
+    sectors: list[str] = Field(default_factory=list, max_length=30)
+
+
+class SavedScreensBody(BaseModel):
+    screens: list[SavedScreen] = Field(..., max_length=25)
+
+
+@router.get("/saved")
+def get_saved(user: dict = Depends(auth.current_user)):
+    return get_storage().user_doc("screens", user["username"],
+                                  {"screens": []}) or {"screens": []}
+
+
+@router.put("/saved")
+def put_saved(body: SavedScreensBody, user: dict = Depends(auth.current_user)):
+    get_storage().save_user_doc("screens", user["username"], body.model_dump())
+    return {"ok": True, "count": len(body.screens)}
 
 
 @router.post("/buffett")

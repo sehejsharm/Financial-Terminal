@@ -92,18 +92,67 @@ def _build_metrics(ticker: str, f: dict | None) -> dict | None:
     de = f.get("debt_to_equity")
     de = de / 100 if de is not None else None  # percentage -> ratio
     promoter = (f.get("held_insiders") or 0) * 100 if f.get("held_insiders") is not None else None
+
+    def pct(key):
+        """Provider fractions (0.184) -> percent (18.4)."""
+        v = f.get(key)
+        return round(v * 100, 2) if isinstance(v, (int, float)) else None
+
+    def num(key, digits=2):
+        v = f.get(key)
+        return round(float(v), digits) if isinstance(v, (int, float)) else None
+
+    price = num("price")
+    hi52, lo52 = num("fifty_two_high"), num("fifty_two_low")
+    ma50, ma200 = num("fifty_day_avg"), num("two_hundred_day_avg")
+
+    # Position within the 52-week range, 0-100. A derived field, but derived
+    # from two published numbers rather than estimated.
+    pos52 = None
+    if price is not None and hi52 is not None and lo52 is not None and hi52 > lo52:
+        pos52 = round(((price - lo52) / (hi52 - lo52)) * 100, 1)
+
+    def vs(ma):
+        return round(((price - ma) / ma) * 100, 1) \
+            if price is not None and ma not in (None, 0) else None
+
     return {
         "ticker": ticker.replace(".NS", ""),
         "name": f.get("name", ticker),
+        "sector": f.get("sector") or None,
+        "industry": f.get("industry") or None,
+        # ── size & price ──
         "mcap_cr": round(mcap_cr, 0),
+        "price": price,
+        "change_pct": num("change_pct"),
+        "pos_52w": pos52,
+        "vs_50d": vs(ma50),
+        "vs_200d": vs(ma200),
+        # ── valuation ──
+        "pe": f.get("trailing_pe"),
+        "forward_pe": num("forward_pe"),
+        "peg": f.get("peg"),
+        "pb": num("price_to_book"),
+        "ps": num("price_to_sales"),
+        # ── growth ──
         "eps_growth": round(eps_g, 1) if eps_g is not None else None,
         "sales_growth": round(sales_g, 1) if sales_g is not None else None,
-        "peg": f.get("peg"),
-        "de": round(de, 2) if de is not None else None,
+        # ── quality / returns ──
         "roce": round(roce, 1) if roce is not None else None,
         "roe": round(roe, 1) if roe is not None else None,
+        "profit_margin": pct("profit_margin"),
+        "operating_margin": pct("operating_margin"),
+        "gross_margin": pct("gross_margin"),
+        # ── balance sheet ──
+        "de": round(de, 2) if de is not None else None,
+        "current_ratio": num("current_ratio"),
+        # ── income / cash ──
+        "revenue_cr": round(f["revenue"] / 1e7, 0) if isinstance(f.get("revenue"), (int, float)) else None,
+        "fcf_cr": round(f["free_cashflow"] / 1e7, 0) if isinstance(f.get("free_cashflow"), (int, float)) else None,
+        # ── other ──
+        "div_yield": pct("dividend_yield"),
+        "beta": num("beta"),
         "promoter": round(promoter, 1) if promoter is not None else None,
-        "pe": f.get("trailing_pe"),
     }
 
 
@@ -191,25 +240,122 @@ def run_preset(name: str, rows: list[dict]) -> list[dict]:
     return [m for m in rows if test(m)]
 
 
-def apply_filters(rows: list[dict], filters: list[dict]) -> list[dict]:
-    """filters: [{key, op ('>'|'<'), value}]; rows must pass all (AND)."""
+# Every filterable field, with the label and unit the UI shows. Declared here
+# so the backend, the UI and the coverage report can't drift apart.
+FIELDS: list[dict] = [
+    {"key": "mcap_cr", "label": "Market cap", "unit": "₹cr", "group": "Size"},
+    {"key": "price", "label": "Price", "unit": "", "group": "Size"},
+    {"key": "change_pct", "label": "Change today", "unit": "%", "group": "Size"},
+    {"key": "revenue_cr", "label": "Revenue", "unit": "₹cr", "group": "Size"},
+
+    {"key": "pe", "label": "P/E (trailing)", "unit": "x", "group": "Valuation"},
+    {"key": "forward_pe", "label": "P/E (forward)", "unit": "x", "group": "Valuation"},
+    {"key": "peg", "label": "PEG", "unit": "x", "group": "Valuation"},
+    {"key": "pb", "label": "Price / book", "unit": "x", "group": "Valuation"},
+    {"key": "ps", "label": "Price / sales", "unit": "x", "group": "Valuation"},
+    {"key": "div_yield", "label": "Dividend yield", "unit": "%", "group": "Valuation"},
+
+    {"key": "eps_growth", "label": "EPS growth", "unit": "%", "group": "Growth"},
+    {"key": "sales_growth", "label": "Sales growth", "unit": "%", "group": "Growth"},
+
+    {"key": "roce", "label": "ROCE", "unit": "%", "group": "Quality"},
+    {"key": "roe", "label": "ROE", "unit": "%", "group": "Quality"},
+    {"key": "profit_margin", "label": "Profit margin", "unit": "%", "group": "Quality"},
+    {"key": "operating_margin", "label": "Operating margin", "unit": "%", "group": "Quality"},
+    {"key": "gross_margin", "label": "Gross margin", "unit": "%", "group": "Quality"},
+    {"key": "fcf_cr", "label": "Free cash flow", "unit": "₹cr", "group": "Quality"},
+
+    {"key": "de", "label": "Debt / equity", "unit": "x", "group": "Balance sheet"},
+    {"key": "current_ratio", "label": "Current ratio", "unit": "x", "group": "Balance sheet"},
+    {"key": "promoter", "label": "Promoter holding", "unit": "%", "group": "Balance sheet"},
+
+    {"key": "pos_52w", "label": "52w range position", "unit": "%", "group": "Technicals"},
+    {"key": "vs_50d", "label": "vs 50-day avg", "unit": "%", "group": "Technicals"},
+    {"key": "vs_200d", "label": "vs 200-day avg", "unit": "%", "group": "Technicals"},
+    {"key": "beta", "label": "Beta", "unit": "", "group": "Technicals"},
+]
+
+FIELD_KEYS = {f["key"] for f in FIELDS}
+
+# Comparison operators. "between" takes value + value2.
+OPS = {">", ">=", "<", "<=", "=", "between"}
+
+
+def _passes(v, op: str, a, b=None) -> bool:
+    """One comparison. A missing value never passes — a screen must not
+    silently treat "unknown" as "meets the criterion"."""
+    if v is None or a is None:
+        return False
+    try:
+        v = float(v); a = float(a)
+    except (TypeError, ValueError):
+        return False
+    if op == ">":
+        return v > a
+    if op == ">=":
+        return v >= a
+    if op == "<":
+        return v < a
+    if op == "<=":
+        return v <= a
+    if op == "=":
+        # Floats: compare with a tolerance rather than exact equality, which
+        # would essentially never match a computed ratio.
+        return abs(v - a) <= max(abs(a) * 1e-6, 1e-9)
+    if op == "between":
+        if b is None:
+            return False
+        try:
+            b = float(b)
+        except (TypeError, ValueError):
+            return False
+        lo, hi = (a, b) if a <= b else (b, a)
+        return lo <= v <= hi
+    return False
+
+
+def apply_filters(rows: list[dict], filters: list[dict],
+                  match: str = "all", sectors: list[str] | None = None) -> list[dict]:
+    """Filter rows.
+
+    filters: [{key, op, value, value2?}]
+    match:   "all" (AND) or "any" (OR) across the filters
+    sectors: keep only these sectors when given
+    """
+    want = {s for s in (sectors or []) if s}
     out = []
     for m in rows:
-        ok = True
-        for flt in filters:
-            v = m.get(flt["key"])
-            if v is None:
-                ok = False
-                break
-            if flt["op"] == ">" and not v > flt["value"]:
-                ok = False
-                break
-            if flt["op"] == "<" and not v < flt["value"]:
-                ok = False
-                break
-        if ok:
+        if want and (m.get("sector") or "") not in want:
+            continue
+        if not filters:
+            out.append(m)
+            continue
+        results = [
+            _passes(m.get(f.get("key")), f.get("op", ">"), f.get("value"), f.get("value2"))
+            for f in filters
+        ]
+        if (all(results) if match != "any" else any(results)):
             out.append(m)
     return out
+
+
+def coverage(rows: list[dict]) -> dict[str, int]:
+    """How many scanned names actually carry each field.
+
+    Surfaced in the UI because it explains the single most confusing screener
+    outcome: a filter on a field the free providers barely populate returns
+    nothing, and without this it looks like no company qualifies rather than
+    like the data isn't there.
+    """
+    out: dict[str, int] = {}
+    for f in FIELDS:
+        k = f["key"]
+        out[k] = sum(1 for m in rows if m.get(k) is not None)
+    return out
+
+
+def sectors_in(rows: list[dict]) -> list[str]:
+    return sorted({(m.get("sector") or "").strip() for m in rows if m.get("sector")})
 
 
 # ── Value-investing screens (merged in from the old Value Investing page) ────

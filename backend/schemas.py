@@ -28,13 +28,18 @@ class MeResponse(BaseModel):
 
 # ── screens ──────────────────────────────────────────────────────────────────
 class FilterClause(BaseModel):
-    key: str
-    op: str = Field(pattern=r"^[<>]$")
-    value: float
+    key: str = Field(..., max_length=32)
+    op: str = Field(">", max_length=8)
+    value: float | None = None
+    # Second bound, used only by the "between" operator.
+    value2: float | None = None
 
 
 class CustomScreenRequest(BaseModel):
-    filters: list[FilterClause]
+    filters: list[FilterClause] = Field(default_factory=list, max_length=12)
+    # "all" = every clause must pass (AND); "any" = at least one (OR).
+    match: str = Field("all", max_length=4)
+    sectors: list[str] = Field(default_factory=list, max_length=30)
 
 
 class GrahamScreenRequest(BaseModel):

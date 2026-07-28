@@ -306,6 +306,15 @@ export type AlertEvent = {
   delivery?: Record<string, boolean>;
 };
 export type Note = { ticker: string; text: string; updated_at: string | null };
+/** A user-saved custom screen (stored server-side, follows the account). */
+export type ScreenClause = {
+  key: string; op: string; value: number | null; value2?: number | null;
+};
+export type SavedScreenDoc = {
+  id: string; name: string; filters: ScreenClause[];
+  match: string; sectors: string[];
+};
+
 export type WorkspacePane = {
   id?: string; widget: string; ticker?: string | null; link?: string | null;
 };
@@ -676,8 +685,21 @@ export const api = {
     apiFetch<unknown>("/api/v1/screens/etfs", {
       method: "POST", body: JSON.stringify({ sort_by, sector }),
     }).then(normScreen),
-  customScreen: (filters: { key: string; op: ">" | "<"; value: number }[]) =>
+  screenFields: () => apiFetch<{
+    fields: { key: string; label: string; unit: string; group: string }[];
+    ops: string[]; sectors: string[]; coverage: Record<string, number>;
+    evaluable: number; scanned: number; as_of: string;
+  }>("/api/v1/screens/fields"),
+  listSavedScreens: () =>
+    apiFetch<{ screens: SavedScreenDoc[] }>("/api/v1/screens/saved"),
+  saveScreens: (screens: SavedScreenDoc[]) =>
+    apiFetch<{ ok: boolean }>("/api/v1/screens/saved", {
+      method: "PUT", body: JSON.stringify({ screens }),
+    }),
+  customScreen: (
+    filters: ScreenClause[], match: "all" | "any" = "all", sectors: string[] = [],
+  ) =>
     apiFetch<unknown>("/api/v1/screens/custom", {
-      method: "POST", body: JSON.stringify({ filters }),
+      method: "POST", body: JSON.stringify({ filters, match, sectors }),
     }).then(normScreen),
 };
