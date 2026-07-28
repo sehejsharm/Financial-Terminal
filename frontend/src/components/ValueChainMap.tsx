@@ -6,6 +6,7 @@ import {
   ChevronRight, Download, ExternalLink, Flag, Maximize2, Pause, Pin, PinOff, Play, X,
 } from "lucide-react";
 
+import { ContagionPathFinder } from "@/components/ContagionPath";
 import { DataAge } from "@/components/DataAge";
 import { StatusBadge } from "@/components/StatusBadge";
 import {
@@ -20,7 +21,8 @@ import {
   type EdgeMetric, type MergedEntity, type Role, type View,
 } from "@/lib/valueChainGraph";
 import {
-  buildOverlayIndex, overlayFor, type NodeOverlay,
+  buildEvidenceIndex, buildOverlayIndex, overlayFor,
+  type EdgeEvidence, type NodeOverlay,
 } from "@/lib/valueChainOverlays";
 import { fmtNum, fmtPct, humanNumber } from "@/lib/utils";
 
@@ -211,12 +213,13 @@ function YoyMark({ x, y, yoy }: { x: number; y: number; yoy: number | null }) {
 
 // ── node box ────────────────────────────────────────────────────────────────
 function Node({ x, y, label, note, pct, color, onClick, selected, verified, dimmed,
-                onHover, onLeave, roles = [], disputed = 0, diffStatus, overlay }: {
+                onHover, onLeave, roles = [], disputed = 0, diffStatus, overlay,
+                sourced = 0 }: {
   x: number; y: number; label: string; note?: string; pct?: number | null;
   color: string; onClick: () => void; selected: boolean;
   verified?: boolean; dimmed?: boolean; roles?: Role[]; disputed?: number;
   diffStatus?: "added" | "removed" | "changed" | "same";
-  overlay?: NodeOverlay;
+  overlay?: NodeOverlay; sourced?: number;
   onHover?: (e: React.MouseEvent | React.FocusEvent) => void;
   onLeave?: () => void;
 }) {
@@ -264,6 +267,17 @@ function Node({ x, y, label, note, pct, color, onClick, selected, verified, dimm
           <title>{r}</title>
         </circle>
       ))}
+      {/* Sourced: a headline names this counterparty alongside the subject,
+          so the edge has a paper trail rather than only the model's word. */}
+      {sourced > 0 && (
+        <g>
+          <title>{`${sourced} headline(s) name this counterparty alongside the subject company`}</title>
+          <circle cx={x - 78} cy={y - 11} r={6} fill="#0c0e12" stroke="#1fd286" strokeWidth={1.2} />
+          <text x={x - 78} y={y - 8.4} textAnchor="middle" fontSize={7.5} fill="#1fd286"
+                fontWeight={700} fontFamily="JetBrains Mono, monospace">⚓</text>
+        </g>
+      )}
+
       {/* ── cross-module overlays ── */}
       {/* Holding: an amber ring around the whole box — you own this. */}
       {overlay?.held && (
@@ -318,10 +332,11 @@ function Node({ x, y, label, note, pct, color, onClick, selected, verified, dimm
 }
 
 // ── drill-down panel ────────────────────────────────────────────────────────
-function NodeDetail({ node, parentTicker, chainTicker, onClose, onRecenter, onReported, overlay }: {
+function NodeDetail({ node, parentTicker, chainTicker, onClose, onRecenter, onReported,
+                      overlay, evidence }: {
   node: Selected; parentTicker: string; chainTicker: string;
   onClose: () => void; onRecenter: (symbol: string, name: string) => void;
-  onReported?: () => void; overlay?: NodeOverlay;
+  onReported?: () => void; overlay?: NodeOverlay; evidence?: EdgeEvidence[];
 }) {
   const router = useRouter();
   const [cands, setCands] = useState<Cand[] | null>(null);
@@ -485,6 +500,30 @@ function NodeDetail({ node, parentTicker, chainTicker, onClose, onRecenter, onRe
             <a key={i} href={h.link} target="_blank" rel="noopener noreferrer"
                className="block text-[11px] text-mut hover:text-amber line-clamp-2">› {h.title}</a>
           ))}
+        </div>
+      )}
+
+      {/* Evidence: headlines naming BOTH companies. This is CO-MENTION
+          sourcing — it proves they were written about together, not that the
+          specific supplier/customer claim is correct. Said plainly. */}
+      {evidence && evidence.length > 0 && (
+        <div className="rounded border border-green/40 bg-green/5 px-2 py-1.5">
+          <div className="text-[10px] uppercase tracking-wider text-green mb-1">
+            ⚓ {evidence.length} source{evidence.length > 1 ? "s" : ""} co-mention this relationship
+          </div>
+          {evidence.map((e, i) => (
+            <a key={i} href={e.link} target="_blank" rel="noopener noreferrer"
+               className="block text-[11px] text-mut hover:text-amber line-clamp-2 mb-0.5">
+              › {e.title}
+              {e.published && (
+                <span className="text-mut/70"> · {new Date(e.published).toLocaleDateString()}</span>
+              )}
+            </a>
+          ))}
+          <div className="text-[9.5px] text-mut/70 mt-1">
+            Co-mention only: these name both companies together — they don&apos;t
+            confirm the specific supplier/customer claim.
+          </div>
         </div>
       )}
 
@@ -945,6 +984,9 @@ export function ValueChainMap({ ticker }: { ticker: string }) {
   const FRAG_COL = fragility.band === "fragile" ? "#ff4d4f"
                  : fragility.band === "concentrated" ? "#ffb000"
                  : fragility.band === "moderate" ? "#c9a25a" : "#1fd286";
+  // Co-mention evidence: headlines naming BOTH this company and the
+  // counterparty are real, timestamped proof the relationship exists.
+  const evidence = buildEvidenceIndex(data.name, allNodes, newsItems);
   const heldCount = [...overlays.values()].filter((o) => o.held).length;
   const dealCount = [...overlays.values()].filter((o) => o.deals.length).length;
   const newsCount = [...overlays.values()].filter((o) => o.news.length).length;
@@ -1010,6 +1052,9 @@ export function ValueChainMap({ ticker }: { ticker: string }) {
           </button>
         </div>
       )}
+
+      {/* Contagion path finder — routes across EVERY map generated so far. */}
+      <div className="mb-3"><ContagionPathFinder seed={data.name} /></div>
 
       {/* Time-lapse: watch the chain evolve across stored generations. */}
       {chrono.length > 1 && (
@@ -1299,6 +1344,7 @@ export function ValueChainMap({ ticker }: { ticker: string }) {
                   disputed={lookupReportCount(reportCounts, n.key)}
                   diffStatus={diff?.byKey.get(n.key)?.status}
                   overlay={overlayFor(overlays, n.key)}
+                  sourced={evidence.get(n.key)?.length ?? 0}
                   onHover={(e) => showTip(e, n, n.primaryRole)} onLeave={hideTip}
                   selected={selected?.key === n.key} />
           ))}
@@ -1452,6 +1498,7 @@ export function ValueChainMap({ ticker }: { ticker: string }) {
             <NodeDetail node={selected} parentTicker={current} chainTicker={current}
                         onClose={() => setSelected(null)} onRecenter={recenter}
                         overlay={overlayFor(overlays, selected.key)}
+                        evidence={evidence.get(selected.key)}
                         onReported={() => {
                           // Refresh badges so the new flag counts immediately.
                           api.vcReportCounts(current)

@@ -221,3 +221,71 @@ export function overlayFor(
   const alias = findAliasKey(key, idx.keys());
   return alias ? idx.get(alias) : undefined;
 }
+
+// ── edge evidence ──────────────────────────────────────────────────────────
+// Every relationship starts life "AI-estimated" with no paper trail. When a
+// headline names BOTH the subject company and a counterparty, that headline
+// is real, timestamped, linkable evidence that the relationship exists — so
+// the edge upgrades from speculative to sourced on its own.
+//
+// NOTE: this is co-mention evidence, NOT a filing or transcript citation. A
+// headline naming two companies proves they were written about together; it
+// does not prove the specific supplier/customer claim. The UI must say so.
+
+/** Looser match used ONLY for the subject company: accepts a whole-word
+ *  prefix of the full name ("Reliance" for "Reliance Industries"), the same
+ *  conservative rule the entity merge uses. */
+export function subjectMentioned(text: string, subjectName: string): boolean {
+  if (textMentionsEntity(text, subjectName)) return true;
+  const key = entityKey(subjectName);
+  if (key.length < 4) return false;
+  const first = key.split(" ")[0];
+  if (first.length < 4 || STOPWORD_NAMES.has(first)) return false;
+  const hay = ` ${normText(text)} `;
+  return hay.includes(` ${first} `);
+}
+
+export type EdgeEvidence = {
+  title: string;
+  link: string;
+  published: string | null;
+  publisher?: string;
+};
+
+/**
+ * Headlines that name BOTH the subject and this counterparty, newest first.
+ */
+export function findEdgeEvidence(
+  subjectName: string,
+  counterpartyName: string,
+  news: NewsHit[],
+  limit = 3,
+): EdgeEvidence[] {
+  if (!subjectName || !counterpartyName) return [];
+  const out: EdgeEvidence[] = [];
+  for (const n of news) {
+    const text = `${n.title} ${n.publisher ?? ""}`;
+    // Asymmetric on purpose. The SUBJECT is known context — the user is
+    // already looking at its map — so a headline shortening "Reliance
+    // Industries" to "Reliance" still counts. The COUNTERPARTY is the claim
+    // being evidenced, so it stays strict: a headline must name it in full,
+    // or we'd cite "Reliance" stories as proof of a Reliance Jio edge.
+    if (subjectMentioned(text, subjectName) && textMentionsEntity(text, counterpartyName)) {
+      out.push(n);
+    }
+  }
+  out.sort((a, b) => (Date.parse(b.published || "") || 0) - (Date.parse(a.published || "") || 0));
+  return out.slice(0, limit);
+}
+
+/** Evidence count per entity key — drives the "sourced" badge on the graph. */
+export function buildEvidenceIndex(
+  subjectName: string, entities: MergedEntity[], news: NewsHit[],
+): Map<string, EdgeEvidence[]> {
+  const idx = new Map<string, EdgeEvidence[]>();
+  for (const e of entities) {
+    const ev = findEdgeEvidence(subjectName, e.name, news);
+    if (ev.length) idx.set(e.key, ev);
+  }
+  return idx;
+}

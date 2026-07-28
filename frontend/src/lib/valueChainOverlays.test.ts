@@ -2,7 +2,8 @@ import { describe, expect, it } from "vitest";
 
 import { mergeEntities } from "./valueChainGraph";
 import {
-  bareSymbol, buildOverlayIndex, overlayFor, symbolMatchesEntity, textMentionsEntity,
+  bareSymbol, buildOverlayIndex, findEdgeEvidence, overlayFor, symbolMatchesEntity,
+  textMentionsEntity,
 } from "./valueChainOverlays";
 
 const chain = {
@@ -134,5 +135,38 @@ describe("buildOverlayIndex", () => {
     for (const e of entities) {
       expect(overlayFor(idx, e.key)).toEqual({ deals: [], news: [] });
     }
+  });
+});
+
+describe("findEdgeEvidence (co-mention sourcing)", () => {
+  const news = [
+    { title: "Reliance signs long-term crude deal with Saudi Aramco", link: "a", published: "2026-07-20T10:00:00Z" },
+    { title: "Saudi Aramco raises official selling prices", link: "b", published: "2026-07-19T10:00:00Z" },
+    { title: "Reliance Q1 profit beats estimates", link: "c", published: "2026-07-18T10:00:00Z" },
+  ];
+
+  it("only returns headlines naming BOTH companies", () => {
+    const ev = findEdgeEvidence("Reliance Industries", "Saudi Aramco", news);
+    expect(ev).toHaveLength(1);
+    expect(ev[0].link).toBe("a");
+  });
+
+  it("returns nothing when only one side is named", () => {
+    expect(findEdgeEvidence("Reliance Industries", "Tata Motors", news)).toHaveLength(0);
+  });
+
+  it("sorts newest first and respects the limit", () => {
+    const many = [
+      { title: "Reliance and Saudi Aramco expand venture", link: "x", published: "2026-07-21T00:00:00Z" },
+      ...news,
+    ];
+    const ev = findEdgeEvidence("Reliance Industries", "Saudi Aramco", many, 1);
+    expect(ev).toHaveLength(1);
+    expect(ev[0].link).toBe("x");
+  });
+
+  it("is null-safe", () => {
+    expect(findEdgeEvidence("", "Saudi Aramco", news)).toEqual([]);
+    expect(findEdgeEvidence("Reliance", "", news)).toEqual([]);
   });
 });
