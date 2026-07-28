@@ -295,3 +295,233 @@ def value_chain_scenario(body: ScenarioRequest,
         raise HTTPException(status.HTTP_502_BAD_GATEWAY, str(e))
     return {"ticker": body.ticker, "node": body.node_name,
             "shock_pct": body.shock_pct, "markdown": text}
+
+
+# ── "Ask Motherboard" — retrieval across the user's own modules ────────────
+#
+# The point of this endpoint is what it REFUSES to do. It answers only from
+# context assembled out of the caller's own data (their portfolio, their
+# watchlists, the maps they've generated, the alerts they've set, live macro),
+# and every block is labelled with the module it came from so the answer can
+# cite a source the user can go and check. If the context doesn't contain the
+# answer, the correct output is "I don't have that", not a plausible
+# recollection from the model's training data.
+
+class AskRequest(BaseModel):
+    question: str = Field(..., min_length=3, max_length=500)
+    # Ticker the user was looking at when they asked, so the answer can lead
+    # with what's on screen rather than guessing at the subject.
+    context_ticker: str | None = Field(None, max_length=24)
+
+
+_ASK_PROMPT = """You are the research assistant inside a financial terminal.
+Answer the user's question using ONLY the CONTEXT below, which was retrieved
+from this specific user's own data a moment ago.
+
+CONTEXT
+=======
+{context}
+=======
+
+QUESTION: {question}
+
+HARD RULES — these matter more than being helpful:
+- Answer ONLY from the context above. You have no other information about
+  this user, their holdings, or current market levels.
+- If the context does not contain what is needed, say exactly what is missing
+  and which screen would have it. Do NOT fill the gap from memory: a
+  confidently wrong position size or price is worse than "I don't have that".
+- Cite the source module in brackets after facts you use, e.g. [Portfolio],
+  [Macro], [Value chain: RELIANCE.NS]. Only cite blocks that actually appear
+  above.
+- Value-chain relationships are AI-ESTIMATED, not filing-sourced. If you use
+  one, say so.
+- Prices and portfolio values are a snapshot from when this question was
+  asked, and can be delayed. Don't present them as live.
+- No investment recommendations. Educational analysis only.
+- Be brief: a few sentences or a short list. Markdown, no preamble.
+"""
+
+
+def _fmt_money(v, cur: str = "") -> str:
+    try:
+        return f"{cur}{float(v):,.0f}"
+    except Exception:
+        return "—"
+
+
+def _ctx_portfolio(user: dict) -> str | None:
+    """Positions, weights and P&L — the block most questions actually want."""
+    try:
+        from backend.routes.portfolio import summary as _summary
+        s = _summary(None, user)
+        positions = s.get("positions") or []
+        if not positions:
+            return None
+        lines = []
+        t = s.get("totals") or {}
+        ccys = {p.get("currency") for p in positions if p.get("currency")}
+        cur = next(iter(ccys)) if len(ccys) == 1 else ""
+        lines.append(
+            f"Total value {_fmt_money(t.get('value'))} {cur}, cost "
+            f"{_fmt_money(t.get('cost'))}, unrealised P&L {_fmt_money(t.get('pnl'))} "
+            f"({t.get('pnl_pct')}%)."
+            + (" NOTE: mixed-currency book, so the total is a raw sum of different "
+               "currencies and is not a meaningful single figure."
+               if len(ccys) > 1 else ""))
+        for p in sorted(positions, key=lambda x: -(x.get("value") or 0))[:25]:
+            lines.append(
+                f"- {p.get('ticker')} ({p.get('name') or '?'}): qty {p.get('qty')}, "
+                f"value {_fmt_money(p.get('value'))} {p.get('currency') or ''}, "
+                f"weight {p.get('weight')}%, P&L {p.get('pnl_pct')}%, "
+                f"sector {p.get('sector') or 'unknown'}")
+        for sec in (s.get("sectors") or [])[:8]:
+            lines.append(f"- sector {sec.get('sector')}: {sec.get('weight')}% of book")
+        return "\n".join(lines)
+    except Exception:
+        return None
+
+
+def _ctx_watchlists(user: dict) -> str | None:
+    try:
+        from backend.routes.watchlists import list_all
+        wls = list_all(user) or []
+        out = []
+        for w in wls[:10]:
+            d = w if isinstance(w, dict) else w.model_dump()
+            out.append(f"- {d.get('name')}: {', '.join((d.get('tickers') or [])[:30])}")
+        return "\n".join(out) or None
+    except Exception:
+        return None
+
+
+def _ctx_alerts(user: dict) -> str | None:
+    try:
+        from backend.routes.alerts import list_alerts
+        # list_alerts returns the whole alerts document, not a bare list.
+        doc = list_alerts(user) or {}
+        rows = doc.get("alerts") or []
+        active = [a for a in rows if a.get("active")]
+        if not active:
+            return None
+        return "\n".join(
+            f"- {a.get('ticker') or a.get('kind')} {a.get('op')} {a.get('value')}"
+            f"{' (already triggered ' + str(a.get('triggered_at'))[:10] + ')' if a.get('triggered_at') else ''}"
+            for a in active[:20])
+    except Exception:
+        return None
+
+
+def _ctx_snapshot(ticker: str) -> str | None:
+    """Live-ish figures for the name the user is looking at."""
+    if not ticker:
+        return None
+    try:
+        f = _normalize_units(get_stock_fundamentals(ticker) or {})
+    except Exception:
+        return None
+    if not f:
+        return None
+    keep = ("name", "sector", "industry", "price", "market_cap", "pe_ratio",
+            "forward_pe", "pb_ratio", "dividend_yield", "profit_margin", "roe",
+            "debt_to_equity", "revenue", "revenue_growth", "beta", "currency",
+            "fifty_two_week_high", "fifty_two_week_low")
+    bits = [f"{k}: {f[k]}" for k in keep if f.get(k) not in (None, "")]
+    return f"{ticker} — " + "; ".join(bits) if bits else None
+
+
+def _ctx_value_chain(ticker: str) -> str | None:
+    """The most recent generated map for this name, if one exists."""
+    if not ticker:
+        return None
+    try:
+        import json as _json
+        from backend.routes.value_chain import HISTORY_PATH
+        if not HISTORY_PATH.exists():
+            return None
+        latest = None
+        with open(HISTORY_PATH, "r", encoding="utf-8") as fh:
+            for ln in fh:
+                try:
+                    rec = _json.loads(ln)
+                except Exception:
+                    continue
+                if str(rec.get("ticker", "")).upper() == ticker.upper():
+                    latest = rec
+        if not latest:
+            return None
+        data = latest.get("data") or {}
+        out = [f"(AI-estimated map generated {str(latest.get('ts'))[:10]})"]
+        for role in ("suppliers", "customers", "competitors"):
+            names = [n.get("name") for n in (data.get(role) or []) if n.get("name")]
+            if names:
+                out.append(f"- {role}: {', '.join(names[:12])}")
+        return "\n".join(out) if len(out) > 1 else None
+    except Exception:
+        return None
+
+
+def _ctx_macro() -> str | None:
+    """Latest Treasury curve. Cheap enough to include, and the 10y2y spread is
+    the one macro number that comes up in questions about anything."""
+    try:
+        from lib import rates
+        df = rates.get_yield_curve()
+        if df is None or df.empty:
+            return None
+        pts = [f"{r['maturity']}: {float(r['yield']):.2f}%"
+               for _, r in df.iterrows()]
+        line = "US Treasury yield curve — " + ", ".join(pts)
+        by = {r["maturity"]: float(r["yield"]) for _, r in df.iterrows()}
+        if "10Y" in by and "2Y" in by:
+            spread = by["10Y"] - by["2Y"]
+            line += (f". 10y-2y spread {spread:+.2f}pp"
+                     f" ({'inverted' if spread < 0 else 'positive'}).")
+        return line
+    except Exception:
+        return None
+
+
+def build_ask_context(user: dict, ticker: str | None) -> list[tuple[str, str]]:
+    """Assemble labelled context blocks. Each is (module label, text).
+
+    Every block is optional: a user with no portfolio simply has no Portfolio
+    block, and the prompt's rules make the model say so rather than invent one.
+    """
+    t = (ticker or "").strip().upper()
+    candidates = [
+        ("Portfolio", _ctx_portfolio(user)),
+        ("Watchlists", _ctx_watchlists(user)),
+        ("Alerts", _ctx_alerts(user)),
+        (f"Snapshot: {t}" if t else "Snapshot", _ctx_snapshot(t) if t else None),
+        (f"Value chain: {t}" if t else "Value chain",
+         _ctx_value_chain(t) if t else None),
+        ("Macro", _ctx_macro()),
+    ]
+    return [(label, text) for label, text in candidates if text]
+
+
+@router.post("/ask")
+def ask(body: AskRequest, user: dict = Depends(auth.current_user)):
+    """Answer a question from the user's own modules, or admit it can't."""
+    _guard()
+    blocks = build_ask_context(user, body.context_ticker)
+    if not blocks:
+        return {
+            "question": body.question,
+            "sources": [],
+            "markdown": ("I have no data to answer from — there's no portfolio, "
+                         "watchlist, alert or generated value-chain map on this "
+                         "account yet, and no ticker in context. Add a position "
+                         "or open a company in the Terminal, then ask again."),
+        }
+    context = "\n\n".join(f"[{label}]\n{text}" for label, text in blocks)
+    try:
+        text = ai_analyst._call(
+            _ASK_PROMPT.format(context=context, question=body.question),
+            max_tokens=900)
+    except ai_analyst.AnalystError as e:
+        raise HTTPException(status.HTTP_502_BAD_GATEWAY, str(e))
+    return {"question": body.question,
+            "sources": [label for label, _ in blocks],
+            "markdown": text}

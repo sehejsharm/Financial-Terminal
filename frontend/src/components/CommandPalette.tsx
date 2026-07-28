@@ -3,18 +3,15 @@
 import { Command } from "cmdk";
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
+import { Sparkles } from "lucide-react";
 
+import { Markdown } from "@/components/Markdown";
 import { api } from "@/lib/api";
+import { looksLikeQuestion, stripAskPrefix } from "@/lib/askIntent";
 import { FN_CODES, FN_DESCRIPTIONS, parseCommand } from "@/lib/commands";
 
 type SearchHit = { symbol: string; name: string; exchange?: string };
 
-/**
- * Cmd/Ctrl+K command palette — ticker search + page jump.
- *
- * Inspired by Bloomberg's <GO> bar: type a ticker, hit enter, you're in
- * the Terminal page for it. Also navigates pages by name.
- */
 export function CommandPalette({
   open, onOpenChange,
 }: { open: boolean; onOpenChange: (v: boolean) => void }) {
@@ -23,11 +20,44 @@ export function CommandPalette({
   const [hits, setHits] = useState<SearchHit[]>([]);
   const [showHelp, setShowHelp] = useState(false);
   const [recents, setRecents] = useState<string[]>([]);
+
+  // ── Ask Motherboard ──
+  const [answer, setAnswer] = useState<
+    { question: string; markdown: string; sources: string[] } | null>(null);
+  const [asking, setAsking] = useState(false);
+  const [askErr, setAskErr] = useState<string | null>(null);
+  // The ticker on screen, so "is this expensive?" has a subject. Read from
+  // location on open rather than via useSearchParams: the palette is mounted
+  // in Shell on every page, and useSearchParams opts the whole route out of
+  // static prerendering unless each page wraps it in its own Suspense.
+  const [ctxTicker, setCtxTicker] = useState<string | null>(null);
+
   useEffect(() => {
     if (!open) return;
     try { setRecents(JSON.parse(localStorage.getItem("mb_recent_tickers") || "[]").slice(0, 6)); }
     catch { setRecents([]); }
+    try { setCtxTicker(new URLSearchParams(window.location.search).get("t")); }
+    catch { setCtxTicker(null); }
   }, [open]);
+
+  // Closing discards the answer — a stale reply to a question you don't
+  // remember asking is worse than no reply.
+  useEffect(() => {
+    if (!open) { setAnswer(null); setAskErr(null); setAsking(false); }
+  }, [open]);
+
+  async function ask() {
+    const question = stripAskPrefix(q);
+    if (question.length < 3) return;
+    setAsking(true); setAskErr(null); setAnswer(null);
+    try {
+      setAnswer(await api.ask(question, ctxTicker));
+    } catch (e: any) {
+      setAskErr(e?.detail || "Couldn't reach the assistant. Try again.");
+    } finally {
+      setAsking(false);
+    }
+  }
 
   // Debounce ticker search via the API.
   useEffect(() => {
@@ -53,10 +83,29 @@ export function CommandPalette({
             value={q}
             onValueChange={setQ}
             autoFocus
-            placeholder="Type a ticker (RELIANCE.NS, AAPL) or page (Terminal, Screeners)…"
+            placeholder="Ticker (RELIANCE.NS), page (Screeners), or ask a question…"
             className="w-full bg-transparent border-0 border-b border-line px-4 py-3.5 text-txt placeholder:text-mut/70 focus:outline-none"
           />
           <Command.List className="max-h-[60vh] overflow-y-auto py-1">
+            {/* Ask Motherboard, ranked first when the input reads as a
+                question so Enter runs it instead of opening a bogus ticker. */}
+            {looksLikeQuestion(q) && (
+              <Command.Group heading="Ask Motherboard" className="px-2 py-1 text-mut">
+                <Command.Item
+                  value={`__ask_${q}`}
+                  onSelect={ask}
+                  className="flex items-center gap-3 px-3 py-2 rounded cursor-pointer
+                             data-[selected=true]:bg-panel data-[selected=true]:text-amber"
+                >
+                  <Sparkles size={13} className="text-amber shrink-0" />
+                  <span className="text-txt flex-1 truncate">
+                    {asking ? "Thinking…" : <>Ask: <span className="text-amber">{stripAskPrefix(q)}</span></>}
+                  </span>
+                  {ctxTicker && <span className="text-mut text-[10px]">about {ctxTicker}</span>}
+                </Command.Item>
+              </Command.Group>
+            )}
+
             {q.trim().length === 0 && recents.length > 0 && (
               <Command.Group heading="Recent" className="px-2 py-1 text-mut">
                 {recents.map((t) => (
@@ -151,6 +200,34 @@ export function CommandPalette({
 
           </Command.List>
         </Command>
+
+        {/* ── the answer ── */}
+        {(asking || answer || askErr) && (
+          <div className="border-t border-line max-h-[45vh] overflow-y-auto px-4 py-3">
+            {asking && <div className="text-mut text-xs animate-pulse">Reading your portfolio, watchlists and maps…</div>}
+            {askErr && <div className="text-red text-xs">{askErr}</div>}
+            {answer && (
+              <>
+                <div className="flex items-center gap-2 mb-2">
+                  <Sparkles size={12} className="text-amber" />
+                  <span className="label-xs">Answer</span>
+                  <div className="flex-1" />
+                  <button onClick={() => setAnswer(null)} className="text-mut hover:text-txt text-xs">clear</button>
+                </div>
+                <Markdown>{answer.markdown}</Markdown>
+                <div className="text-[10px] text-mut mt-3 pt-2 border-t border-line/60">
+                  {answer.sources.length > 0 ? (
+                    <>Answered from your own data only: {answer.sources.join(" · ")}.{" "}</>
+                  ) : null}
+                  It was given nothing else to work from, so if something isn&apos;t in
+                  those modules it should say so rather than guess — treat any
+                  unattributed claim as unverified. Value-chain links are AI-estimated,
+                  and prices are a snapshot that may be delayed.
+                </div>
+              </>
+            )}
+          </div>
+        )}
 
         {showHelp && (
           <div className="border-t border-line max-h-[40vh] overflow-y-auto px-4 py-3">

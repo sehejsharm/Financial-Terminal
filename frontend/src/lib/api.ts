@@ -486,6 +486,12 @@ export const api = {
   }) => apiFetch<{ ticker: string; node: string; shock_pct: number; markdown: string }>(
       "/api/v1/ai/value-chain-scenario", { method: "POST", body: JSON.stringify(body) },
       { timeoutMs: 60_000 }),
+  /** Ask Motherboard — answered strictly from the caller's own modules. */
+  ask: (question: string, contextTicker?: string | null) =>
+    apiFetch<{ question: string; sources: string[]; markdown: string }>(
+      "/api/v1/ai/ask",
+      { method: "POST", body: JSON.stringify({ question, context_ticker: contextTicker || null }) },
+      { timeoutMs: 60_000 }),
   vcPath: (source: string, target: string) =>
     apiFetch<ContagionPath>(
       `/api/v1/value-chain/graph/path?source=${encodeURIComponent(source)}&target=${encodeURIComponent(target)}`),
