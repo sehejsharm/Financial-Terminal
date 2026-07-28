@@ -6,6 +6,7 @@ import { Backtester } from "@/components/Backtester";
 import { Shell } from "@/components/Shell";
 import { QuantSkeleton } from "@/components/Skeleton";
 import { TickerInput } from "@/components/TickerInput";
+import { VolCone } from "@/components/VolCone";
 import { api, type Watchlist } from "@/lib/api";
 import { fmtNum } from "@/lib/utils";
 
@@ -92,11 +93,13 @@ type QuantResult = {
   betas: { ticker: string; b60: number; bfull: number }[] | null;
 };
 
-type Tab = "corr" | "bt";
+type Tab = "corr" | "bt" | "vol";
 
 export default function QuantPage() {
   const [tab, setTab] = useState<Tab>("corr");
-  const [btOpened, setBtOpened] = useState(false);
+  // Heavy tabs fetch on mount, so they're created on first visit and then
+  // kept alive — flipping back and forth must not refetch or lose state.
+  const [opened, setOpened] = useState<Record<string, boolean>>({});
   const [watchlists, setWatchlists] = useState<Watchlist[]>([]);
   const [input, setInput] = useState("RELIANCE.NS, TCS.NS, HDFCBANK.NS, INFY.NS, ^NSEI");
   const [bench, setBench] = useState("^NSEI");
@@ -168,9 +171,10 @@ export default function QuantPage() {
   return (
     <Shell>
       <div className="flex items-center gap-1 mb-4 border-b border-line">
-        {([["corr", "Correlation & beta"], ["bt", "Backtest"]] as const).map(([id, label]) => (
+        {([["corr", "Correlation & beta"], ["bt", "Backtest"],
+           ["vol", "Volatility"]] as const).map(([id, label]) => (
           <button key={id}
-                  onClick={() => { setTab(id); if (id === "bt") setBtOpened(true); }}
+                  onClick={() => { setTab(id); setOpened((o) => ({ ...o, [id]: true })); }}
                   className={`px-3 py-2 text-xs uppercase tracking-wider border-b-2 -mb-px ${
                     tab === id
                       ? "border-amber text-amber"
@@ -180,11 +184,11 @@ export default function QuantPage() {
         ))}
       </div>
 
-      {/* Mounted lazily (it fetches history on mount) but kept alive once
-          opened, so flipping tabs doesn't refetch or discard a tuned
-          parameter set. */}
       <div className={tab === "bt" ? "" : "hidden"}>
-        {btOpened && <Backtester seedTicker={firstTicker} />}
+        {opened.bt && <Backtester seedTicker={firstTicker} />}
+      </div>
+      <div className={tab === "vol" ? "" : "hidden"}>
+        {opened.vol && <VolCone seedTicker={firstTicker} />}
       </div>
 
       <div className={tab === "corr" ? "" : "hidden"}>
