@@ -87,7 +87,7 @@ function PresetPicker({ onPick, onClose }: {
         <button onClick={onClose} className="text-mut hover:text-txt text-xs">close</button>
       </div>
       <div className="grid gap-2"
-           style={{ gridTemplateColumns: "repeat(auto-fill, minmax(230px, 1fr))" }}>
+           style={{ gridTemplateColumns: "repeat(auto-fit, minmax(230px, 1fr))" }}>
         {DESK_PRESETS.map((p) => (
           <button key={p.id} onClick={() => onPick(p.id)}
                   className="text-left px-3 py-2 rounded border border-line2 bg-panel

@@ -113,7 +113,7 @@ export function TileSection({
         <>
           <div className="grid gap-2"
                style={{
-                 gridTemplateColumns: `repeat(auto-fill, minmax(${dense ? 132 : 158}px, 1fr))`,
+                 gridTemplateColumns: `repeat(auto-fit, minmax(${dense ? 132 : 158}px, 1fr))`,
                }}>
             {visible.map((s) => (
               <TickerTile key={s} sym={s} dense={dense} editing={editing}

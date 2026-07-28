@@ -12,6 +12,8 @@ from typing import Any
 
 from backend.config import DATA_DIR
 
+from lib.atomic import read_json_resilient, write_json_atomic
+
 
 class Storage:
     """Pluggable storage interface (watchlists, saved screens, audit log)."""
@@ -41,15 +43,11 @@ class JSONStore(Storage):
 
     # ── private helpers ──────────────────────────────────────────────────────
     def _load_watchlists(self) -> dict:
-        if not self.wl_path.exists():
-            return {}
-        try:
-            return json.loads(self.wl_path.read_text() or "{}")
-        except Exception:
-            return {}
+        data = read_json_resilient(self.wl_path, {})
+        return data if isinstance(data, dict) else {}
 
     def _save_watchlists(self, data: dict) -> None:
-        self.wl_path.write_text(json.dumps(data, indent=2))
+        write_json_atomic(self.wl_path, data)
 
     # ── watchlists ──────────────────────────────────────────────────────────
     def watchlists_for(self, username: str) -> list[dict]:
@@ -92,13 +90,8 @@ class JSONStore(Storage):
         return self.root / f"{kind}.json"
 
     def _load_docs(self, kind: str) -> dict:
-        p = self._doc_path(kind)
-        if not p.exists():
-            return {}
-        try:
-            return json.loads(p.read_text() or "{}")
-        except Exception:
-            return {}
+        data = read_json_resilient(self._doc_path(kind), {})
+        return data if isinstance(data, dict) else {}
 
     def user_doc(self, kind: str, username: str, default: Any = None) -> Any:
         with self._lock:
@@ -109,7 +102,9 @@ class JSONStore(Storage):
         with self._lock:
             docs = self._load_docs(kind)
             docs[username.lower()] = doc
-            self._doc_path(kind).write_text(json.dumps(docs, indent=2, default=str))
+            # Atomic: a truncate-then-write here could wipe every user's
+            # portfolios if the disk filled part-way through.
+            write_json_atomic(self._doc_path(kind), docs, default=str)
 
     def all_user_docs(self, kind: str) -> dict[str, Any]:
         with self._lock:

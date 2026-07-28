@@ -211,7 +211,7 @@ export function WatchlistBoard() {
 
       {lists && lists.length > 0 && (
         <div className="grid gap-3"
-             style={{ gridTemplateColumns: "repeat(auto-fill, minmax(268px, 1fr))" }}>
+             style={{ gridTemplateColumns: "repeat(auto-fit, minmax(268px, 1fr))" }}>
           {lists.map((w) => <ListCard key={w.id} wl={w} onChanged={load} />)}
         </div>
       )}

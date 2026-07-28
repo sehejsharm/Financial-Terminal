@@ -35,7 +35,7 @@ export function SectionPicker({ layout, onAddPreset, onAddCustom, onAddBoard, on
 
       {presets.length > 0 ? (
         <div className="grid gap-2 mb-4"
-             style={{ gridTemplateColumns: "repeat(auto-fill, minmax(240px, 1fr))" }}>
+             style={{ gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))" }}>
           {presets.map((p) => (
             <button key={p.id} onClick={() => onAddPreset(p.id)}
                     className="text-left px-3 py-2 rounded border border-line2 bg-panel

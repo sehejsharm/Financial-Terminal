@@ -21,6 +21,8 @@ import streamlit as st
 import os as _os
 
 # MB_DATA_DIR override matches backend/config.py (used by test harnesses).
+from lib.atomic import read_json_resilient, write_json_atomic
+
 DATA_DIR = Path(_os.getenv("MB_DATA_DIR")
                 or (Path(__file__).resolve().parent.parent / "data"))
 USERS_PATH = DATA_DIR / "users.json"
@@ -105,20 +107,24 @@ def _load() -> dict:
         data = _seed()
         _save(data)
         return data
-    try:
-        with open(USERS_PATH, "r", encoding="utf-8") as fh:
-            data = json.load(fh)
-        if "users" not in data:
-            data = {"users": {}}
-        return data
-    except Exception:
+    # Falls back to the .bak copy and quarantines an unreadable primary,
+    # instead of silently returning an empty user table — that turned one bad
+    # write into "every account vanished", and the next save made it permanent.
+    data = read_json_resilient(USERS_PATH, {"users": {}})
+    if not isinstance(data, dict) or "users" not in data:
         return {"users": {}}
+    return data
 
 
 def _save(data: dict) -> None:
+    """Persist the user table atomically.
+
+    Never truncate-then-write: a failure part-way (a full disk is the
+    realistic case) would leave users.json empty and lock everyone out, and
+    freeing the disk afterwards would not bring the accounts back.
+    """
     DATA_DIR.mkdir(parents=True, exist_ok=True)
-    with open(USERS_PATH, "w", encoding="utf-8") as fh:
-        json.dump(data, fh, indent=2)
+    write_json_atomic(USERS_PATH, data)
 
 
 def _lock_remaining(key: str) -> int:

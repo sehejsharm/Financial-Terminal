@@ -46,41 +46,44 @@ export function TickerTile({
          className={`hud relative overflow-hidden group h-full
                      ${has ? "hover:hud-glow" : ""} transition-shadow
                      ${dense ? "px-2.5 py-2" : "px-3 py-2.5"}`}>
-      <div className="flex items-start gap-1.5">
+      <div className="flex items-center gap-1.5">
         <span className={`label-xs truncate flex-1 min-w-0 ${dense ? "text-[9.5px]" : ""}`}
               title={meta.label}>
           {meta.short}
         </span>
         {meta.coverage === "nse" && (
           <span title="Served direct from NSE — the most reliable path"
-                className="w-1 h-1 rounded-full bg-green/70 shrink-0 mt-1" />
+                className="w-1 h-1 rounded-full bg-green/70 shrink-0" />
         )}
       </div>
 
-      <div className={`num text-txt tracking-tight leading-none mt-1.5
-                       ${dense ? "text-[15px]" : "text-[19px]"}`}>
-        {has
-          ? <LiveNumber value={tick!.ltp} format="price" ccy={cur} />
-          : meta.coverage === "none"
-            ? <span className="text-mut text-[13px]">n/a</span>
-            : <span className="text-mut animate-pulse">···</span>}
-      </div>
+      {/* Price left, change right on ONE baseline. A tile stretched wide by
+          the grid then reads as a deliberate row rather than a narrow card
+          with a gap bolted onto its right-hand side. */}
+      <div className="flex items-baseline justify-between gap-2 mt-1.5 min-w-0">
+        <span className={`num text-txt tracking-tight leading-none truncate
+                          ${dense ? "text-[15px]" : "text-[19px]"}`}>
+          {has
+            ? <LiveNumber value={tick!.ltp} format="price" ccy={cur} />
+            : meta.coverage === "none"
+              ? <span className="text-mut text-[13px]">n/a</span>
+              : <span className="text-mut animate-pulse">···</span>}
+        </span>
 
-      <div className={`flex items-baseline gap-2 mt-1 ${dense ? "text-[10px]" : "text-[11.5px]"}`}>
-        {cp != null ? (
-          <>
+        <span className={`shrink-0 text-right ${dense ? "text-[10px]" : "text-[11.5px]"}`}>
+          {cp != null ? (
             <span className={up ? "text-green" : "text-red"}>
               {up ? "▲" : "▼"} <LiveNumber value={cp} format="pct" />
+              {tick?.chg != null && !dense && (
+                <span className="num text-mut ml-1.5">{fmtNum(Math.abs(tick.chg), 2)}</span>
+              )}
             </span>
-            {tick?.chg != null && !dense && (
-              <span className="num text-mut">{fmtNum(Math.abs(tick.chg), 2)}</span>
-            )}
-          </>
-        ) : (
-          <span className="text-mut">
-            {meta.coverage === "none" ? "no free symbol" : "awaiting tick"}
-          </span>
-        )}
+          ) : (
+            <span className="text-mut">
+              {meta.coverage === "none" ? "no free symbol" : "awaiting tick"}
+            </span>
+          )}
+        </span>
       </div>
 
       {/* Magnitude bar — size of the move, readable without parsing digits. */}
