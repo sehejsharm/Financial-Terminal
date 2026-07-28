@@ -1,10 +1,12 @@
 "use client";
 
 import { useRouter, useSearchParams } from "next/navigation";
-import { Suspense, useCallback, useEffect, useRef, useState } from "react";
+import {
+  Suspense, useCallback, useEffect, useReducer, useRef, useState,
+} from "react";
+import { ChevronLeft, ChevronRight } from "lucide-react";
 
 import { AIPanel } from "@/components/AIPanel";
-import { DataAge } from "@/components/DataAge";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
 import { CapitalStructureView } from "@/components/CapitalStructure";
 import { Comparables } from "@/components/Comparables";
@@ -22,57 +24,24 @@ import { ChartToolbar, PriceChart, useChartConfig } from "@/components/PriceChar
 import { Shell } from "@/components/Shell";
 import { TerminalSkeleton } from "@/components/Skeleton";
 import { TickerInput } from "@/components/TickerInput";
+import { FunctionRail } from "@/components/terminal/FunctionRail";
+import { QuoteHeader } from "@/components/terminal/QuoteHeader";
 import { StreetRatings } from "@/components/StreetRatings";
 import { ValueChainMap } from "@/components/ValueChainMap";
 import { LiveNumber } from "@/components/LiveNumber";
 import { Wacc } from "@/components/Wacc";
 import { api, type Quote, type ResolveRec, type Snapshot } from "@/lib/api";
-import { FN_CODES } from "@/lib/commands";
+import { parseEntry, resolveFn, stepFn } from "@/lib/terminalFunctions";
 import { useLive } from "@/lib/useLive";
 import { useQuote } from "@/lib/useQuote";
 import { curForTicker, fmtNum, fmtPct, formatPercent, humanNumber, inferCurrency } from "@/lib/utils";
 
-const FUNCTIONS = [
-  "Snapshot",
-  "Technicals & charts",
-  "Financials",
-  "Estimates & targets",
-  "Capital structure",
-  "Comparables",
-  "Debt profile",
-  "Ownership / insiders",
-  "Earnings history",
-  "Street ratings",
-  "WACC model",
-  "Value-chain map",
-  "Options & Greeks",
-  "AI deep-dive",
-  "Recent news",
-  "Notes",
-] as const;
-type Fn = typeof FUNCTIONS[number];
+/** The screens, their mnemonics and their order live in lib/terminalFunctions
+ *  so the rail, the keyboard handling, the URL sync and the ⌘K palette all
+ *  agree — a code must never mean two different things. */
+type Fn = string;
 
 const PERIODS = ["1D", "5D", "1M", "3M", "6M", "YTD", "1Y", "3Y", "5Y", "10Y"] as const;
-
-/** Header price card, isolated so the live tick re-renders ONLY this card —
- *  not the whole terminal (8 metric cards + chart) on every tick. Owns its
- *  own useQuote(ticker); falls back to the REST price/change until a tick. */
-function HeaderPriceCard({ ticker, cur, fallbackPrice, fallbackCp }: {
-  ticker: string; cur: string; fallbackPrice: number | null; fallbackCp: number | null;
-}) {
-  const liveTick = useQuote(ticker);
-  const priceVal = liveTick?.ltp ?? fallbackPrice;
-  const cpVal = liveTick?.chgPct ?? fallbackCp;
-  return (
-    <MetricCard
-      label="Price"
-      value={priceVal != null ? <LiveNumber symbol={ticker} field="ltp" format="price" ccy={cur} /> : "—"}
-      delta={cpVal != null ? <LiveNumber symbol={ticker} field="chgPct" format="pct" showDelta /> : null}
-      tone={cpVal == null ? "neutral" : cpVal >= 0 ? "positive" : "negative"}
-      className="!p-3 min-w-[160px]"
-    />
-  );
-}
 
 function TerminalInner() {
   const router = useRouter();
@@ -89,13 +58,8 @@ function TerminalInner() {
   useEffect(() => {
     const t = (sp.get("t") || "").toUpperCase();
     if (t && t !== ticker) setTicker(t);
-    const f = sp.get("fn");
-    if (f) {
-      const label = FN_CODES[f.toUpperCase()] ?? f;
-      if ((FUNCTIONS as readonly string[]).includes(label) && label !== fn) {
-        setFn(label as Fn);
-      }
-    }
+    const label = resolveFn(sp.get("fn"));
+    if (label && label !== fn) setFn(label);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sp]);
 
@@ -187,11 +151,98 @@ function TerminalInner() {
   const cp = quote?.change_pct ?? null;
   const name = (snap?.name as string) || ticker;
 
-  function commitTicker(v: string) {
+  /** Switch screens, reflecting it in the URL so links and reloads keep it. */
+  const pickFn = useCallback((label: string) => {
+    setFn(label);
+    const params = new URLSearchParams(sp.toString());
+    params.set("t", ticker);
+    params.set("fn", label);
+    router.replace(`/terminal?${params.toString()}`);
+  }, [router, sp, ticker]);
+
+  /**
+   * The command line. "TCS.NS" navigates, "FA" jumps screens on the current
+   * name, "TCS.NS FA" does both — the way a terminal command line is expected
+   * to behave.
+   */
+  function runEntry(raw: string) {
+    const parsed = parseEntry(raw);
+    switch (parsed.kind) {
+      case "symbol": commitTicker(parsed.symbol); break;
+      case "function": pickFn(parsed.fn); break;
+      case "both": commitTicker(parsed.symbol, parsed.fn); break;
+      default: break;
+    }
+  }
+
+  // ── symbol history (back / forward within the terminal) ──
+  // Held in a ref, not state: travel() and the push effect both read the
+  // CURRENT stack, and a render closure over a state array goes stale the
+  // moment two navigations land in the same tick. The version counter exists
+  // only to re-render the disabled state of the two buttons.
+  const histRef = useRef<{ stack: string[]; idx: number }>({ stack: [initialTicker], idx: 0 });
+  const [, bumpHist] = useReducer((x: number) => x + 1, 0);
+  const travelling = useRef(false);
+
+  useEffect(() => {
+    if (travelling.current) { travelling.current = false; return; }
+    const h = histRef.current;
+    if (h.stack[h.idx] === ticker) return;
+    // A new visit truncates the forward stack, like a browser.
+    const stack = [...h.stack.slice(0, h.idx + 1), ticker].slice(-25);
+    histRef.current = { stack, idx: stack.length - 1 };
+    bumpHist();
+  }, [ticker]);
+
+  const travel = useCallback((delta: -1 | 1) => {
+    const h = histRef.current;
+    const j = h.idx + delta;
+    if (j < 0 || j >= h.stack.length) return;
+    travelling.current = true;
+    histRef.current = { ...h, idx: j };
+    const sym = h.stack[j];
+    setTicker(sym);
+    router.replace(`/terminal?t=${encodeURIComponent(sym)}&fn=${encodeURIComponent(fn)}`);
+    bumpHist();
+  }, [router, fn]);
+
+  const canBack = histRef.current.idx > 0;
+  const canForward = histRef.current.idx < histRef.current.stack.length - 1;
+
+  // ── keyboard ──
+  // "/" focuses the command line, "[" / "]" cycle screens. Ignored while the
+  // user is typing anywhere, so they never eat a character.
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      const el = e.target as HTMLElement | null;
+      const typing = !!el && (el.tagName === "INPUT" || el.tagName === "TEXTAREA"
+        || el.tagName === "SELECT" || el.isContentEditable);
+      if (typing || e.metaKey || e.ctrlKey || e.altKey) return;
+      if (e.key === "/") {
+        e.preventDefault();
+        document.querySelector<HTMLInputElement>('input[placeholder^="Symbol, function"]')?.focus();
+      } else if (e.key === "[") {
+        e.preventDefault(); pickFn(stepFn(fn, -1));
+      } else if (e.key === "]") {
+        e.preventDefault(); pickFn(stepFn(fn, 1));
+      }
+    }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [fn, pickFn]);
+
+  function commitTicker(v: string, withFn?: string) {
     const t = v.trim().toUpperCase();
-    if (!t || t === ticker) return;
+    if (!t) return;
+    const nextFn = withFn ?? fn;
+    if (withFn) setFn(withFn);
+    if (t === ticker) {
+      if (withFn) pickFn(withFn);
+      return;
+    }
     setTicker(t);
-    router.replace(`/terminal?t=${encodeURIComponent(t)}`);
+    router.replace(
+      `/terminal?t=${encodeURIComponent(t)}&fn=${encodeURIComponent(nextFn)}`);
     // Feed the ⌘K "Recent" group (qualified symbols only).
     if (t.includes(".") || t.startsWith("^")) {
       try {
@@ -204,50 +255,50 @@ function TerminalInner() {
 
   return (
     <Shell>
-      {/* Ticker + Function */}
-      <div className="grid grid-cols-1 sm:grid-cols-[1fr_280px] gap-3 mb-5">
-        <TickerInput
-          value={ticker}
-          onCommit={commitTicker}
-          commitOnBlur={false}  /* commit = navigation here; keep it explicit */
-          placeholder="Ticker (RELIANCE.NS, AAPL, ^NSEI)…"
-        />
-        <select value={fn}
-          onChange={(e) => {
-            const f = e.target.value as Fn;
-            setFn(f);
-            // Reflect the view in the URL so reload/bookmarks/deep links keep
-            // the selected tab instead of resetting to Snapshot.
-            const params = new URLSearchParams(sp.toString());
-            params.set("t", ticker);
-            params.set("fn", f);
-            router.replace(`/terminal?${params.toString()}`);
-          }}
-          className="input-bare cursor-pointer">
-          {FUNCTIONS.map((f) => <option key={f}>{f}</option>)}
-        </select>
+      {/* Command line: a symbol, a mnemonic, or both ("TCS.NS FA"). */}
+      <div className="flex flex-wrap items-center gap-2 mb-3">
+        <div className="flex-1 min-w-[260px]">
+          <TickerInput
+            key={ticker}
+            value={ticker}
+            onCommit={runEntry}
+            commitOnBlur={false}  /* commit = navigation here; keep it explicit */
+            placeholder="Symbol, function code, or both — RELIANCE.NS · FA · TCS.NS OMON"
+          />
+        </div>
+        <div className="flex items-center gap-1">
+          <button onClick={() => travel(-1)} disabled={!canBack}
+                  title="Back to the previous symbol"
+                  className="btn-ghost !px-2 !py-1.5 text-xs disabled:opacity-30">
+            <ChevronLeft size={13} />
+          </button>
+          <button onClick={() => travel(1)} disabled={!canForward}
+                  title="Forward"
+                  className="btn-ghost !px-2 !py-1.5 text-xs disabled:opacity-30">
+            <ChevronRight size={13} />
+          </button>
+        </div>
+        <span className="text-[10px] text-mut hidden xl:inline">
+          <kbd className="px-1 border border-line2 rounded">/</kbd> command ·{" "}
+          <kbd className="px-1 border border-line2 rounded">[</kbd>
+          <kbd className="px-1 border border-line2 rounded ml-0.5">]</kbd> cycle screens
+        </span>
       </div>
 
-      {/* Header strip */}
-      <div className="panel-2 p-4 mb-5 flex items-center gap-5">
-        <div className="flex-1 min-w-0">
-          <div className="text-amber text-xs uppercase tracking-[0.18em]">{ticker}</div>
-          <div className="text-xl font-bold tracking-tight truncate">{name}</div>
-          <div className="text-mut text-xs mt-0.5">
-            {(snap?.sector as string) || "—"} / {(snap?.industry as string) || "—"}
-          </div>
-          <div className="mt-1.5 flex items-center gap-3">
-            <DataAge at={quoteLive.updatedAt} prefix="Quote" />
-            <DataAge at={snapAt} prefix="Fundamentals" onRefresh={refreshHeader} busy={snapBusy} />
-            <a href={`/tearsheet?t=${encodeURIComponent(ticker)}`} target="_blank"
-               className="text-[10.5px] text-mut hover:text-amber underline decoration-dotted"
-               title="Print-ready one-page tear sheet (save as PDF from the print dialog)">
-              Tear sheet →
-            </a>
-          </div>
-        </div>
-        <HeaderPriceCard ticker={ticker} cur={cur} fallbackPrice={price} fallbackCp={cp} />
-      </div>
+      <FunctionRail active={fn} onPick={pickFn} />
+
+      <QuoteHeader
+        ticker={ticker}
+        name={name}
+        snap={snap}
+        cur={cur}
+        fallbackPrice={price}
+        fallbackCp={cp}
+        quoteAt={quoteLive.updatedAt}
+        snapAt={snapAt}
+        snapBusy={snapBusy}
+        onRefresh={refreshHeader}
+      />
 
       {disamb && disamb.length > 0 && (
         <div className="panel-2 p-4 mb-5">
@@ -292,14 +343,15 @@ function TerminalInner() {
       {!loading && !err && fn === "Snapshot" && (
         <>
           <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-5">
-            <MetricCard label="Market cap"   value={humanNumber(snap?.market_cap as number, cur)} />
+            {/* Market cap and the 52-week range moved into the quote header;
+                repeating them here would be two places to read the same
+                number. These are what the header doesn't carry. */}
             <MetricCard label="Trailing P/E" value={fmtNum(snap?.trailing_pe as number, 1)} />
+            <MetricCard label="Forward P/E"  value={fmtNum(snap?.forward_pe as number, 1)}
+              title="Consensus forward earnings multiple, where the providers publish one." />
+            <MetricCard label="EPS (TTM)"    value={fmtNum(snap?.eps_trailing as number, 2)} />
             <MetricCard label="Beta"         value={fmtNum(snap?.beta as number, 2)}
               title="Provider-published beta (typically ~5Y monthly returns vs the listing exchange's main index). The Quant page computes its own 60-day / 1-year daily-returns beta vs a benchmark you choose, so the two figures can differ — different lookback, frequency, and benchmark, not a data bug." />
-            <MetricCard
-              label="52-w range"
-              value={`${fmtNum(snap?.fifty_two_low as number, 2)} – ${fmtNum(snap?.fifty_two_high as number, 2)}`}
-            />
           </div>
           <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-6">
             {/* Level metrics: unsigned formatPercent — a "+" prefix falsely
