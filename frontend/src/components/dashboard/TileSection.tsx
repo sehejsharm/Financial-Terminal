@@ -57,8 +57,11 @@ export function TileSection({
   }
 
   return (
-    <section className="mb-5">
-      <div className="flex items-center gap-2 mb-2 flex-wrap">
+    // A rule under every section header, and more air between sections: the
+    // boards previously ran into each other as one undifferentiated field of
+    // tiles.
+    <section className="mb-7">
+      <div className="flex items-center gap-2 mb-2 flex-wrap pb-1.5 border-b border-line2">
         <button onClick={onToggleCollapsed}
                 className="text-mut hover:text-amber shrink-0"
                 title={section.collapsed ? "Expand" : "Collapse"}>

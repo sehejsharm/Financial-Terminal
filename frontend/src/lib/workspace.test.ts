@@ -319,6 +319,31 @@ describe("normalize — hostile and legacy input", () => {
     expect(out.groups.A).toBe("TCS.NS");
   });
 
+  it("migrates a v1 layout AS THE SERVER RETURNS IT (rows: [] present)", () => {
+    // The regression that broke restoring saved desks: the backend's Pydantic
+    // model defaults rows to [], so the wire shape of a v1 document has BOTH
+    // an empty rows array and the legacy panes. Testing only the hand-written
+    // shape (no rows key at all) missed it entirely.
+    const fromServer = {
+      id: "old", name: "Old desk", version: null,
+      rows: [], groups: {},
+      panes: [{ widget: "chart", ticker: "TCS.NS", link: null, id: null },
+              { widget: "news", ticker: "TCS.NS", link: null, id: null }],
+      split: [2, 1],
+    };
+    const out = normalize(fromServer, WIDGET_IDS);
+    expect(out, "a saved v1 desk must not be discarded").not.toBeNull();
+    expect(out!.name).toBe("Old desk");
+    expect(out!.rows).toHaveLength(1);
+    expect(out!.rows[0].panes.map((p) => p.widget)).toEqual(["chart", "news"]);
+    expect(out!.rows[0].split).toEqual([2, 1]);
+    expect(out!.groups.A).toBe("TCS.NS");
+  });
+
+  it("still returns null when BOTH rows and panes are empty", () => {
+    expect(normalize({ id: "x", name: "X", rows: [], panes: [], groups: {} })).toBeNull();
+  });
+
   it("drops panes whose widget this build no longer ships", () => {
     const out = normalize({
       rows: [{ panes: [{ widget: "chart" }, { widget: "removed_widget" }] }],

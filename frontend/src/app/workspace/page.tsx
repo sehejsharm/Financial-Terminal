@@ -2,7 +2,8 @@
 
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
-  Grid2x2, LayoutGrid, Plus, RotateCcw, Rows3, Save, Trash2, X,
+  ChevronDown, ChevronUp, Grid2x2, LayoutGrid, Plus, RotateCcw, Rows3,
+  Save, Trash2, X,
 } from "lucide-react";
 
 import { Shell } from "@/components/Shell";
@@ -31,6 +32,14 @@ import {
  */
 
 const ACTIVE_KEY = "mb_ws_active";
+
+/** A row is at least as tall as its most demanding widget wants to be — a
+ *  price chart squeezed into 140px is not a chart. Capped so one greedy
+ *  widget can't push every other row off the screen. */
+function rowMinHeight(row: { panes: { widget: string }[] }): number {
+  const want = row.panes.map((p) => widget(p.widget)?.minHeight ?? 240);
+  return Math.min(400, Math.max(200, ...want));
+}
 
 // ── divider ───────────────────────────────────────────────────────────────
 
@@ -369,14 +378,19 @@ function WorkspaceBody() {
         </div>
       ) : (
         <>
-          {/* ── the grid (desktop) ── */}
-          <div className="hidden md:flex flex-col h-[calc(100vh-200px)] min-h-[520px]">
+          {/* ── the grid (desktop) ──
+              min-height, NOT a fixed height: the grid fills the viewport when
+              the rows fit, but each row also carries a minimum derived from
+              its tallest widget, so on a short screen the page scrolls
+              instead of clipping the bottom row off the fold. */}
+          <div className="hidden md:flex flex-col min-h-[calc(100vh-215px)]">
             {ws.rows.map((row, ri) => (
               // Fragment, NOT a display:contents div: the divider measures its
               // parentElement, and a contents box reports clientWidth/Height 0,
               // which silently killed every resize drag.
               <Fragment key={row.id}>
-                <div className="flex min-h-0" style={{ flex: `${row.height} 1 0%` }}>
+                <div className="flex min-h-0"
+                     style={{ flex: `${row.height} 1 0%`, minHeight: rowMinHeight(row) }}>
                   {row.panes.map((p, pi) => (
                     <Fragment key={p.id}>
                       <div className="min-w-0 flex flex-col" style={{ flex: `${row.split[pi]} 1 0%` }}>
@@ -388,28 +402,37 @@ function WorkspaceBody() {
                     </Fragment>
                   ))}
 
-                  {/* Per-row controls, tucked to the right edge. */}
-                  <div className="flex flex-col gap-1 justify-start pl-1 pt-1 shrink-0">
+                  {/* Per-row controls: a proper rail with real hit targets,
+                      not four glyphs crushed into the gutter. */}
+                  <div className="flex flex-col gap-0.5 justify-start pl-1.5 pt-1 w-7 shrink-0">
                     <button onClick={() => update((x) => addPane(x, row.id, "news"))}
                             disabled={row.panes.length >= MAX_PANES_PER_ROW || total >= MAX_PANES}
                             title="Add a pane to this row"
-                            className="text-mut hover:text-amber disabled:opacity-25 disabled:hover:text-mut">
-                      <Plus size={12} />
+                            className="h-5 rounded border border-line2 flex items-center justify-center
+                                       text-mut hover:text-amber hover:border-amber
+                                       disabled:opacity-25 disabled:hover:text-mut disabled:hover:border-line2">
+                      <Plus size={11} />
                     </button>
                     <button onClick={() => update((x) => moveRow(x, row.id, -1))}
                             disabled={ri === 0} title="Move row up"
-                            className="text-mut hover:text-amber disabled:opacity-25 disabled:hover:text-mut text-[10px]">
-                      ▲
+                            className="h-5 rounded border border-line2 flex items-center justify-center
+                                       text-mut hover:text-amber hover:border-amber
+                                       disabled:opacity-25 disabled:hover:text-mut disabled:hover:border-line2">
+                      <ChevronUp size={11} />
                     </button>
                     <button onClick={() => update((x) => moveRow(x, row.id, 1))}
                             disabled={ri === ws.rows.length - 1} title="Move row down"
-                            className="text-mut hover:text-amber disabled:opacity-25 disabled:hover:text-mut text-[10px]">
-                      ▼
+                            className="h-5 rounded border border-line2 flex items-center justify-center
+                                       text-mut hover:text-amber hover:border-amber
+                                       disabled:opacity-25 disabled:hover:text-mut disabled:hover:border-line2">
+                      <ChevronDown size={11} />
                     </button>
                     <button onClick={() => update((x) => removeRow(x, row.id))}
                             disabled={ws.rows.length <= 1} title="Remove this row"
-                            className="text-mut hover:text-red disabled:opacity-25 disabled:hover:text-mut">
-                      <Trash2 size={11} />
+                            className="h-5 rounded border border-line2 flex items-center justify-center
+                                       text-mut hover:text-red hover:border-red
+                                       disabled:opacity-25 disabled:hover:text-mut disabled:hover:border-line2">
+                      <Trash2 size={10} />
                     </button>
                   </div>
                 </div>

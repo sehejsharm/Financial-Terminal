@@ -352,8 +352,13 @@ export function normalize(raw: unknown, knownWidgets?: Set<string>): Workspace |
   // them into a single row and link everything to group A, which reproduces
   // the old behaviour (all panes followed whatever you typed) as closely as
   // the new model allows.
-  const legacyPanes = Array.isArray(o.panes) ? o.panes : null;
-  const rowsRaw = Array.isArray(o.rows) ? o.rows
+  // NOTE the `.length` checks. The server's Pydantic model defaults `rows` to
+  // [], so a v1 document comes back over the wire WITH an empty rows array —
+  // testing `Array.isArray(o.rows)` alone made every legacy desk take the v2
+  // branch, find no rows, and return null. The user's saved desk was then
+  // silently replaced by the default preset.
+  const legacyPanes = Array.isArray(o.panes) && o.panes.length ? o.panes : null;
+  const rowsRaw = Array.isArray(o.rows) && o.rows.length ? o.rows
     : legacyPanes ? [{ panes: legacyPanes, split: o.split, height: 1 }]
       : null;
   if (!rowsRaw) return null;
