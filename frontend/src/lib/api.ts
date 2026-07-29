@@ -440,6 +440,30 @@ export type TickerNews = {
   dropped: number | null;
   strict: boolean;
 };
+/** One name's capacity to absorb an order. */
+export type LiquidityProfile = {
+  adv_value: number | null;
+  median_value: number | null;
+  adv_shares: number | null;
+  basis_value: number | null;
+  sessions: number;
+  last_close: number | null;
+  participation: number;
+  notional: number;
+  days: number | null;
+  verdict: string;
+};
+export type LiquidityBook = {
+  names: Record<string, LiquidityProfile>;
+  summary: {
+    names: number; priced: number; unknown: number;
+    worst_days: number | null; median_days: number | null;
+    notional_each: number; buckets: Record<string, number>;
+  };
+  participation: number;
+  window: number;
+  note: string;
+};
 export type YieldPoint = { maturity: string; years: number; yield: number };
 export type YieldCurve = {
   country: string;
@@ -493,6 +517,11 @@ export const api = {
     ),
   quote: (ticker: string) =>
     apiFetch<Quote>(`/api/v1/market/quote/${encodeURIComponent(ticker)}`),
+  /** Days to build or exit a position in each name, from 20-session ADV. */
+  liquidity: (tickers: string[], notional = 1e9, participation = 0.15) =>
+    apiFetch<LiquidityBook>(
+      `/api/v1/market/liquidity?symbols=${encodeURIComponent(tickers.join(","))}`
+      + `&notional=${notional}&participation=${participation}`),
   quoteBulk: (tickers: string[]) =>
     apiFetch<Record<string, Quote | null>>(
       `/api/v1/market/quote-bulk?symbols=${encodeURIComponent(tickers.join(","))}`,

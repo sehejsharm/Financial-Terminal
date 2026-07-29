@@ -11,17 +11,19 @@ import { DataAge } from "@/components/DataAge";
 import { Markdown } from "@/components/Markdown";
 import { Methodology } from "@/components/Methodology";
 import { ChainTable } from "@/components/valueChain/ChainTable";
+import { ExposurePanel } from "@/components/valueChain/ExposurePanel";
 import { PanelError, PanelLoading } from "@/components/PanelStates";
 import { StatusBadge } from "@/components/StatusBadge";
 import {
-  api, ApiError, type ChainNode, type Quote, type ValueChain,
-  type VcHistoryEntry,
+  api, ApiError, type ChainNode, type Quote, type Snapshot,
+  type ValueChain, type VcHistoryEntry,
   type VcReportCount,
 } from "@/lib/api";
 import {
   clamp, CX, CY, DEFAULT_VIEW, EDGE_METRIC_LABEL, edgeOpacityFor, edgeWidthFor,
   diffChains, fitView, fmtUsd, fragilityScore, H, lookupReportCount, MAX_W, maxUsd,
-  EMPTY_METRICS, mergeEntities, MIN_W, resolveMetric, W, zoomAt,
+  EMPTY_METRICS, FUNNEL_L, FUNNEL_R, mergeEntities, MIN_W, resolveMetric,
+  W, zoomAt,
   type ChainDiff,
   type EdgeMetric, type MergedEntity, type Role, type View,
 } from "@/lib/valueChainGraph";
@@ -697,9 +699,13 @@ export function ValueChainMap({ ticker }: { ticker: string }) {
   // SPLC is two views of one dataset. The chart answers "who is connected to
   // whom"; the table answers "which five of these matter and how much of
   // that is a guess", which is the question research actually starts from.
-  const [mode, setMode] = useState<"chart" | "table">("chart");
+  const [mode, setMode] = useState<"chart" | "table" | "exposure">("chart");
   const [roleTab, setRoleTab] = useState<Role | "all">("all");
   const [nodeQuotes, setNodeQuotes] = useState<Record<string, Quote | null>>({});
+  // The subject's own revenue and cost base — what converts a percentage
+  // share into money. Without it the exposure view falls back to the model's
+  // own value estimates and says so.
+  const [subjectSnap, setSubjectSnap] = useState<Snapshot | null>(null);
   const [selected, setSelected] = useState<Selected | null>(null);
   const svgRef = useRef<SVGSVGElement | null>(null);
 
@@ -795,6 +801,14 @@ export function ValueChainMap({ ticker }: { ticker: string }) {
   }, []);
 
   useEffect(() => { load(current); }, [current, load]);
+
+  useEffect(() => {
+    let alive = true;
+    api.snapshot(current)
+      .then((sn) => { if (alive) setSubjectSnap(sn); })
+      .catch(() => { if (alive) setSubjectSnap(null); });
+    return () => { alive = false; };
+  }, [current]);
 
   // ── overlay sources ─────────────────────────────────────────────────────
   // Portfolio + deals are slow-moving: fetched once per mapped company.
@@ -1168,7 +1182,7 @@ export function ValueChainMap({ ticker }: { ticker: string }) {
       <div className="hud px-3 py-2 mb-3 flex flex-wrap items-center gap-x-4 gap-y-2 text-[11px]">
         <span className="label-xs">Show as</span>
         <div className="flex items-center gap-1">
-          {(["chart", "table"] as const).map((m) => (
+          {(["chart", "table", "exposure"] as const).map((m) => (
             <button key={m} onClick={() => setMode(m)}
                     aria-pressed={mode === m}
                     className={`px-2.5 py-1 rounded border uppercase tracking-wider
@@ -1208,9 +1222,9 @@ export function ValueChainMap({ ticker }: { ticker: string }) {
 
         <div className="flex-1" />
         <span className="text-mut">
-          {mode === "chart"
-            ? "Click a node to re-centre the map"
-            : "Click a row to re-centre the map"}
+          {mode === "chart" ? "Click a node to re-centre the map"
+            : mode === "table" ? "Click a row to re-centre the map"
+            : "Concentration, money at risk, and whether it can be traded at size"}
         </span>
       </div>
 
@@ -1313,7 +1327,7 @@ export function ValueChainMap({ ticker }: { ticker: string }) {
           fit/reset all describe the canvas; leaving them on screen in table
           mode is a row of buttons that do nothing to what you are reading. */}
       <div className={`flex-wrap items-center gap-x-3 gap-y-2 mb-3 text-[11px] text-mut ${
-        mode === "table" ? "hidden" : "flex"}`}>
+        mode === "chart" ? "flex" : "hidden"}`}>
         {/* legend */}
         <span className="inline-flex items-center gap-3 whitespace-nowrap">
           <span><span style={{ color: COL.supplier }}>●</span> Suppliers</span>
@@ -1431,6 +1445,15 @@ export function ValueChainMap({ ticker }: { ticker: string }) {
       {/* The table view. Kept as a sibling of the graph rather than a
           replacement for it: both read the same merged entity list, so
           switching views never refetches or loses the drill-down trail. */}
+      {mode === "exposure" && (
+        <ExposurePanel
+          entities={entities}
+          subject={data.name || current}
+          generatedAt={data.generated_at ?? null}
+          quotes={nodeQuotes}
+          snapshot={subjectSnap} />
+      )}
+
       {mode === "table" && (
         <ChainTable
           entities={entities}
@@ -1447,7 +1470,7 @@ export function ValueChainMap({ ticker }: { ticker: string }) {
       {/* Graph + docked detail panel. The panel sits BESIDE the canvas on
           large screens so selecting a node never scrolls the graph out of
           view; below ~1024px it stacks underneath (still adjacent). */}
-      <div className={`gap-3 ${mode === "table" ? "hidden" : "grid"} ${selected ? "lg:grid-cols-[minmax(0,1fr)_340px]" : "grid-cols-1"}`}>
+      <div className={`gap-3 ${mode === "chart" ? "grid" : "hidden"} ${selected ? "lg:grid-cols-[minmax(0,1fr)_340px]" : "grid-cols-1"}`}>
       <div ref={containerRef}
            className="panel overflow-hidden touch-none select-none relative min-w-0"
            onPointerDown={onPointerDown} onPointerMove={onPointerMove}
@@ -1462,6 +1485,25 @@ export function ValueChainMap({ ticker }: { ticker: string }) {
             </marker>
           </defs>
 
+          {/* The trunks. Each side's fan converges on a funnel point and one
+              thick line carries it into the subject — the visual shorthand
+              for "this entire column is upstream of that company". */}
+          {suppliers.length > 0 && (
+            <>
+              <line x1={FUNNEL_L} y1={CY} x2={CX - 92} y2={CY}
+                    stroke={COL.supplier} strokeOpacity={0.85} strokeWidth={3}
+                    markerEnd="url(#arrow)" />
+              <circle cx={FUNNEL_L} cy={CY} r={3} fill={COL.supplier} opacity={0.9} />
+            </>
+          )}
+          {customers.length > 0 && (
+            <>
+              <line x1={CX + 92} y1={CY} x2={FUNNEL_R} y2={CY}
+                    stroke={COL.customer} strokeOpacity={0.85} strokeWidth={3} />
+              <circle cx={FUNNEL_R} cy={CY} r={3} fill={COL.customer} opacity={0.9} />
+            </>
+          )}
+
           {/* Edges are drawn PER ROLE, not per column, so a merged entity
               that both supplies and buys gets an inbound AND an outbound
               arrow. Styling encodes exposure (width/opacity) and provenance
@@ -1471,13 +1513,17 @@ export function ValueChainMap({ ticker }: { ticker: string }) {
             const w = edgeWidthFor(m.value, m.used, usdMax);
             return (
               <g key={`se${i}`} opacity={matchesFilter(s) ? 1 : 0.12}>
-                <line x1={s.x + 78} y1={s.y} x2={CX - 90} y2={CY}
+                {/* Node -> funnel, not node -> centre. Every edge converging
+                    on one point and then running as a single trunk into the
+                    subject is what makes a supply chain read as a BOWTIE
+                    rather than a starburst: the eye sees "all of this feeds
+                    that" before it reads a single label. */}
+                <line x1={s.x + 78} y1={s.y} x2={FUNNEL_L} y2={CY}
                       stroke={s.confidence === "verified" ? "#1fd286" : COL.supplier}
                       strokeOpacity={s.confidence === "verified" ? 0.9 : edgeOpacityFor(m.value, m.used, usdMax)}
                       strokeWidth={s.confidence === "verified" ? Math.max(2, w) : w}
-                      strokeDasharray={s.confidence === "verified" ? undefined : "6 4"}
-                      markerEnd="url(#arrow)" />
-                <YoyMark x={(s.x + 78 + CX - 90) / 2} y={(s.y + CY) / 2}
+                      strokeDasharray={s.confidence === "verified" ? undefined : "6 4"} />
+                <YoyMark x={(s.x + 78 + FUNNEL_L) / 2} y={(s.y + CY) / 2}
                          yoy={s.metricsByRole.supplier?.yoyPct ?? null} />
               </g>
             );
@@ -1487,7 +1533,7 @@ export function ValueChainMap({ ticker }: { ticker: string }) {
             const w = edgeWidthFor(m.value, m.used, usdMax);
             return (
               <g key={`ce${i}`} opacity={matchesFilter(c) ? 1 : 0.12}>
-                <line x1={CX + 90} y1={CY} x2={c.x - 78} y2={c.y}
+                <line x1={FUNNEL_R} y1={CY} x2={c.x - 78} y2={c.y}
                       stroke={c.confidence === "verified" ? "#1fd286" : COL.customer}
                       strokeOpacity={c.confidence === "verified" ? 0.9 : edgeOpacityFor(m.value, m.used, usdMax)}
                       strokeWidth={c.confidence === "verified" ? Math.max(2, w) : w}

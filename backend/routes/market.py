@@ -206,6 +206,33 @@ def _computed_roe(ticker: str) -> float | None:
     return None
 
 
+@cached(ttl=3600)
+def _liquidity(syms: tuple[str, ...], notional: float, participation: float) -> dict:
+    from lib import liquidity as lq
+    return lq.book(providers.history, list(syms), notional_each=notional,
+                   participation=participation, period="3M")
+
+
+@router.get("/liquidity")
+def liquidity(symbols: str = Query(..., description="Comma-separated tickers"),
+              notional: float = Query(1e9, gt=0,
+                                      description="Position size per name, in the "
+                                                  "listing's own currency"),
+              participation: float = Query(0.15, gt=0, le=1.0),
+              _user: dict = Depends(auth.current_user)):
+    """How many sessions it takes to build or exit a position in each name.
+
+    The question a supply-chain screen has to answer before anyone trades on
+    it: this analysis says buy the assembler and short the display maker —
+    how long does each leg take, and which of these cannot absorb the size
+    at all? Derived from the same daily bars the charts use.
+    """
+    syms = [s.strip().upper() for s in symbols.split(",") if s.strip()][:30]
+    if not syms:
+        raise HTTPException(400, "No symbols provided")
+    return _liquidity(tuple(sorted(set(syms))), notional, participation)
+
+
 @router.get("/snapshot/{ticker}")
 @cached(ttl=120)
 def snapshot(ticker: str, _user: dict = Depends(auth.current_user)):

@@ -194,6 +194,49 @@ export const METHODOLOGY: Record<string, Methodology> = {
     ],
   },
 
+  chainExposure: {
+    kind: "computed",
+    what: "Concentration, money at risk, and whether the resulting trade can "
+      + "actually be executed at the intended size.",
+    formula: "HHI = Σ(share²) · at risk = share × (revenue or cost of revenue) "
+      + "· sessions = notional / (ADV × participation)",
+    inputs: [
+      "Relationship shares from the value-chain map — the model's estimates "
+        + "unless an edge is marked verified.",
+      "The subject's revenue and cost of revenue, where the providers carry "
+        + "them; otherwise the model's own estimated relationship values.",
+      "Twenty sessions of daily bars per listed counterparty, for average "
+        + "daily value traded.",
+      "Your chosen notional and a 15% participation assumption.",
+    ],
+    assumptions: [
+      "Shares are normalised over what is QUANTIFIED, not over 100 — the map "
+        + "covers the largest relationships it knows about, not the whole book.",
+      "A supplier's share applies to cost of revenue and a customer's to "
+        + "revenue; the two are never added together.",
+      "Liquidity is stable at recent levels, and 15% of a day's volume is an "
+        + "upper bound for a patient order rather than a target.",
+      "The position is spread in proportion to exposure, which is a sizing "
+        + "convention and not a recommendation.",
+    ],
+    limits: [
+      "Because the map is partial, real concentration is AT LEAST what is "
+        + "shown here and never less. Treat every concentration figure as a "
+        + "floor.",
+      "No market impact is modelled. The day counts assume your buying does "
+        + "not move the price, which stops being true at exactly the sizes "
+        + "this screen is for.",
+      "Borrow availability, position limits, index-inclusion effects and the "
+        + "fact that other participants can see the same liquidity are all "
+        + "absent.",
+      "Money at risk is what a relationship is worth, not what would be lost: "
+        + "a disrupted supplier is usually replaced at a higher price, not at "
+        + "zero output.",
+      "Private and unlisted counterparties carry no ticker, so they are "
+        + "excluded from the trade plan while still being real exposure.",
+    ],
+  },
+
   aiAnalysis: {
     kind: "ai",
     what: "A written analysis produced by a language model from the figures on "

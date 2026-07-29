@@ -23,6 +23,12 @@ export const clamp = (v: number, lo: number, hi: number) => Math.min(hi, Math.ma
 
 export const DEFAULT_VIEW: View = { x: 0, y: 0, w: W, h: H };
 
+/** Where each side's fan converges before a single trunk runs to the centre.
+ *  The bowtie shape depends on this being well inside the columns and well
+ *  outside the subject card. */
+export const FUNNEL_L = CX - 250;
+export const FUNNEL_R = CX + 250;
+
 /** Node box half-extents used by the renderer (rect is 156×32 centred on x,y). */
 export const NODE_HALF_W = 78;
 export const NODE_HALF_H = 16;

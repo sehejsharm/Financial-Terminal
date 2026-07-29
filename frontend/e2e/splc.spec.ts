@@ -50,6 +50,27 @@ async function openSplc(page: Page) {
   await page.route("**/api/v1/market/quote/**", (r) => r.fulfill({
     json: { symbol: "AAPL", price: 212.43, prev_close: 214.9, change_pct: -1.15 },
   }));
+  await page.route("**/api/v1/market/liquidity**", (r) => {
+    const syms = (new URL(r.request().url()).searchParams.get("symbols") || "").split(",");
+    const names: Record<string, unknown> = {};
+    syms.forEach((sym, i) => {
+      // First name is deep, the rest are progressively thinner.
+      const adv = [4e9, 8e7, 2e7][i % 3];
+      names[sym] = {
+        adv_value: adv, median_value: adv, basis_value: adv, adv_shares: 1e6,
+        sessions: 20, last_close: 100, participation: 0.15, notional: 1e9,
+        days: 1e9 / (adv * 0.15), verdict: "days",
+      };
+    });
+    return r.fulfill({ json: {
+      names,
+      summary: { names: syms.length, priced: syms.length, unknown: 0,
+                 worst_days: 80, median_days: 5, notional_each: 1e9, buckets: {} },
+      participation: 0.15, window: 20,
+      note: "Days to trade = notional / (ADV × participation). Nothing here "
+        + "models market impact or borrow availability.",
+    } });
+  });
   await page.goto("/terminal?t=AAPL&fn=SPLC");
   await expect(page.getByRole("button", { name: "chart", exact: true }))
     .toBeVisible({ timeout: 45_000 });
@@ -119,4 +140,66 @@ test("the table says how much of the map is quantified at all", async ({ page })
   await expect(page.getByText(/counterparties/)).toBeVisible();
   await expect(page.getByText(/carry a number/)).toBeVisible();
   await expect(page.getByText(/verified/).first()).toBeVisible();
+});
+
+
+test("the exposure view scores concentration and names the choke points",
+  async ({ page }) => {
+    await openSplc(page);
+    await page.getByRole("button", { name: "exposure", exact: true }).click();
+
+    // Hon Hai is 46.6% of input cost on its own — the map is concentrated and
+    // has to say so rather than leaving the reader to add up a column.
+    await expect(page.getByText(/Largest single counterparty/i)).toBeVisible();
+    await expect(page.getByText(/Single points of failure/i)).toBeVisible();
+    await expect(page.getByText(/Hon Hai/).first()).toBeVisible();
+    // Both the summary and the callout say it; either is enough.
+    await expect(page.getByText(/cannot be replaced quickly|passes straight through/i)
+      .first()).toBeVisible();
+    // The read states its coverage before its conclusion.
+    await expect(page.getByText(/relationships carry a figure/)).toBeVisible();
+    await expect(page.getByText(/at least this high, not lower/)).toBeVisible();
+  });
+
+test("exposure is converted into money using the subject's own financials",
+  async ({ page }) => {
+    await openSplc(page);
+    await page.getByRole("button", { name: "exposure", exact: true }).click();
+    await expect(page.getByText(/Exposure in money/i)).toBeVisible();
+    await expect(page.getByRole("columnheader", { name: /At risk/i })).toBeVisible();
+  });
+
+test("tradability is opt-in, then answers the size question", async ({ page }) => {
+  await openSplc(page);
+  await page.getByRole("button", { name: "exposure", exact: true }).click();
+
+  // Not automatic: it is the heaviest fetch on the screen.
+  const check = page.getByRole("button", { name: "Check tradability" });
+  await expect(check).toBeVisible();
+  await check.click();
+
+  await expect(page.getByText(/Deployable inside 20 sessions/i)).toBeVisible();
+  await expect(page.getByText(/Blocked by liquidity/i)).toBeVisible();
+  await expect(page.getByText(/Slowest leg/i)).toBeVisible();
+  await expect(page.getByRole("columnheader", { name: /Sessions/i })).toBeVisible();
+});
+
+test("changing the size changes the day counts", async ({ page }) => {
+  await openSplc(page);
+  await page.getByRole("button", { name: "exposure", exact: true }).click();
+  await page.getByRole("button", { name: "Check tradability" }).click();
+  await expect(page.getByText(/Slowest leg/i)).toBeVisible();
+
+  const slowest = () => page.getByText(/Slowest leg/i).locator("..").locator(".num").first();
+  const big = await slowest().textContent();
+  await page.getByRole("button", { name: "$100m", exact: true }).click();
+  await expect(slowest()).not.toHaveText(big!);
+});
+
+test("the exposure view never renders the graph underneath it", async ({ page }) => {
+  // Both were mounted at once at first: the chart kept rendering below the
+  // analysis, which reads as a duplicated screen.
+  await openSplc(page);
+  await page.getByRole("button", { name: "exposure", exact: true }).click();
+  await expect(page.getByPlaceholder("Find in graph…")).toBeHidden();
 });

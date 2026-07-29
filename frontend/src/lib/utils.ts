@@ -13,7 +13,13 @@ export function humanNumber(n: number | null | undefined, prefix = ""): string {
     [1e12, "T"], [1e9, "B"], [1e6, "M"], [1e3, "K"],
   ];
   for (const [div, suf] of map) {
-    if (abs >= div) return `${sign}${prefix}${(abs / div).toFixed(2)}${suf}`;
+    // The threshold is nudged below the divisor so a value that ROUNDS to the
+    // next unit is shown in it: 999,999,999 formatted naively reads
+    // "1000.00M", a unit nobody uses, sitting next to a "$1.00B" three rows
+    // above. Two decimals means the cut is at 0.999995 of the divisor.
+    if (abs >= div * 0.999995) {
+      return `${sign}${prefix}${(abs / div).toFixed(2)}${suf}`;
+    }
   }
   return `${sign}${prefix}${abs.toLocaleString(undefined, { maximumFractionDigits: 2 })}`;
 }
