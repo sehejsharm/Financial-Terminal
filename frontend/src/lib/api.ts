@@ -16,7 +16,25 @@ export class ApiError extends Error {
   constructor(public status: number, public detail: string) {
     super(detail || `API error ${status}`);
   }
+
+  /** True when the failure is the backend's, not the browser's. */
+  get serverFault(): boolean { return this.status >= 500; }
+  /** True when nothing reached the server at all. */
+  get offline(): boolean { return this.status === 0; }
 }
+
+/** Plain-language text for the server failures this app actually produces.
+ *  Used only when the backend didn't send its own `detail`. */
+const SERVER_FAULT: Record<number, string> = {
+  500: "The server hit an internal error handling this request. It has been "
+    + "logged. Retry, and if it keeps happening the data is unavailable "
+    + "rather than slow.",
+  502: "The server could not get an answer from an upstream data provider. "
+    + "This is a backend problem, not your connection — retry in a moment.",
+  503: "The server is shedding load right now. Retry in a few seconds.",
+  504: "The server gave up waiting for an upstream data provider. Retry in "
+    + "a moment; the provider is slow, not your connection.",
+};
 
 function readCookie(name: string): string | null {
   if (typeof document === "undefined") return null;
@@ -134,8 +152,9 @@ export async function apiFetchMeta<T = unknown>(
                       { ...init, headers, cache: "no-store", signal: ctrl.signal });
   } catch (e: any) {
     throw new ApiError(0, e?.name === "AbortError"
-      ? "Request timed out — the data provider may be slow. Try again."
-      : "Network error — check your connection and retry.");
+      ? "Timed out waiting for the server. The upstream data provider is "
+        + "probably slow right now — retry in a moment."
+      : "Could not reach the server — check your connection and retry.");
   } finally {
     clearTimeout(timer);
   }
@@ -146,6 +165,13 @@ export async function apiFetchMeta<T = unknown>(
       detail = (body?.detail || body?.message || detail) as string;
     } catch { /* not JSON */ }
     if (res.status === 401) { token.clear(); cacheClearAll(); }
+    // A 5xx is the SERVER failing, not the user's network. Telling someone
+    // to check their connection when the backend returned 502 sends them
+    // to debug the one thing that is working.
+    if (res.status >= 500 && (!detail || detail === res.statusText)) {
+      detail = SERVER_FAULT[res.status] ?? `The server failed (${res.status}). `
+        + "This is not your connection. Retry in a moment.";
+    }
     throw new ApiError(res.status, detail);
   }
   if (res.status === 204) return { data: undefined as T, fetchedAt: Date.now(), fromCache: false };
@@ -362,6 +388,9 @@ export type NewsItem = {
   /** Which configured feed delivered it — not always the outlet named in
    *  `publisher`, since Google News reports the originating publisher. */
   source?: string | null;
+  /** How it was matched to a requested company: "exact" | "name". Only set
+   *  on the per-ticker feed, which is entity-filtered. */
+  match?: string | null;
 };
 export type Indicator = {
   name: string; value: number | null; prior: number | null;
@@ -399,6 +428,17 @@ export type SectorBoard = {
   weights: Record<string, number>;
   component_labels: Record<string, string>;
   note: string;
+};
+/** Response of the per-ticker news endpoint. */
+export type TickerNews = {
+  ticker: string;
+  items: NewsItem[];
+  /** Resolved company name the items were matched against. */
+  entity: string | null;
+  matched: number | null;
+  /** Items dropped as being about a different company of a similar name. */
+  dropped: number | null;
+  strict: boolean;
 };
 export type YieldPoint = { maturity: string; years: number; yield: number };
 export type YieldCurve = {
@@ -467,8 +507,14 @@ export const api = {
     apiFetchMeta<Snapshot>(`/api/v1/market/snapshot/${encodeURIComponent(ticker)}`, {}, opts),
   movers: (kind: "gainers" | "losers" = "gainers", count = 8) =>
     apiFetch<Mover[]>(`/api/v1/market/movers?kind=${kind}&count=${count}`),
-  news: (ticker: string, limit = 15) =>
-    apiFetch<NewsItem[]>(`/api/v1/market/news/${encodeURIComponent(ticker)}?limit=${limit}`),
+  /** Entity-filtered headlines for one listing, plus the filter outcome. */
+  tickerNews: (ticker: string, limit = 15) =>
+    apiFetch<TickerNews>(
+      `/api/v1/market/news/${encodeURIComponent(ticker)}?limit=${limit}`),
+  /** Just the items, for callers that don't surface the filter counts. */
+  news: async (ticker: string, limit = 15) =>
+    (await apiFetch<TickerNews>(
+      `/api/v1/market/news/${encodeURIComponent(ticker)}?limit=${limit}`)).items,
   marketNews: (limit = 30) =>
     apiFetch<NewsItem[]>(`/api/v1/market/news?limit=${limit}`),
 

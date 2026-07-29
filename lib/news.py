@@ -10,6 +10,7 @@ from urllib.parse import quote_plus
 import requests
 import streamlit as st
 
+from lib import news_relevance
 from lib.market_data import make_ticker
 
 _HEADERS = {"User-Agent": "Mozilla/5.0 (compatible; StockMarketAnalyst/1.0)"}
@@ -210,15 +211,52 @@ def _newest_first(items: list[dict]) -> list[dict]:
     return sorted(items, key=key, reverse=True)
 
 
-@st.cache_data(ttl=600, show_spinner=False)
-def ticker_news(ticker: str, limit: int = 10) -> list[dict]:
-    """Headlines for a single ticker.
+def entity_for(ticker: str) -> dict:
+    """The company identity behind a ticker, for relevance matching.
 
-    yfinance first (it knows which stories are actually tagged to the
-    symbol), then Yahoo's RSS, then a Google News search on the bare symbol.
-    The last of those is the only route that reliably surfaces Indian-outlet
-    coverage of an NSE name, which is most of the coverage that matters here.
+    Reads the NSE directory (symbol -> name + ISIN) so matching can use the
+    real legal name and the ISIN rather than the bare symbol text. Falls back
+    to a name-less entity, which downgrades matching to exact-symbol only —
+    strict, but never wrong.
     """
+    sym = news_relevance.bare_symbol(ticker)
+    name, isin = "", ""
+    try:
+        from lib.resolve import _nse_directory
+        meta = _nse_directory().get(sym) or {}
+        name, isin = meta.get("name", ""), meta.get("isin", "")
+    except Exception:
+        pass
+    if not name:
+        # Non-Indian listings: yfinance carries a long name for most of them.
+        try:
+            info = make_ticker(ticker).info or {}
+            name = info.get("longName") or info.get("shortName") or ""
+        except Exception:
+            name = ""
+    return news_relevance.entity(ticker, name, isin)
+
+
+@st.cache_data(ttl=600, show_spinner=False)
+def ticker_news(ticker: str, limit: int = 10,
+                strict: bool = True) -> list[dict]:
+    """Headlines for a single ticker, filtered to that actual company.
+
+    yfinance first (it knows which stories are tagged to the symbol), then
+    Yahoo's RSS, then a Google News search. The last of those is the only
+    route that reliably surfaces Indian-outlet coverage of an NSE name — and
+    it is also where the wrong-company results came from, because the old
+    query was the bare symbol plus the word "stock". "RELIANCE stock"
+    returned Reliance Steel & Aluminum, a US metals distributor.
+
+    Two changes fix that. The query is now the company's full name as a
+    quoted phrase with an exchange qualifier, and every item — from every
+    source, including yfinance's own tagging — is checked against the
+    resolved entity before it is returned. Items that only match part of the
+    name are dropped, and the count is reported so the caller can say so
+    rather than silently showing a short list.
+    """
+    ent = entity_for(ticker)
     out: list[dict] = []
     try:
         raw = make_ticker(ticker).news or []
@@ -235,13 +273,35 @@ def ticker_news(ticker: str, limit: int = 10) -> list[dict]:
             f"&region=US&lang=en-US", limit)
 
     if len(out) < limit:
-        bare = ticker.split(".")[0].lstrip("^")
-        query = quote_plus(f"{bare} stock")
+        query = quote_plus(news_relevance.search_query(ent))
         out += _parse_rss(
             f"https://news.google.com/rss/search?q={query}"
             f"&hl=en-IN&gl=IN&ceid=IN:en", limit, publisher="Google News")
 
-    return _newest_first(dedupe(out))[:limit]
+    out = _newest_first(dedupe(out))
+    if not strict or not ent["tokens"]:
+        # No resolved name to match against: returning the raw list is the
+        # honest option, and the caller flags it.
+        return out[:limit]
+
+    kept, dropped = news_relevance.partition(out, ent)
+    for it in kept:
+        it["match"] = news_relevance.match_strength(
+            f"{it.get('title', '')} {it.get('summary', '')}", ent)
+    _LAST_FILTER[ticker.upper()] = {
+        "kept": len(kept), "dropped": len(dropped), "entity": ent["name"],
+    }
+    return kept[:limit]
+
+
+# Last relevance-filter outcome per ticker, so the API can tell the user
+# "6 headlines matched Reliance Industries; 9 mentioning other companies
+# called Reliance were dropped" instead of just showing a short list.
+_LAST_FILTER: dict[str, dict] = {}
+
+
+def last_filter(ticker: str) -> dict:
+    return _LAST_FILTER.get((ticker or "").upper(), {})
 
 
 def _fetch_feed(name_url: tuple[str, str], per_feed: int) -> list[dict]:

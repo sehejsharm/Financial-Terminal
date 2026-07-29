@@ -1,6 +1,8 @@
 """Market data: quote, history, snapshot, search, movers, news."""
 from __future__ import annotations
 
+import time
+
 from fastapi import APIRouter, Depends, HTTPException, Query
 
 from backend import auth
@@ -56,14 +58,66 @@ def _bulk_quotes(syms: tuple[str, ...]) -> dict:
     return providers.quotes_bulk(list(syms))
 
 
+#: A tick this old is still worth serving directly. Above it we go to the
+#: provider. 20s is under the fastest market cadence, so a symbol the stream
+#: is actively polling always answers from memory.
+_LIVE_TICK_MAX_AGE_MS = 20_000
+
+
 @router.get("/quote-bulk")
 def quote_bulk(symbols: str = Query(..., description="Comma-separated tickers"),
                _user: dict = Depends(auth.current_user)):
-    """Parallel batch quote — single round-trip from the client's view."""
+    """Parallel batch quote, served from the live tick store where possible.
+
+    This endpoint was taking 5–9 seconds, because a cache miss meant a live
+    fan-out over up to 30 symbols against providers that answer in
+    hundreds of milliseconds each. Meanwhile the streaming ingest loop was
+    already polling most of those exact symbols on a timer and holding the
+    results in memory — the slow path was re-fetching data the process
+    already had.
+
+    So: memory first, provider only for what's missing or stale. Each entry
+    carries `as_of` and `age_ms` so the UI can say how old a number is
+    rather than implying everything is live.
+    """
     syms = [s.strip().upper() for s in symbols.split(",") if s.strip()][:30]
     if not syms:
         raise HTTPException(400, "No symbols provided")
-    return _bulk_quotes(tuple(sorted(set(syms))))
+
+    from backend.stream import hub
+
+    now_ms = time.time() * 1000
+    out: dict[str, dict | None] = {}
+    missing: list[str] = []
+    for s in sorted(set(syms)):
+        tick = hub.last_tick(s)
+        ts = (tick or {}).get("ts")
+        age = now_ms - ts if isinstance(ts, (int, float)) else None
+        if tick and age is not None and age <= _LIVE_TICK_MAX_AGE_MS:
+            ltp, chg = tick.get("ltp"), tick.get("chg")
+            out[s] = {
+                "symbol": s,
+                "price": ltp,
+                # The stream carries the change, not the previous close;
+                # deriving it here keeps the response shape identical to the
+                # provider path so clients need no special case.
+                "prev_close": (ltp - chg) if (ltp is not None and chg is not None)
+                              else None,
+                "change_pct": tick.get("chgPct"),
+                "currency": tick.get("ccy"),
+                "as_of": ts, "age_ms": round(age), "source": "stream",
+            }
+        else:
+            missing.append(s)
+
+    if missing:
+        fetched = _bulk_quotes(tuple(missing))
+        for s in missing:
+            q = fetched.get(s)
+            out[s] = None if not q else {
+                **q, "as_of": now_ms, "age_ms": 0, "source": "provider",
+            }
+    return out
 
 
 @router.get("/history/{ticker}")
@@ -177,6 +231,10 @@ def _news_payload(items):
             # the item. Google News reports the originating publisher, so
             # without this the UI can't offer a working source filter.
             "source": _strip_html(it.get("source")) or None,
+            # How this item was matched to the requested company: "exact"
+            # (qualified symbol or ISIN) or "name" (full company name).
+            # Absent on the market-wide wire, which isn't entity-filtered.
+            "match": it.get("match"),
         }
         for it in items
     ]
@@ -184,9 +242,25 @@ def _news_payload(items):
 
 @router.get("/news/{ticker}")
 @cached(ttl=300)
-def news(ticker: str, limit: int = 15,
+def news(ticker: str, limit: int = 15, strict: bool = True,
          _user: dict = Depends(auth.current_user)):
-    return _news_payload(news_mod.ticker_news(ticker, limit=limit))
+    """Headlines for one listing, filtered to that actual company.
+
+    Returns the filter outcome alongside the items so the UI can say "9
+    stories about other companies called Reliance were dropped" rather than
+    just showing a short list. `strict=false` returns the unfiltered feed,
+    which is the escape hatch when a company's name isn't in the directory.
+    """
+    items = news_mod.ticker_news(ticker, limit=limit, strict=strict)
+    info = news_mod.last_filter(ticker) if strict else {}
+    return {
+        "ticker": ticker.upper(),
+        "items": _news_payload(items),
+        "entity": info.get("entity") or None,
+        "matched": info.get("kept"),
+        "dropped": info.get("dropped"),
+        "strict": strict,
+    }
 
 
 @router.get("/news")
