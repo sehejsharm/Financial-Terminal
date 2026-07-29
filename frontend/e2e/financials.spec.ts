@@ -29,6 +29,8 @@ const INCOME = mk({
   "Pre-Tax Income": [1510e7, 1490e7, 1390e7, 1290e7],
   "Tax Provision": [380e7, 375e7, 350e7, 325e7],
   "Net Income": [1130e7, 1115e7, 1040e7, 965e7],
+  // Rising EPS on near-flat income: the count is shrinking.
+  "EPS (diluted)": [17.4, 16.6, 15.1, 13.6],
 });
 const BALANCE = mk({
   "Total Assets": [17800e7, 16200e7, 14900e7, 13600e7],
@@ -45,6 +47,25 @@ const CASHFLOW = mk({
   "Free Cash Flow": [500e7, 660e7, 720e7, 700e7],
 });
 
+// Five quarters: four beats, one miss, ending on a two-beat run.
+const EARNINGS = {
+  columns: ["quarter", "epsActual", "epsEstimate"],
+  rows: [
+    { quarter: "2024-06-30", epsActual: 4.10, epsEstimate: 4.00 },
+    { quarter: "2024-09-30", epsActual: 4.35, epsEstimate: 4.20 },
+    { quarter: "2024-12-31", epsActual: 4.05, epsEstimate: 4.30 },
+    { quarter: "2025-03-31", epsActual: 4.62, epsEstimate: 4.40 },
+    { quarter: "2025-06-30", epsActual: 4.75, epsEstimate: 4.55 },
+  ],
+};
+
+const ESTIMATES = {
+  price_targets: {
+    low: 1180, mean: 1620, median: 1600, high: 2100, current: 1425.6,
+  },
+  earnings_estimate: { "0q": { avg: 4.8, low: 4.4, high: 5.2 } },
+};
+
 async function openFa(page: Page, fn = "FA") {
   await login(page);
   await page.route("**/statement/income**", (r) =>
@@ -60,8 +81,10 @@ async function openFa(page: Page, fn = "FA") {
   await page.route("**/api/v1/market/quote/**", (r) => r.fulfill({ json: {
     symbol: "RELIANCE.NS", price: 1425.6, prev_close: 1440.2, change_pct: -1.01 } }));
   await page.route("**/capital-structure**", (r) => r.fulfill({ json: {
-    total_debt: 4900e7, cash: 1420e7, market_cap: 19.3e12, shares: 6.77e9,
+    total_debt: 3.24e12, cash: 1.12e12, market_cap: 19.3e12, shares: 6.77e9,
     currency: "INR" } }));
+  await page.route("**/earnings-history**", (r) => r.fulfill({ json: EARNINGS }));
+  await page.route("**/estimates**", (r) => r.fulfill({ json: ESTIMATES }));
   await page.goto(`/terminal?t=RELIANCE.NS&fn=${fn}`);
 }
 
@@ -148,4 +171,51 @@ test("DDIS shows the leverage trend, not just today's number", async ({ page }) 
     .toBeVisible({ timeout: 45_000 });
   await expect(page.getByText(/How it has moved/i)).toBeVisible();
   await expect(page.getByText(/no maturity ladder/i)).toBeVisible();
+});
+
+
+test("CS values the whole enterprise, not just the equity", async ({ page }) => {
+  await openFa(page, "CS");
+  await expect(page.getByText(/Enterprise value/).first())
+    .toBeVisible({ timeout: 45_000 });
+  for (const m of [/EV \/ EBITDA/, /EV \/ sales/, /EV \/ free cash flow/]) {
+    await expect(page.getByText(m)).toBeVisible();
+  }
+});
+
+test("CS derives the share count and says whether it is rising", async ({ page }) => {
+  // Net income and diluted EPS recover the count exactly. A company buying
+  // back 3% a year and one issuing 3% look identical on a debt/equity bar.
+  await openFa(page, "CS");
+  await expect(page.getByText(/Implied diluted shares/))
+    .toBeVisible({ timeout: 45_000 });
+  await expect(page.getByText(/Change per year/)).toBeVisible();
+  await expect(page.getByText(/derived/).first()).toBeVisible();
+});
+
+test("ERN reports the record, not just the last quarter", async ({ page }) => {
+  await openFa(page, "ERN");
+  await expect(page.getByText(/Hit rate/)).toBeVisible({ timeout: 45_000 });
+  // .first(): the card and the summary sentence both say it.
+  await expect(page.getByText("80%").first()).toBeVisible();   // 4 of 5
+  await expect(page.getByText(/Typical surprise/)).toBeVisible();
+  await expect(page.getByText("4B / 1M")).toBeVisible();
+  await expect(page.getByText(/Current beat streak/)).toBeVisible();
+});
+
+test("ERN says what a high hit rate actually means", async ({ page }) => {
+  await openFa(page, "ERN");
+  await expect(page.getByText(/guides\s+conservatively/i))
+    .toBeVisible({ timeout: 45_000 });
+});
+
+test("EE shows the upside and the spread, not just the target", async ({ page }) => {
+  // A target of 1,620 means nothing until you know the price is 1,425.60,
+  // and a tight band and a 57%-wide one carry the same mean.
+  await openFa(page, "EE");
+  await expect(page.getByText(/Implied upside to mean/))
+    .toBeVisible({ timeout: 45_000 });
+  await expect(page.getByText("+13.6%")).toBeVisible();
+  await expect(page.getByText(/Spread of views/)).toBeVisible();
+  await expect(page.getByText(/targets follow the share more often/i)).toBeVisible();
 });

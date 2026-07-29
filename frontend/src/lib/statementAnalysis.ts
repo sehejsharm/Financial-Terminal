@@ -442,3 +442,80 @@ export function coverageNote(st: Statements): string {
     + "those, so a year present in one statement and missing from another is "
     + "left out rather than mixed with a neighbouring period.";
 }
+
+
+// ── capital structure ───────────────────────────────────────────────────
+
+/**
+ * Diluted share count implied by net income and diluted EPS.
+ *
+ * Both providers give EPS and net income; neither gives a share-count SERIES,
+ * and the count is what tells you whether shareholders are being diluted or
+ * bought back. Dividing one by the other recovers it exactly — this is
+ * arithmetic on reported figures, not an estimate.
+ *
+ * Null wherever EPS is zero or missing: an implied count from a rounding
+ * artefact is a wild number that would dominate any trend drawn through it.
+ */
+export function impliedShares(income: Statementish | null,
+                              cols?: string[]): (number | null)[] {
+  const columns = cols ?? (income ? chronological(income.columns) : []);
+  const net = seriesFor(income, "netIncome", columns);
+  const eps = seriesFor(income, "eps", columns);
+  return columns.map((_, i) => {
+    const n = net[i], e = eps[i];
+    if (n == null || e == null || e === 0) return null;
+    const shares = n / e;
+    return shares > 0 ? shares : null;
+  });
+}
+
+export type EvMultiples = {
+  ev: number | null;
+  evEbitda: number | null;
+  evSales: number | null;
+  evFcf: number | null;
+  netDebtToEv: number | null;
+};
+
+/**
+ * Enterprise-value multiples off the latest reported period.
+ *
+ * EV/EBITDA and EV/sales are the two comparisons that survive different
+ * capital structures, which is the whole reason to look at enterprise value
+ * rather than market cap. Each returns null rather than a number when its
+ * denominator is missing or non-positive — a negative EBITDA produces a
+ * negative multiple that reads like a cheap valuation.
+ */
+export function evMultiples(
+  cap: { market_cap?: number | null; total_debt?: number | null; cash?: number | null },
+  st: Statements,
+): EvMultiples {
+  const mcap = cap.market_cap ?? null;
+  const debt = cap.total_debt ?? null;
+  const cash = cap.cash ?? null;
+  const ev = mcap == null ? null : mcap + (debt ?? 0) - (cash ?? 0);
+  const cols = sharedColumns(st);
+  const latest = (kind: keyof Statements, key: string) => {
+    const s = seriesFor(st[kind], key, cols.length ? cols : undefined);
+    return [...s].reverse().find((v) => v != null) ?? null;
+  };
+  const ebitda = latest("income", "ebitda");
+  const revenue = latest("income", "revenue");
+  let fcf = latest("cashflow", "freeCF");
+  if (fcf == null) {
+    const ocf = latest("cashflow", "operatingCF");
+    const capex = latest("cashflow", "capex");
+    fcf = ocf != null && capex != null ? ocf + capex : null;
+  }
+  const over = (d: number | null) =>
+    (ev == null || d == null || d <= 0 ? null : ev / d);
+  return {
+    ev,
+    evEbitda: over(ebitda),
+    evSales: over(revenue),
+    evFcf: over(fcf),
+    netDebtToEv: ev && ev > 0 && debt != null
+      ? ((debt - (cash ?? 0)) / ev) * 100 : null,
+  };
+}
