@@ -30,6 +30,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from backend.audit import AuditMiddleware
 from backend.ratelimit import RateLimitMiddleware
+from backend.reliability import DeadlineMiddleware, configure_thread_pool
 from backend.config import CORS_ORIGINS
 from backend.routes import (
     admin,
@@ -89,8 +90,11 @@ async def _unhandled(request: Request, exc: Exception):
 
 
 # Starlette nests middleware with the LAST added outermost. Desired nesting:
-# CORS (outermost — 429s still get CORS headers so the browser can read the
-# error) ⊃ Audit (429s appear in the audit log) ⊃ RateLimit ⊃ routes.
+# CORS (outermost — 429s and 504s still get CORS headers so the browser can
+# read the error) ⊃ Audit (both appear in the audit log) ⊃ RateLimit ⊃
+# Deadline (innermost: it times the handler, not the queueing in front of
+# it) ⊃ routes.
+app.add_middleware(DeadlineMiddleware)
 app.add_middleware(RateLimitMiddleware)
 app.add_middleware(AuditMiddleware)
 app.add_middleware(
@@ -123,6 +127,19 @@ _DASH_TICKERS = tuple(sorted({
     "^CNXIT", "^CNXFMCG", "^CNXAUTO", "^CNXPHARMA",
     "^CNXMETAL", "^CNXENERGY", "^CNXMIDCAP", "^CNX500",
 }))
+
+
+@app.on_event("startup")
+def _bound_threads() -> None:
+    """Cap the worker-thread pool before any request arrives.
+
+    Starlette runs sync endpoints in AnyIO's pool, which defaults to 40. On
+    this VM forty concurrent provider calls is more memory than the
+    container is allowed, and the OOM kill that follows is what turned slow
+    endpoints into 502s. Queueing is the desired behaviour here.
+    """
+    n = configure_thread_pool()
+    _log.info("worker thread pool limited to %s", n or "default")
 
 
 @app.on_event("startup")

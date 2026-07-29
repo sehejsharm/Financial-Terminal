@@ -59,3 +59,24 @@ def deactivate(username: str, user: dict = Depends(auth.require_master_admin)):
 def audit(limit: int = 200,
           _user: dict = Depends(auth.require_master_admin)):
     return get_storage().recent_audit(limit=limit)
+
+
+@router.get("/performance")
+def performance(limit: int = 40,
+                _user: dict = Depends(auth.require_master_admin)):
+    """Slow-request and timeout telemetry.
+
+    Exists because the Macro → Sectors tab could hang forever and the only
+    way anyone found out was a user watching a spinner. Requests past the
+    slow threshold and every request that hit the deadline are counted here,
+    so a hang shows up as a number on this page.
+    """
+    from backend.reliability import slow_report
+    return slow_report(limit=limit)
+
+
+@router.delete("/performance", status_code=204)
+def reset_performance(user: dict = Depends(auth.require_master_admin)):
+    from backend.reliability import reset_report
+    reset_report()
+    _audit_action(user, "performance_stats_reset", "")

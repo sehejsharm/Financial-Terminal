@@ -21,6 +21,12 @@ _RULES: list[tuple[str, frozenset[str] | None, int, int]] = [
     ("/api/v1/alerts", frozenset({"POST", "PUT", "DELETE"}), 30, 60),
     ("/api/v1/admin", None, 60, 60),
     ("/api/v1/ai", frozenset({"POST"}), 20, 60),   # LLM calls cost quota
+    # Market reads are authenticated, so the anonymous requests seen in the
+    # audit log were already being rejected with 401 — this is defence in
+    # depth, not a fix for an open endpoint. The ceiling is well above what
+    # the app itself generates: the dashboard batches its symbols into one
+    # quote-bulk call every few seconds, nowhere near 240/min.
+    ("/api/v1/market", frozenset({"GET"}), 240, 60),
 ]
 
 _lock = threading.Lock()
