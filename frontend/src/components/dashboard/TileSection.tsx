@@ -116,7 +116,10 @@ export function TileSection({
         <>
           <div className="grid gap-2 mb-stagger"
                style={{
-                 gridTemplateColumns: `repeat(auto-fit, minmax(${dense ? 132 : 158}px, 1fr))`,
+                 // Wide enough that a six-figure price and its change chip sit
+                 // on one line for the common cases; the tile wraps rather
+                 // than clips when they don't.
+                 gridTemplateColumns: `repeat(auto-fit, minmax(${dense ? 142 : 176}px, 1fr))`,
                }}>
             {visible.map((s) => (
               <TickerTile key={s} sym={s} dense={dense} editing={editing}

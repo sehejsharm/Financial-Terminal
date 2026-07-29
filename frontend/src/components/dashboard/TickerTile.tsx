@@ -64,12 +64,14 @@ export function TickerTile({
         )}
       </div>
 
-      {/* Price left, change right on ONE baseline. A tile stretched wide by
-          the grid then reads as a deliberate row rather than a narrow card
-          with a gap bolted onto its right-hand side. */}
-      <div className="flex items-baseline justify-between gap-2 mt-1.5 min-w-0 relative">
-        <span className={`num text-txt tracking-tight leading-none truncate
-                          ${dense ? "text-[15px]" : "text-[19px]"}`}>
+      {/* Price left, change right on one baseline — but WRAPPING, never
+          truncating. A six-figure rupee price next to a change chip does not
+          fit a 158px column, and the old `truncate` silently ate the end of
+          the number. A tile that shows "₹1,42,3…" is worse than a tile two
+          lines tall: the whole point of the number is its digits. */}
+      <div className="flex flex-wrap items-baseline justify-between gap-x-2 mt-1.5 relative">
+        <span className={`num text-txt tracking-tight leading-none whitespace-nowrap
+                          ${dense ? "text-[14.5px]" : "text-[18px]"}`}>
           {has
             ? <LiveNumber value={tick!.ltp} format="price" ccy={cur} />
             : meta.coverage === "none"
@@ -77,7 +79,7 @@ export function TickerTile({
               : <span className="text-mut animate-pulse">···</span>}
         </span>
 
-        <span className={`shrink-0 text-right ${dense ? "text-[10px]" : "text-[11.5px]"}`}>
+        <span className={`whitespace-nowrap ${dense ? "text-[10px]" : "text-[11.5px]"}`}>
           {cp != null ? (
             <span className={up ? "text-green" : "text-red"}>
               {up ? "▲" : "▼"} <LiveNumber value={cp} format="pct" />
