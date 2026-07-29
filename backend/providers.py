@@ -192,10 +192,16 @@ def quote(ticker: str) -> dict | None:
     return q
 
 
+# One shared pool for the quote fan-out. The previous code built and tore
+# down a ThreadPoolExecutor on EVERY call — and the stream ingest calls this
+# up to four times a second, so the box spent real time just creating and
+# joining threads.
+_QUOTE_POOL = ThreadPoolExecutor(max_workers=8, thread_name_prefix="quotes")
+
+
 def quotes_bulk(tickers: list[str], max_workers: int = 8) -> dict[str, dict | None]:
     """Parallel quote fetch across the configured provider."""
-    with ThreadPoolExecutor(max_workers=max_workers) as pool:
-        results = list(pool.map(quote, tickers))
+    results = list(_QUOTE_POOL.map(quote, tickers))
     return dict(zip(tickers, results))
 
 

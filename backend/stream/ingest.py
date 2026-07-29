@@ -23,8 +23,39 @@ log = logging.getLogger("motherboard.stream.ingest")
 _BASE_TICK = 0.25          # loop wake interval (s)
 _MAX_BATCH = 60            # cap symbols polled per pass (VM + rate-limit guard)
 
+# ── failure backoff ───────────────────────────────────────────────────────
+# The free tier cannot price a large slice of the catalogue from a cloud host
+# (most commodities, FX and non-Indian indices). Each attempt at one of those
+# still costs a full NSE -> Twelve Data -> yfinance round trip, and every one
+# of those ends in a timeout or a 403.
+#
+# Without backoff the poller retries them forever. On a 1-vCPU VM the thread
+# pool ends up permanently saturated with calls that will never succeed, and
+# because the blocking work holds the GIL it starves the event loop — so the
+# whole API goes slow, not just the stream. Adding ~60 symbols to the
+# dashboard and the Global board is what pushed this over the edge.
+#
+# So: a symbol that yields no price backs off exponentially, up to 15 minutes.
+# One that starts working again resets immediately.
+_MAX_BACKOFF_MS = 15 * 60 * 1000
+_BACKOFF_AFTER = 2          # first N misses are free (a blip isn't an outage)
+
 _next_due: dict[str, float] = {}
-_metrics = {"last_poll_ms": 0.0, "last_batch": 0, "polls": 0, "feed_latency_ms": 0.0}
+_misses: dict[str, int] = {}
+_metrics = {"last_poll_ms": 0.0, "last_batch": 0, "polls": 0,
+            "feed_latency_ms": 0.0, "backed_off": 0}
+
+
+def next_delay_ms(base_ms: int, misses: int) -> int:
+    """Cadence for a symbol given how many consecutive polls found no price.
+
+    Pure, so the backoff curve is testable without a network or a clock.
+    """
+    if misses <= _BACKOFF_AFTER:
+        return base_ms
+    # Doubling from the first miss past the grace window.
+    factor = 2 ** min(misses - _BACKOFF_AFTER, 20)
+    return min(base_ms * factor, _MAX_BACKOFF_MS)
 
 
 def _to_tick(sym: str, q: dict | None) -> dict | None:
@@ -69,17 +100,24 @@ async def _poll_once() -> None:
     _metrics["feed_latency_ms"] = round((time.perf_counter() - t0) * 1000, 1)
     for sym in due:
         tick = _to_tick(sym, quotes.get(sym))
-        cad = session.cadence_ms(session.market_for_symbol(sym)) / 1000.0
-        _next_due[sym] = now + cad
+        base = session.cadence_ms(session.market_for_symbol(sym))
         if tick:
+            _misses.pop(sym, None)        # it works again — full speed
+            _next_due[sym] = now + base / 1000.0
             hub.publish(sym, tick)
+        else:
+            n = _misses.get(sym, 0) + 1
+            _misses[sym] = n
+            _next_due[sym] = now + next_delay_ms(base, n) / 1000.0
     _metrics["last_batch"] = len(due)
     _metrics["polls"] += 1
+    _metrics["backed_off"] = sum(1 for n in _misses.values() if n > _BACKOFF_AFTER)
     # Drop schedule entries for symbols nobody wants anymore.
     if len(_next_due) > 4 * _MAX_BATCH:
         for sym in list(_next_due):
             if sym not in active:
                 _next_due.pop(sym, None)
+                _misses.pop(sym, None)
 
 
 async def run() -> None:
