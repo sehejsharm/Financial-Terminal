@@ -1,10 +1,12 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { Sparkles } from "lucide-react";
 
+import { NewsFeed } from "@/components/news/NewsFeed";
+import { ErrorState, Loading } from "@/components/ui";
 import { api, type NewsItem, type SentimentResp } from "@/lib/api";
-import { timeAgoShort, useNow } from "@/lib/clock";
+import type { FeedItem } from "@/lib/newsFeed";
 import { fmtNum } from "@/lib/utils";
 
 const SENT_STYLE: Record<string, string> = {
@@ -28,8 +30,15 @@ function TrendBars({ history }: { history: SentimentResp["history"] }) {
   );
 }
 
+/**
+ * Headlines for one symbol, with an optional AI sentiment pass.
+ *
+ * The list is the shared NewsFeed — same search, recency filter, source
+ * filter, age headings and story clustering as the market wire. A ticker's
+ * news used to be a plain list that behaved differently from the news page
+ * for no reason anyone had chosen.
+ */
 export function News({ ticker }: { ticker: string }) {
-  const now = useNow();
   const [items, setItems] = useState<NewsItem[] | null>(null);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
@@ -37,12 +46,14 @@ export function News({ ticker }: { ticker: string }) {
   const [sentBusy, setSentBusy] = useState(false);
   const [sentErr, setSentErr] = useState<string | null>(null);
 
-  const load = () => {
+  const load = useCallback(() => {
     setBusy(true); setErr(null); setItems(null); setSent(null); setSentErr(null);
-    api.news(ticker, 15).then(setItems).catch((e) => setErr(e?.detail || "Failed to load news.")).finally(() => setBusy(false));
-  };
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  useEffect(load, [ticker]);
+    api.news(ticker, 40)
+      .then(setItems)
+      .catch((e) => setErr(e?.detail || "Failed to load news."))
+      .finally(() => setBusy(false));
+  }, [ticker]);
+  useEffect(() => { load(); }, [load]);
 
   // Explicit button (not auto) — each analysis is a Groq call; results are
   // server-cached 30 min per ticker.
@@ -57,30 +68,19 @@ export function News({ ticker }: { ticker: string }) {
     }
   }
 
-  if (busy) return <div className="text-mut text-xs animate-pulse">Loading headlines…</div>;
-  if (err) {
-    return (
-      <div className="panel-2 p-4 text-sm">
-        <div className="text-red mb-2">{err}</div>
-        <button onClick={load} className="btn-ghost text-xs">Retry</button>
-      </div>
-    );
-  }
-  if (!items || items.length === 0) {
-    return (
-      <div className="panel-2 p-4 text-mut text-sm flex items-center gap-3">
-        <span>No recent headlines for {ticker}.</span>
-        <button onClick={load} className="btn-ghost text-xs shrink-0">Retry</button>
-      </div>
-    );
-  }
+  if (busy && !items) return <Loading what={`headlines for ${ticker}`} />;
+  if (err) return <ErrorState message={err} onRetry={load} />;
 
-  const label = (title: string) =>
-    sent?.items.find((s) => s.title === title)?.sentiment;
+  const sentimentOf = (it: FeedItem) =>
+    sent?.items.find((s) => s.title === it.title)?.sentiment;
+
+  const counts = (["bull", "bear", "neutral"] as const).map((k) => ({
+    k, n: (items ?? []).filter((i) => sentimentOf(i) === k).length,
+  }));
 
   return (
     <div>
-      <div className="flex items-center gap-3 mb-3">
+      <div className="flex flex-wrap items-center gap-3 mb-3">
         {sent?.score != null && (
           <span className={`text-sm num ${sent.score > 0.15 ? "text-green" : sent.score < -0.15 ? "text-red" : "text-mut"}`}>
             Sentiment {sent.score > 0 ? "+" : ""}{fmtNum(sent.score, 2)}
@@ -88,37 +88,39 @@ export function News({ ticker }: { ticker: string }) {
             <TrendBars history={sent.history} />
           </span>
         )}
+        {sent && (
+          <span className="flex flex-wrap gap-1">
+            {counts.filter((c) => c.n > 0).map(({ k, n }) => (
+              <span key={k}
+                    className={`px-1.5 py-0.5 rounded border text-[9px] uppercase tracking-wider ${SENT_STYLE[k]}`}>
+                {n} {k}
+              </span>
+            ))}
+          </span>
+        )}
         <div className="flex-1" />
         {sentErr && <span className="text-red text-[11px]">{sentErr}</span>}
-        <button onClick={analyze} disabled={sentBusy} className="btn-ghost flex items-center gap-1.5 text-xs">
+        <button onClick={analyze} disabled={sentBusy}
+                className="btn-ghost flex items-center gap-1.5 text-xs">
           <Sparkles size={12} />
           {sentBusy ? "Analyzing…" : sent ? "Re-analyze" : "Analyze sentiment (AI)"}
         </button>
       </div>
 
-      <div className="space-y-2">
-        {items.map((n, i) => {
-          const s = label(n.title);
+      <NewsFeed
+        items={items ?? []}
+        badge={(it) => {
+          const s = sentimentOf(it);
+          if (!s) return null;
           return (
-            <a key={i} href={n.link} target="_blank" rel="noopener noreferrer"
-               className="block panel-2 p-3 hover:border-amber transition-colors">
-              <div className="flex items-start justify-between gap-3">
-                <div className="text-sm text-txt font-medium leading-snug">
-                  {s && (
-                    <span className={`inline-block align-middle mr-2 px-1.5 py-0.5 rounded border text-[9px] uppercase tracking-wider ${SENT_STYLE[s]}`}>
-                      {s}
-                    </span>
-                  )}
-                  {n.title}
-                </div>
-                <span className="text-[10px] text-mut whitespace-nowrap mt-0.5">{timeAgoShort(n.published, now)}</span>
-              </div>
-              {n.summary && <div className="text-xs text-mut mt-1 line-clamp-2">{n.summary}</div>}
-              <div className="text-[10px] text-amber/80 uppercase tracking-wider mt-1.5">{n.publisher}</div>
-            </a>
+            <span className={`inline-block align-middle mr-2 px-1.5 py-0.5 rounded border text-[9px] uppercase tracking-wider ${SENT_STYLE[s]}`}>
+              {s}
+            </span>
           );
-        })}
-      </div>
+        }}
+        emptyTitle={`No recent headlines for ${ticker}.`}
+        emptyDetail="Yahoo, its RSS mirror and a Google News search all came back
+                     empty for this symbol." />
     </div>
   );
 }

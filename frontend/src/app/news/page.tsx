@@ -1,99 +1,72 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 
+import { DataAge } from "@/components/DataAge";
 import { News } from "@/components/News";
 import { Shell } from "@/components/Shell";
+import { TickerInput } from "@/components/TickerInput";
+import { NewsFeed } from "@/components/news/NewsFeed";
+import { ErrorState, Loading, PageHeader, Tabs, type TabDef } from "@/components/ui";
 import { api, type NewsItem } from "@/lib/api";
-import { timeAgoShort, useNow } from "@/lib/clock";
 
-function Hero({ item, now }: { item: NewsItem; now: number }) {
-  return (
-    <a href={item.link} target="_blank" rel="noopener noreferrer"
-       className="block panel-2 p-5 hover:border-amber transition-colors col-span-2 row-span-2 relative overflow-hidden">
-      <div className="absolute top-3 right-3 text-[9px] uppercase tracking-[0.18em] text-amber bg-amber/10 px-2 py-0.5 rounded border border-amber/40">FEATURED</div>
-      <div className="text-[10px] text-amber/80 uppercase tracking-wider mb-2">{item.publisher} · {timeAgoShort(item.published, now)}</div>
-      <div className="text-lg font-bold text-white leading-snug mb-2 pr-12">{item.title}</div>
-      <div className="text-sm text-mut line-clamp-4">{item.summary}</div>
-    </a>
-  );
-}
+type Tab = "market" | "ticker";
 
-function MiniCard({ item, now }: { item: NewsItem; now: number }) {
-  return (
-    <a href={item.link} target="_blank" rel="noopener noreferrer"
-       className="block panel-2 p-3 hover:border-amber transition-colors">
-      <div className="text-[10px] text-amber/80 uppercase tracking-wider mb-1">{item.publisher} · {timeAgoShort(item.published, now)}</div>
-      <div className="text-sm text-txt font-medium leading-snug line-clamp-3">{item.title}</div>
-    </a>
-  );
-}
+const TABS: readonly TabDef<Tab>[] = [
+  { id: "market", label: "Market wire", hint: "Every configured feed, deduplicated" },
+  { id: "ticker", label: "By ticker", hint: "Headlines tagged to one symbol" },
+];
 
 export default function NewsPage() {
-  const now = useNow();
-  const [tab, setTab] = useState<"market" | "ticker">("market");
+  const [tab, setTab] = useState<Tab>("market");
   const [items, setItems] = useState<NewsItem[] | null>(null);
+  const [at, setAt] = useState<number | null>(null);
+  const [err, setErr] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [ticker, setTicker] = useState("RELIANCE.NS");
 
-  useEffect(() => {
-    if (tab !== "market") return;
-    setBusy(true);
-    api.marketNews(30).then(setItems).catch(() => setItems([])).finally(() => setBusy(false));
-  }, [tab]);
-
-  const hero = items?.[0];
-  const subHero = items?.slice(1, 5) ?? [];
-  const rest = items?.slice(5) ?? [];
+  const load = useCallback(() => {
+    setBusy(true); setErr(null);
+    // 120 rather than 30: clustering collapses syndicated copies, so a
+    // small pull renders as a very short page.
+    api.marketNews(120)
+      .then((n) => { setItems(n); setAt(Date.now()); })
+      .catch((e) => setErr(e?.detail || "News feed unavailable."))
+      .finally(() => setBusy(false));
+  }, []);
+  useEffect(() => { load(); }, [load]);
 
   return (
     <Shell>
-      <h1 className="heading mb-3">NEWS</h1>
-      <div className="flex items-center gap-2 mb-4">
-        <button onClick={() => setTab("market")} className={`btn ${tab === "market" ? "btn-primary" : "btn-ghost"}`}>Market headlines</button>
-        <button onClick={() => setTab("ticker")} className={`btn ${tab === "ticker" ? "btn-primary" : "btn-ghost"}`}>By ticker</button>
-      </div>
+      <PageHeader
+        title="NEWS"
+        subtitle="Indian market wires first — Economic Times, Business Standard,
+                  Livemint, Moneycontrol, BusinessLine — plus Yahoo and CNBC,
+                  deduplicated across feeds and grouped by story."
+        actions={<DataAge at={at} onRefresh={load} busy={busy} />}
+      />
+
+      <Tabs tabs={TABS} value={tab} onChange={setTab} />
 
       {tab === "market" && (
         <>
-          {busy && <div className="text-mut text-xs">Loading headlines…</div>}
-          {items && items.length === 0 && <div className="panel-2 p-4 text-mut text-sm">No headlines available right now.</div>}
-
-          {hero && (
-            <>
-              <div className="grid grid-cols-1 md:grid-cols-4 gap-3 mb-6"
-                   style={{ gridAutoRows: "minmax(110px, auto)" }}>
-                <Hero item={hero} now={now} />
-                {subHero.map((it, i) => <MiniCard key={i} item={it} now={now} />)}
-              </div>
-
-              {rest.length > 0 && (
-                <>
-                  <div className="heading mb-2">More headlines</div>
-                  <div className="space-y-2">
-                    {rest.map((n, i) => (
-                      <a key={i} href={n.link} target="_blank" rel="noopener noreferrer"
-                         className="block panel-2 p-3 hover:border-amber transition-colors">
-                        <div className="flex items-start justify-between gap-3">
-                          <div className="text-sm text-txt font-medium leading-snug">{n.title}</div>
-                          <span className="text-[10px] text-mut whitespace-nowrap mt-0.5">{timeAgoShort(n.published, now)}</span>
-                        </div>
-                        {n.summary && <div className="text-xs text-mut mt-1 line-clamp-2">{n.summary}</div>}
-                        <div className="text-[10px] text-amber/80 uppercase tracking-wider mt-1.5">{n.publisher}</div>
-                      </a>
-                    ))}
-                  </div>
-                </>
-              )}
-            </>
+          {err && <ErrorState message={err} onRetry={load} />}
+          {!err && !items && <Loading what="headlines" />}
+          {items && (
+            <NewsFeed
+              items={items}
+              emptyTitle="No headlines available right now."
+              emptyDetail="Every configured feed returned nothing. That is usually
+                           the network rather than a quiet news day." />
           )}
         </>
       )}
 
       {tab === "ticker" && (
         <>
-          <input value={ticker} onChange={(e) => setTicker(e.target.value.toUpperCase())}
-                 placeholder="Ticker" className="input-bare mb-4 max-w-sm" />
+          <div className="max-w-sm mb-4">
+            <TickerInput value={ticker} onCommit={setTicker} placeholder="RELIANCE.NS" />
+          </div>
           <News ticker={ticker} />
         </>
       )}

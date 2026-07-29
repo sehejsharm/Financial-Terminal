@@ -173,6 +173,10 @@ def _news_payload(items):
             "summary": _strip_html(it.get("summary")),
             "published": it["published"].isoformat()
                          if it.get("published") else None,
+            # Which feed it came from, as distinct from the outlet named in
+            # the item. Google News reports the originating publisher, so
+            # without this the UI can't offer a working source filter.
+            "source": _strip_html(it.get("source")) or None,
         }
         for it in items
     ]
