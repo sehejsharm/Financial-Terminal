@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { Layers, Plus, Trash2 } from "lucide-react";
 
 import { ScrollX } from "@/components/ScrollX";
+import { Methodology } from "@/components/Methodology";
 import {
   analyse, payoffCurve, PRESETS, probProfit, roundToStep, strategyGreeks,
   strikeStep, type Leg, type PresetId, type PriceInputs,
@@ -397,6 +398,7 @@ export function OptionBuilder({ ticker, spot: spotProp }: {
         tails, so tail-risk structures are riskier than it suggests. Educational
         analysis only, not advice.
       </div>
+      <Methodology id="greeks" className="mt-3" />
     </div>
   );
 }

@@ -9,6 +9,7 @@ import {
 import { ContagionPathFinder } from "@/components/ContagionPath";
 import { DataAge } from "@/components/DataAge";
 import { Markdown } from "@/components/Markdown";
+import { Methodology } from "@/components/Methodology";
 import { PanelError, PanelLoading } from "@/components/PanelStates";
 import { StatusBadge } from "@/components/StatusBadge";
 import {
@@ -1111,6 +1112,8 @@ export function ValueChainMap({ ticker }: { ticker: string }) {
           </button>
         )}
       </div>
+
+      <Methodology id="valueChain" className="mb-3" />
 
       {diff && (
         <div className="border border-line2 rounded-md px-3 py-2 mb-3 flex flex-wrap items-center gap-x-4 gap-y-1 text-[11px]">

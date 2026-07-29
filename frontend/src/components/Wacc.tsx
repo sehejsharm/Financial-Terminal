@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 
 import { MetricCard } from "@/components/MetricCard";
+import { Methodology } from "@/components/Methodology";
 import { api, type Snapshot } from "@/lib/api";
 import { curSymbol, humanNumber } from "@/lib/utils";
 
@@ -96,6 +97,7 @@ export function Wacc({ ticker, snap }: { ticker: string; snap: Snapshot | null }
       <div className="text-[10.5px] text-mut mt-3">
         Enterprise value ≈ {humanNumber(v, cur)}. Adjust any input to re-model.
       </div>
+      <Methodology id="wacc" className="mt-3" />
     </div>
   );
 }

@@ -7,6 +7,7 @@ import { DataAge } from "@/components/DataAge";
 import {
   AsyncPanel, Note, SectionHeader, SkeletonCards,
 } from "@/components/ui";
+import { Methodology } from "@/components/Methodology";
 import { useAsync } from "@/lib/useAsync";
 import { api, type SectorRow } from "@/lib/api";
 import { tintBg, tintBorder } from "@/lib/heat";
@@ -219,6 +220,7 @@ export function SectorBoard() {
               ))}
             </div>
             <Note>{b.note}</Note>
+            <Methodology id="sectorRating" className="mt-3" />
           </>
         )}
       </AsyncPanel>

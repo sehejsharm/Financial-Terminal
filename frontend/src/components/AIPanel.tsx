@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 
 import { Markdown } from "@/components/Markdown";
+import { Methodology } from "@/components/Methodology";
 import { PanelError, PanelLoading } from "@/components/PanelStates";
 import { StatusBadge } from "@/components/StatusBadge";
 import { api } from "@/lib/api";
@@ -86,6 +87,7 @@ export function AIPanel({ ticker }: { ticker: string }) {
         <div className="panel-2 p-5">
           <div className="mb-3"><StatusBadge kind="ai" /></div>
           <Markdown>{text}</Markdown>
+          <Methodology id="aiAnalysis" className="mt-4" />
         </div>
       )}
     </div>

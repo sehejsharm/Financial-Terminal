@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Activity } from "lucide-react";
 
 import { PanelError } from "@/components/PanelStates";
+import { Methodology } from "@/components/Methodology";
 import { TickerInput } from "@/components/TickerInput";
 import { api } from "@/lib/api";
 import {
@@ -353,6 +354,10 @@ export function RiskLab({ seedTicker }: { seedTicker?: string }) {
             )}
           </div>
         </>
+      )}
+
+      {!busy && !err && asset && rep.n >= 20 && (
+        <Methodology id="riskMetrics" className="mt-4" />
       )}
 
       {!busy && !err && asset && rep.n < 20 && (

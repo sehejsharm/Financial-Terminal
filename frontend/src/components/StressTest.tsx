@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ShieldAlert } from "lucide-react";
 
 import { PanelError } from "@/components/PanelStates";
+import { Methodology } from "@/components/Methodology";
 import { ScrollX } from "@/components/ScrollX";
 import { api, type PortfolioRow } from "@/lib/api";
 import {
@@ -330,6 +331,7 @@ export function StressTest({ positions, cur, mixedCcy }: {
             totals rather than assumed flat, which is why coverage is shown alongside
             every result.
           </div>
+          <Methodology id="stress" className="mt-3" />
         </>
       )}
     </div>

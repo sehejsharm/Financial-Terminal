@@ -1,0 +1,220 @@
+/** How every model-derived number on this terminal is actually computed.
+ *
+ *  The Volatility Cone and Backtest screens already state their assumptions
+ *  inline, and that is the most valuable thing about them: you can tell
+ *  whether the number applies to your question before you use it. Bloomberg
+ *  mostly gives you the figure and expects you to know the convention.
+ *
+ *  This registry makes that treatment uniform. Anything the app CALCULATES
+ *  or GENERATES — a WACC, a Greek, a stress result, a sector rating, an LLM
+ *  map — carries a `Methodology` entry saying what it is, what goes into it,
+ *  what it assumes, and what it does not capture. It is data rather than
+ *  prose scattered through components so it can be reviewed in one place and
+ *  can't drift out of sync with the screen it describes.
+ *
+ *  The `limits` field is the one that matters. Every model here is wrong in
+ *  a specific, knowable way, and saying so is what makes the number usable.
+ */
+
+export type Methodology = {
+  /** What this number is, in one sentence. */
+  what: string;
+  /** The formula, written how a human would write it. */
+  formula?: string;
+  /** Each input and where it came from. */
+  inputs: string[];
+  /** What has to be true for the number to mean what it says. */
+  assumptions: string[];
+  /** What it does NOT capture. Never empty. */
+  limits: string[];
+  /** "computed" — arithmetic we do; "model" — a pricing/statistical model;
+   *  "ai" — a language model generated it. */
+  kind: "computed" | "model" | "ai";
+};
+
+export const METHODOLOGY: Record<string, Methodology> = {
+  wacc: {
+    kind: "model",
+    what: "The blended annual rate a company pays for its capital, used as "
+      + "the discount rate in a DCF.",
+    formula: "WACC = E/V × (rf + β × ERP) + D/V × rd × (1 − tax)",
+    inputs: [
+      "E — market capitalisation from the live quote and share count.",
+      "D — total debt from the latest reported balance sheet.",
+      "β — the provider's levered beta, typically against a local index over "
+        + "five years of monthly returns.",
+      "rf, the equity risk premium and the tax rate — your inputs, with "
+        + "regional defaults pre-filled.",
+    ],
+    assumptions: [
+      "CAPM holds: expected equity return is linear in beta.",
+      "Today's capital structure is the one that persists.",
+      "The cost of debt is constant across the whole debt stack.",
+      "The marginal tax rate equals the effective one.",
+    ],
+    limits: [
+      "Beta is a backward-looking regression, and the number changes "
+        + "materially with the window and index chosen.",
+      "Off-balance-sheet obligations (leases, guarantees) are not in D unless "
+        + "the filing capitalised them.",
+      "The equity risk premium is not observable; it is an assumption you are "
+        + "choosing, and the output moves roughly one-for-one with it.",
+      "No country or size premium is applied.",
+    ],
+  },
+
+  greeks: {
+    kind: "model",
+    what: "Black–Scholes sensitivities of an option position to price, time, "
+      + "volatility and rates.",
+    formula: "Black–Scholes–Merton, European exercise, continuous dividends",
+    inputs: [
+      "Spot from the live quote; strike, expiry and side from the position.",
+      "Implied volatility from the chain where the provider publishes it, "
+        + "otherwise your input.",
+      "Risk-free rate — your input.",
+    ],
+    assumptions: [
+      "Returns are lognormal with constant volatility to expiry.",
+      "European exercise: no early assignment.",
+      "Continuous, frictionless hedging, no transaction costs.",
+    ],
+    limits: [
+      "Real return distributions have fatter tails than lognormal, so far "
+        + "out-of-the-money risk is understated.",
+      "Volatility is not constant — a single IV cannot represent a skewed "
+        + "surface, and these Greeks assume it can.",
+      "Indian index options are European, but single-stock options are "
+        + "American; early exercise is not modelled.",
+      "Greeks are instantaneous. They are wrong the moment anything moves, "
+        + "and second-order effects are not shown except gamma.",
+    ],
+  },
+
+  stress: {
+    kind: "computed",
+    what: "What this book would have done under a chosen shock.",
+    inputs: [
+      "Historical replay: each holding's own returns across the dated window.",
+      "Factor shock: your percentage move, applied through each holding's "
+        + "beta to the index.",
+      "Position sizes and prices from the portfolio as it stands now.",
+    ],
+    assumptions: [
+      "Positions are held unchanged through the whole episode — no trading, "
+        + "no rebalancing, no stops.",
+      "Historical replay assumes a security behaves as it did then, which "
+        + "presumes the business is comparable.",
+      "The factor shock assumes beta is stable, which is exactly what stops "
+        + "being true in a crash.",
+    ],
+    limits: [
+      "Coverage is stated per run: holdings without history for the window "
+        + "are excluded, not estimated, and the result covers only the rest.",
+      "Correlations rise towards one in real crises; a beta-based shock "
+        + "understates that.",
+      "Liquidity, gap risk and margin calls are not modelled at all.",
+      "A replay is one path that happened, not a distribution of what could.",
+    ],
+  },
+
+  sectorRating: {
+    kind: "computed",
+    what: "A bull/bear score for a sector index, from six price measurements.",
+    formula: "score = Σ(weight × component), renormalised over what is measurable",
+    inputs: [
+      "One year of the sector index's own closes.",
+      "NIFTY 50 closes over the same window, for relative strength.",
+      "Today's change for a representative sample of constituents, for breadth.",
+    ],
+    assumptions: [
+      "Price contains the information — no fundamentals enter the score.",
+      "The saturation points (10 points of relative strength, 20% below the "
+        + "high) are judgement calls, stated so you can disagree with them.",
+    ],
+    limits: [
+      "Five of the six components are trend-following, so the rating turns "
+        + "late at every inflection.",
+      "Breadth uses a representative sample, not official index membership, "
+        + "which is why it carries the lightest weight.",
+      "Nothing here is valuation. A sector can score well and be expensive.",
+      "It describes what price has done, and is not a forecast.",
+    ],
+  },
+
+  riskMetrics: {
+    kind: "computed",
+    what: "Distribution and drawdown statistics for a return series.",
+    inputs: [
+      "Period returns from the same history feed the charts use.",
+      "Your periods-per-year setting, which drives every annualised figure.",
+      "The risk-free rate, converted to a period rate before subtraction.",
+    ],
+    assumptions: [
+      "Returns are independent across periods — which is what allows scaling "
+        + "volatility by the square root of time.",
+      "The sample window is representative of the risk being measured.",
+    ],
+    limits: [
+      "Sharpe assumes a symmetric distribution and penalises upside "
+        + "volatility identically to downside.",
+      "VaR and CVaR here are historical, not modelled: they cannot show you "
+        + "a loss bigger than the worst one in the sample.",
+      "Fewer than twenty observations returns nothing rather than a figure "
+        + "computed from noise.",
+      "Past distribution is not future distribution, and drawdowns in "
+        + "particular cluster in ways a single sample understates.",
+    ],
+  },
+
+  valueChain: {
+    kind: "ai",
+    what: "Suppliers, customers and competitors for a company, generated by a "
+      + "language model.",
+    inputs: [
+      "The company's resolved identity, sector and industry — from market "
+        + "data, not from the model's memory.",
+      "The model's training data for the relationships themselves.",
+    ],
+    assumptions: [
+      "The model knows the industry structure well enough to name real "
+        + "counterparties.",
+      "Revenue shares it attaches are estimates, and it says so per edge.",
+    ],
+    limits: [
+      "This is generated content, not sourced from filings. Nothing is "
+        + "verified against a document unless it carries a ✓ verified mark, "
+        + "which means an admin checked it.",
+      "The model has a training cutoff: recent contract wins, disposals and "
+        + "failures may be missing or wrong.",
+      "It can name a plausible company that is not actually a counterparty. "
+        + "Flag anything that looks wrong — flags feed a review queue.",
+      "Revenue percentages are the least reliable part; treat them as "
+        + "ordering, not as measurements.",
+    ],
+  },
+
+  aiAnalysis: {
+    kind: "ai",
+    what: "A written analysis produced by a language model from the figures on "
+      + "this screen.",
+    inputs: [
+      "The quantitative data already shown on the page.",
+      "The model's general knowledge of how to read those figures.",
+    ],
+    assumptions: [
+      "The underlying data is correct — the model does not verify it.",
+    ],
+    limits: [
+      "It can be fluent and wrong, and fluency is not evidence.",
+      "It has no access to anything after its training cutoff except the "
+        + "figures passed to it.",
+      "It is not investment advice, and it has no knowledge of your "
+        + "position, horizon or constraints.",
+      "Two runs can disagree. If a conclusion matters, check the numbers it "
+        + "was given.",
+    ],
+  },
+};
+
+export type MethodologyKey = keyof typeof METHODOLOGY;

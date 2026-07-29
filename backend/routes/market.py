@@ -163,6 +163,49 @@ def _computed_roce(ticker: str) -> float | None:
     return None
 
 
+@cached(ttl=21600)
+def _computed_roe(ticker: str) -> float | None:
+    """ROE from our own statements when no provider supplies it.
+
+    Same gap as ROCE, and the same fix: Indian listings are the ones the
+    free snapshot APIs most often leave blank, and both ratios are simple
+    arithmetic over statements we already fetch. Returns None rather than a
+    guess when either side is missing — a blank cell is honest, a made-up
+    return on equity is not.
+    """
+    try:
+        from lib.fundamentals import get_statement
+        inc = get_statement(ticker, "income", False)
+        bal = get_statement(ticker, "balance", False)
+        if inc is None or bal is None or inc.empty or bal.empty:
+            return None
+
+        def latest(df, names):
+            for n in names:
+                if n in df.index:
+                    v = df.loc[n].iloc[0]
+                    try:
+                        v = float(v)
+                    except (TypeError, ValueError):
+                        continue
+                    if v == v:  # not NaN
+                        return v
+            return None
+
+        ni = latest(inc, ["Net Income", "NetIncome",
+                          "Net Income Common Stockholders"])
+        eq = latest(bal, ["Stockholders Equity", "StockholdersEquity",
+                          "Total Stockholder Equity",
+                          "Common Stock Equity", "Total Equity Gross Minority Interest"])
+        # Negative equity makes the ratio meaningless rather than merely
+        # negative — a company with a deficit has no "return on equity".
+        if ni is not None and eq and eq > 0:
+            return ni / eq
+    except Exception:
+        pass
+    return None
+
+
 @router.get("/snapshot/{ticker}")
 @cached(ttl=120)
 def snapshot(ticker: str, _user: dict = Depends(auth.current_user)):
@@ -174,6 +217,11 @@ def snapshot(ticker: str, _user: dict = Depends(auth.current_user)):
         if r is not None:
             f["roce"] = r
             f["roce_source"] = "computed: EBIT / (total assets − current liabilities)"
+    if f.get("roe") is None:
+        r = _computed_roe(ticker)
+        if r is not None:
+            f["roe"] = r
+            f["roe_source"] = "computed: net income / shareholders' equity"
     return f
 
 
