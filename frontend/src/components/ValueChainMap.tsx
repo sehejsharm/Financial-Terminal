@@ -10,6 +10,7 @@ import { ContagionPathFinder } from "@/components/ContagionPath";
 import { DataAge } from "@/components/DataAge";
 import { Markdown } from "@/components/Markdown";
 import { Methodology } from "@/components/Methodology";
+import { ChainTable } from "@/components/valueChain/ChainTable";
 import { PanelError, PanelLoading } from "@/components/PanelStates";
 import { StatusBadge } from "@/components/StatusBadge";
 import {
@@ -20,7 +21,7 @@ import {
 import {
   clamp, CX, CY, DEFAULT_VIEW, EDGE_METRIC_LABEL, edgeOpacityFor, edgeWidthFor,
   diffChains, fitView, fmtUsd, fragilityScore, H, lookupReportCount, MAX_W, maxUsd,
-  mergeEntities, MIN_W, resolveMetric, W, zoomAt,
+  EMPTY_METRICS, mergeEntities, MIN_W, resolveMetric, W, zoomAt,
   type ChainDiff,
   type EdgeMetric, type MergedEntity, type Role, type View,
 } from "@/lib/valueChainGraph";
@@ -693,6 +694,12 @@ export function ValueChainMap({ ticker }: { ticker: string }) {
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const [errServerFault, setErrServerFault] = useState(false);
+  // SPLC is two views of one dataset. The chart answers "who is connected to
+  // whom"; the table answers "which five of these matter and how much of
+  // that is a guess", which is the question research actually starts from.
+  const [mode, setMode] = useState<"chart" | "table">("chart");
+  const [roleTab, setRoleTab] = useState<Role | "all">("all");
+  const [nodeQuotes, setNodeQuotes] = useState<Record<string, Quote | null>>({});
   const [selected, setSelected] = useState<Selected | null>(null);
   const svgRef = useRef<SVGSVGElement | null>(null);
 
@@ -971,24 +978,63 @@ export function ValueChainMap({ ticker }: { ticker: string }) {
   // the minimap (which need node coordinates) can be plain hooks.
   // De-duplicated model: one node per COMPANY (with all its roles), not one
   // per role occurrence. Columns are then filled by primary role.
+  /** One row per COMPANY, with every role it plays — shared by both views. */
+  const entities = useMemo(() => (data ? mergeEntities(data) : []), [data]);
+
+  // Live quotes for counterparties the model gave a ticker for. Capped at the
+  // endpoint's own limit; a value-chain map with 40 named tickers must not
+  // turn into a 40-symbol market-data request.
+  useEffect(() => {
+    const tickers = Array.from(new Set(
+      entities.map((e) => (e.ticker || "").trim().toUpperCase()).filter(Boolean),
+    )).slice(0, 30);
+    if (!tickers.length) { setNodeQuotes({}); return; }
+    let alive = true;
+    api.quoteBulk(tickers)
+      .then((q) => { if (alive) setNodeQuotes(q); })
+      .catch(() => { if (alive) setNodeQuotes({}); });
+    return () => { alive = false; };
+  }, [entities]);
+
   const layout = useMemo(() => {
     if (!data) return null;
     const merged = mergeEntities(data);
-    const supList = merged.filter((e) => e.primaryRole === "supplier").slice(0, 10);
-    const cusList = merged.filter((e) => e.primaryRole === "customer").slice(0, 12);
-    const cmpList = merged.filter((e) => e.primaryRole === "competitor").slice(0, 8);
-    const sGap = Math.min(70, (H - 140) / Math.max(supList.length, 1));
-    const cGap = Math.min(60, (H - 140) / Math.max(cusList.length, 1));
+
+    // Biggest exposure at the top of each column. Reading order in a bowtie
+    // is top-down, so an unsorted column buries the relationship that
+    // matters behind whichever one the model happened to emit first.
+    const byWeight = (a: MergedEntity, b: MergedEntity, role: Role) => {
+      const av = resolveMetric(a.metricsByRole[role] ?? EMPTY_METRICS, edgeMetric).value;
+      const bv = resolveMetric(b.metricsByRole[role] ?? EMPTY_METRICS, edgeMetric).value;
+      if (av == null && bv == null) return a.name.localeCompare(b.name);
+      if (av == null) return 1;
+      if (bv == null) return -1;
+      return bv - av;
+    };
+
+    // Caps raised from 10/12/8: Bloomberg's chart carries roughly twenty a
+    // side, and truncating to ten silently dropped real counterparties. The
+    // gap shrinks to fit rather than the list being cut.
+    const supList = merged.filter((e) => e.primaryRole === "supplier")
+      .sort((a, b) => byWeight(a, b, "supplier")).slice(0, 20);
+    const cusList = merged.filter((e) => e.primaryRole === "customer")
+      .sort((a, b) => byWeight(a, b, "customer")).slice(0, 20);
+    const cmpList = merged.filter((e) => e.primaryRole === "competitor")
+      .sort((a, b) => byWeight(a, b, "competitor")).slice(0, 10);
+    const sGap = Math.min(70, (H - 120) / Math.max(supList.length, 1));
+    const cGap = Math.min(70, (H - 120) / Math.max(cusList.length, 1));
+    // Columns hug the edges, which is what gives the bowtie its shape: two
+    // dense stacks of names with the subject alone in the middle.
     return {
-      suppliers: supList.map((it, i): Placed => ({ ...it, x: 170, y: 70 + i * sGap })),
-      customers: cusList.map((it, i): Placed => ({ ...it, x: W - 170, y: 70 + i * cGap })),
+      suppliers: supList.map((it, i): Placed => ({ ...it, x: 130, y: 60 + i * sGap })),
+      customers: cusList.map((it, i): Placed => ({ ...it, x: W - 130, y: 60 + i * cGap })),
       competitors: cmpList.map((it, i, arr): Placed => ({
         ...it,
         x: CX + (i - (arr.length - 1) / 2) * Math.min(180, (W - 200) / Math.max(arr.length, 1)),
         y: H - 60,
       })),
     };
-  }, [data]);
+  }, [data, edgeMetric]);
 
   /** Frame every node — the escape hatch when a 30-node map runs off-canvas. */
   const fitToView = useCallback(() => {
@@ -1115,6 +1161,59 @@ export function ValueChainMap({ ticker }: { ticker: string }) {
 
       <Methodology id="valueChain" className="mb-3" />
 
+      {/* ── SPLC toolbar: one dataset, two views ──────────────────────────
+          Bloomberg puts a Chart/Table switch and the relationship tabs at the
+          top of SPLC, and the table is where the work happens. Ours had only
+          the chart. */}
+      <div className="hud px-3 py-2 mb-3 flex flex-wrap items-center gap-x-4 gap-y-2 text-[11px]">
+        <span className="label-xs">Show as</span>
+        <div className="flex items-center gap-1">
+          {(["chart", "table"] as const).map((m) => (
+            <button key={m} onClick={() => setMode(m)}
+                    aria-pressed={mode === m}
+                    className={`px-2.5 py-1 rounded border uppercase tracking-wider
+                                text-[10px] transition-colors ${
+                      mode === m
+                        ? "border-amber text-amber bg-amber/10"
+                        : "border-line2 text-mut hover:text-txt hover:border-mut"}`}>
+              {m}
+            </button>
+          ))}
+        </div>
+
+        <span className="w-px h-4 bg-line2" />
+
+        <span className="label-xs">Relationships</span>
+        <div className="flex items-center gap-1 flex-wrap">
+          {([["all", "All"], ["supplier", "Suppliers"], ["customer", "Customers"],
+             ["competitor", "Peers"]] as const).map(([id, label]) => {
+            const n = id === "all"
+              ? entities.length
+              : entities.filter((e) => e.roles.includes(id as Role)).length;
+            return (
+              <button key={id} onClick={() => setRoleTab(id as Role | "all")}
+                      aria-pressed={roleTab === id}
+                      disabled={n === 0}
+                      title={n === 0 ? `No ${label.toLowerCase()} in this map` : undefined}
+                      className={`px-2 py-1 rounded border text-[10px] uppercase
+                                  tracking-wider transition-colors disabled:opacity-40 ${
+                        roleTab === id
+                          ? "border-amber text-amber bg-amber/10"
+                          : "border-line2 text-mut hover:text-txt hover:border-mut"}`}>
+                {label} <span className="num opacity-70">{n}</span>
+              </button>
+            );
+          })}
+        </div>
+
+        <div className="flex-1" />
+        <span className="text-mut">
+          {mode === "chart"
+            ? "Click a node to re-centre the map"
+            : "Click a row to re-centre the map"}
+        </span>
+      </div>
+
       {diff && (
         <div className="border border-line2 rounded-md px-3 py-2 mb-3 flex flex-wrap items-center gap-x-4 gap-y-1 text-[11px]">
           <span className="text-amber font-bold uppercase tracking-wider">Diff mode</span>
@@ -1210,7 +1309,11 @@ export function ValueChainMap({ ticker }: { ticker: string }) {
           narrow viewport ate a whole line and orphaned the export buttons
           onto a disconnected row. Groups are separated by a subtle divider so
           the reflow still reads as structure, not scatter. */}
-      <div className="flex flex-wrap items-center gap-x-3 gap-y-2 mb-3 text-[11px] text-mut">
+      {/* Chart-only controls. The legend, edge weighting, graph search and
+          fit/reset all describe the canvas; leaving them on screen in table
+          mode is a row of buttons that do nothing to what you are reading. */}
+      <div className={`flex-wrap items-center gap-x-3 gap-y-2 mb-3 text-[11px] text-mut ${
+        mode === "table" ? "hidden" : "flex"}`}>
         {/* legend */}
         <span className="inline-flex items-center gap-3 whitespace-nowrap">
           <span><span style={{ color: COL.supplier }}>●</span> Suppliers</span>
@@ -1325,10 +1428,26 @@ export function ValueChainMap({ ticker }: { ticker: string }) {
         </span>
       </div>
 
+      {/* The table view. Kept as a sibling of the graph rather than a
+          replacement for it: both read the same merged entity list, so
+          switching views never refetches or loses the drill-down trail. */}
+      {mode === "table" && (
+        <ChainTable
+          entities={entities}
+          subject={data.name || current}
+          generatedAt={data.generated_at ?? null}
+          quotes={nodeQuotes}
+          roleFilter={roleTab}
+          onPick={(row) => {
+            // Same behaviour as clicking a node: re-centre on that company.
+            if (row.ticker) recenter(row.ticker, row.name);
+          }} />
+      )}
+
       {/* Graph + docked detail panel. The panel sits BESIDE the canvas on
           large screens so selecting a node never scrolls the graph out of
           view; below ~1024px it stacks underneath (still adjacent). */}
-      <div className={`grid gap-3 ${selected ? "lg:grid-cols-[minmax(0,1fr)_340px]" : "grid-cols-1"}`}>
+      <div className={`gap-3 ${mode === "table" ? "hidden" : "grid"} ${selected ? "lg:grid-cols-[minmax(0,1fr)_340px]" : "grid-cols-1"}`}>
       <div ref={containerRef}
            className="panel overflow-hidden touch-none select-none relative min-w-0"
            onPointerDown={onPointerDown} onPointerMove={onPointerMove}

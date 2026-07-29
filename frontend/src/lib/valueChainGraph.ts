@@ -245,6 +245,11 @@ export type EdgeMetrics = {
   yoyPct: number | null;
 };
 
+/** The all-null measure set, for entities that carry no figure in a role. */
+export const EMPTY_METRICS: EdgeMetrics = {
+  pctRevenue: null, pctCOGS: null, estUSDValue: null, yoyPct: null,
+};
+
 export function readMetrics(n: ChainNode | undefined, role: Role): EdgeMetrics {
   if (!n) return { pctRevenue: null, pctCOGS: null, estUSDValue: null, yoyPct: null };
   // Legacy `revenue_pct` is role-dependent: revenue share for a customer,
