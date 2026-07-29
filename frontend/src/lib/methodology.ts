@@ -194,6 +194,44 @@ export const METHODOLOGY: Record<string, Methodology> = {
     ],
   },
 
+  financials: {
+    kind: "computed",
+    what: "Growth, common-size, ratios and quality checks derived from the "
+      + "three reported statements.",
+    formula: "Every ratio prints its own formula beside it on the Ratios tab.",
+    inputs: [
+      "Income statement, balance sheet and cash flow as reported, from FMP "
+        + "where it covers the listing and yfinance otherwise.",
+      "Nothing else. No estimate, model or peer figure enters this screen.",
+    ],
+    assumptions: [
+      "Line items mean the same thing across providers — the screen matches "
+        + "them by meaning, not by label, because the two name them "
+        + "differently.",
+      "Periods are comparable. A change of fiscal year end or an acquisition "
+        + "makes a growth rate misleading and the statements do not say so.",
+      "Where gross profit or free cash flow is absent it is derived from "
+        + "lines that ARE present (revenue less cost of revenue; operating "
+        + "cash flow plus capex). That is arithmetic, not an estimate.",
+    ],
+    limits: [
+      "Ratios use only periods present in ALL the statements they need. A "
+        + "year in one statement and missing from another is left out rather "
+        + "than mixed with a neighbouring period.",
+      "Interest cover is inferred from the gap between operating and pre-tax "
+        + "income, because neither provider gives an interest line. That gap "
+        + "also holds other non-operating items, so it is approximate.",
+      "Reported figures are not adjusted: one-off gains, impairments and "
+        + "changes in accounting policy all sit inside these numbers "
+        + "unmarked.",
+      "Quality flags are six specific checks, not an audit. Nothing flagged "
+        + "means those six did not fire — it is not a clean bill of health.",
+      "Free-tier coverage is uneven: Indian listings frequently have no "
+        + "statements at all, which is a gap in the data rather than in the "
+        + "company.",
+    ],
+  },
+
   chainExposure: {
     kind: "computed",
     what: "Concentration, money at risk, and whether the resulting trade can "

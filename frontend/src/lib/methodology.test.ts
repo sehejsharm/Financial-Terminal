@@ -9,7 +9,7 @@ describe("methodology registry", () => {
     // If a screen starts computing something new, it belongs here. This list
     // is the contract, not a snapshot.
     for (const key of ["wacc", "greeks", "stress", "sectorRating",
-                       "riskMetrics", "valueChain", "chainExposure",
+                       "riskMetrics", "valueChain", "chainExposure", "financials",
                        "aiAnalysis"]) {
       expect(Object.keys(METHODOLOGY)).toContain(key);
     }
