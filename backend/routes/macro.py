@@ -6,7 +6,7 @@ from concurrent.futures import TimeoutError as FuturesTimeout
 
 from fastapi import APIRouter, Depends, HTTPException
 
-from backend import auth
+from backend import auth, providers
 from backend.cache import cached
 from backend.serialize import records
 from lib.config import get_fred_key
@@ -45,7 +45,9 @@ def indicators(country: str = "US",
         raise HTTPException(503, "No FRED_API_KEY configured on the backend.")
     if country not in COUNTRIES:
         raise HTTPException(400, f"Unknown country '{country}'. Use one of: {COUNTRIES}")
-    return _with_deadline(lambda: get_dashboard(country))
+    # India carries ~17 series; at 12 workers that is two waves of FRED
+    # calls, which does not fit the default 25s budget.
+    return _with_deadline(lambda: get_dashboard(country), seconds=45.0)
 
 
 @router.get("/calendar")
@@ -65,6 +67,22 @@ def calendar(country: str = "US",
                  "consensus estimates). Next-release dates are cadence "
                  "estimates, not official schedules."),
     }
+
+
+@router.get("/sectors")
+@cached(ttl=900)
+def sector_board(_user: dict = Depends(auth.current_user)):
+    """Bull/bear ratings for the NSE sector indices.
+
+    Needs no FRED key — this is price arithmetic over data the terminal
+    already fetches. Cached for 15 minutes: it reads nine index histories
+    and ~70 quotes, which is far too much work to redo per page view.
+    """
+    from lib import sectors as sec
+
+    return _with_deadline(
+        lambda: sec.get_sector_board(providers.history, providers.quotes_bulk),
+        seconds=40.0)
 
 
 @router.get("/yield-curve")

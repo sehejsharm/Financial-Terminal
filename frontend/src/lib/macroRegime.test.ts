@@ -1,13 +1,17 @@
 import { describe, expect, it } from "vitest";
 
 import {
-  directionOf, GROUP_ORDER, groupIndicators, groupOf, regimeNote,
-  regimeSummary, type MacroIndicator,
+  coverage, directionOf, GROUP_ORDER, groupIndicators, groupOf, pillarReports,
+  regimeNote, regimeSummary, type MacroIndicator,
 } from "./macroRegime";
 
 const ind = (name: string, change: number | null = null,
              stale = false): MacroIndicator => ({
   name, value: 1, prior: 1, change, date: "2026-01-01", unit: "%", stale,
+});
+
+const missing = (name: string): MacroIndicator => ({
+  name, value: null, prior: null, change: null, date: null, unit: "%",
 });
 
 describe("groupOf", () => {
@@ -26,6 +30,27 @@ describe("groupOf", () => {
     // interest rates.
     expect(groupOf("Unemployment Rate")).toBe("labour");
     expect(groupOf("Initial Jobless Claims")).toBe("labour");
+  });
+
+  it("files the EXTERNAL block before policy", () => {
+    // "Real effective exchange rate" contains "rate"; an exchange rate is
+    // not a policy rate and must not land under Policy.
+    expect(groupOf("Real effective exchange rate")).toBe("external");
+    expect(groupOf("USD / INR")).toBe("external");
+    expect(groupOf("Current account (% GDP)")).toBe("external");
+    expect(groupOf("FX reserves ex-gold (USD)")).toBe("external");
+    expect(groupOf("Exports (YoY)")).toBe("external");
+  });
+
+  it("keeps money and debt under policy, and output under growth", () => {
+    expect(groupOf("M2 money supply (YoY)")).toBe("policy");
+    expect(groupOf("Broad money M3 (YoY)")).toBe("policy");
+    // Contains "GDP" but is a policy/fiscal level, not an output series.
+    expect(groupOf("Federal debt (% GDP)")).toBe("policy");
+    expect(groupOf("Nominal GDP (USD)")).toBe("growth");
+    expect(groupOf("Housing starts")).toBe("growth");
+    expect(groupOf("Composite leading indicator")).toBe("growth");
+    expect(groupOf("Initial jobless claims")).toBe("labour");
   });
 
   it("falls back to 'other' rather than guessing", () => {
@@ -114,6 +139,63 @@ describe("regimeSummary", () => {
 
   it("handles an empty list", () => {
     expect(regimeSummary([])).toEqual({ good: 0, bad: 0, neutral: 0, stale: 0, n: 0 });
+  });
+});
+
+describe("directionOf — external series", () => {
+  it("signs reserves, the current account and exports", () => {
+    expect(directionOf("FX reserves ex-gold (USD)", 1)).toBe("good");
+    expect(directionOf("Current account (% GDP)", -1)).toBe("bad");
+    expect(directionOf("Exports (YoY)", 2)).toBe("good");
+  });
+
+  it("leaves IMPORTS and the exchange rate unsigned", () => {
+    // Rising imports can be healthy domestic demand or a widening deficit;
+    // a weaker rupee helps exporters and hurts importers. Neither carries a
+    // sign on its own.
+    expect(directionOf("Imports (YoY)", 3)).toBe("neutral");
+    expect(directionOf("Real effective exchange rate", -1)).toBe("neutral");
+    expect(directionOf("Federal debt (% GDP)", 1)).toBe("neutral");
+  });
+});
+
+describe("pillarReports", () => {
+  it("reports one entry per non-empty group, in declared order", () => {
+    const p = pillarReports([ind("Real GDP", 1), ind("CPI", 1),
+                             ind("USD / INR", 1)]);
+    expect(p.map((x) => x.group)).toEqual(["growth", "inflation", "external"]);
+  });
+
+  it("leans with the balance and stays null when nothing is signed", () => {
+    const [growth, policy] = pillarReports([
+      ind("Real GDP", 1), ind("Industrial Production", 1),
+      ind("Fed Funds Rate", 0.25),
+    ]);
+    expect(growth.lean).toBe("improving");
+    expect(policy.lean).toBeNull();
+  });
+
+  it("counts series that reported NOTHING separately from neutral ones", () => {
+    // A missing series is not a neutral reading — it's an absent one, and
+    // folding the two together would overstate how much is known.
+    const [p] = pillarReports([ind("Real GDP", 1), missing("Industrial Production")]);
+    expect(p.missing).toBe(1);
+    expect(p.n).toBe(2);
+  });
+
+  it("handles an empty list", () => {
+    expect(pillarReports([])).toEqual([]);
+  });
+});
+
+describe("coverage", () => {
+  it("counts series that actually reported a value", () => {
+    expect(coverage([ind("CPI"), missing("Exports"), missing("Imports")]))
+      .toEqual({ reported: 1, total: 3, pct: (1 / 3) * 100 });
+  });
+
+  it("does not divide by zero", () => {
+    expect(coverage([])).toEqual({ reported: 0, total: 0, pct: 0 });
   });
 });
 

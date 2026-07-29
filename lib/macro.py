@@ -35,6 +35,14 @@ INDICATORS: dict[str, dict] = {
     "10Y-2Y spread": {"ids": ["T10Y2Y"], "unit": "%", "kind": "level"},
     "Retail sales (YoY)": {"ids": ["RSAFS"], "unit": "%", "kind": "yoy"},
     "Industrial production (YoY)": {"ids": ["INDPRO"], "unit": "%", "kind": "yoy"},
+    "Core PCE (YoY)": {"ids": ["PCEPILFE"], "unit": "%", "kind": "yoy"},
+    "10Y Treasury yield": {"ids": ["DGS10"], "unit": "%", "kind": "level"},
+    "Initial jobless claims": {"ids": ["ICSA"], "unit": "count", "kind": "level"},
+    "Nonfarm payrolls (YoY)": {"ids": ["PAYEMS"], "unit": "%", "kind": "yoy"},
+    "Consumer sentiment": {"ids": ["UMCSENT"], "unit": "index", "kind": "level"},
+    "Housing starts": {"ids": ["HOUST"], "unit": "k", "kind": "level"},
+    "M2 money supply (YoY)": {"ids": ["M2SL"], "unit": "%", "kind": "yoy"},
+    "Federal debt (% GDP)": {"ids": ["GFDEGDQ188S"], "unit": "%", "kind": "level"},
 }
 
 COUNTRY_INDICATORS: dict[str, dict[str, dict]] = {
@@ -50,6 +58,25 @@ COUNTRY_INDICATORS: dict[str, dict[str, dict]] = {
         "10Y govt yield": {"ids": ["IRLTLT01INM156N"], "unit": "%", "kind": "level"},
         "USD / INR": {"ids": ["DEXINUS"], "unit": "INR", "kind": "level"},
         "Unemployment rate": {"ids": ["LRUNTTTTINQ156S"], "unit": "%", "kind": "level"},
+        # India is the home market of this terminal, so it carries the widest
+        # series list. Several of these come from OECD collections FRED has
+        # been retiring since 2024; each lists fallbacks, and anything that
+        # returns nothing is reported as unavailable rather than blanked out
+        # or quietly padded with an older number.
+        "Nominal GDP (USD)": {"ids": ["MKTGDPINA646NWDB"], "unit": "USD", "kind": "level"},
+        "Current account (% GDP)": {"ids": ["INDBCABP6GDPPT"], "unit": "%", "kind": "level"},
+        "FX reserves ex-gold (USD)": {"ids": ["TRESEGINM052N"], "unit": "USD", "kind": "level"},
+        "Real effective exchange rate": {"ids": ["RBINBIS"], "unit": "index", "kind": "level"},
+        "Broad money M3 (YoY)": {"ids": ["MABMM301INQ189S",
+                                         "MABMM301INM189S"], "unit": "%", "kind": "yoy"},
+        "Exports (YoY)": {"ids": ["XTEXVA01INM667S", "XTEXVA01INQ667S"],
+                          "unit": "%", "kind": "yoy"},
+        "Imports (YoY)": {"ids": ["XTIMVA01INM667S", "XTIMVA01INQ667S"],
+                          "unit": "%", "kind": "yoy"},
+        "Business confidence": {"ids": ["BSCICP03INM665S"], "unit": "index", "kind": "level"},
+        "Consumer confidence": {"ids": ["CSCICP03INM665S"], "unit": "index", "kind": "level"},
+        "Composite leading indicator": {"ids": ["INDLOLITONOSTSAM"],
+                                        "unit": "index", "kind": "level"},
     },
     "EU": {
         "Real GDP growth": {"ids": ["CLVMNACSCAB1GQEA19"], "unit": "%", "kind": "yoy"},
@@ -90,7 +117,14 @@ COUNTRY_INDICATORS: dict[str, dict[str, dict]] = {
 # as current.
 def _max_age_days(name: str, unit: str) -> int:
     n = name.lower()
-    if "gdp" in n:
+    # Annual series first: "Nominal GDP (USD)" contains "gdp", and the
+    # quarterly threshold below would badge a perfectly current annual print
+    # as stale every year between releases.
+    if "nominal gdp" in n or "current account" in n:
+        return 500
+    if "claims" in n:
+        return 21           # weekly
+    if "gdp" in n or "% gdp" in n:
         return 200          # quarterly, long publication lag
     if "/" in name and unit != "%":
         return 10           # FX — daily series
@@ -181,11 +215,15 @@ def get_indicator(name: str, country: str = "US") -> dict:
 def _cadence_days(name: str, unit: str) -> int | None:
     """Typical release cadence; None for daily series (FX, spreads)."""
     n = name.lower()
+    if "nominal gdp" in n or "current account" in n:
+        return 365         # annual
+    if "claims" in n:
+        return 7           # weekly
     if "gdp" in n:
         return 91
     if "/" in name and unit != "%":
         return None        # FX — daily
-    if "spread" in n:
+    if "spread" in n or "yield" in n:
         return None        # daily
     return 30              # monthly indicators
 
@@ -232,6 +270,6 @@ def get_dashboard(country: str = "US") -> list[dict]:
     from concurrent.futures import ThreadPoolExecutor
     inds = COUNTRY_INDICATORS.get(country, INDICATORS)
     names = list(inds.keys())
-    with ThreadPoolExecutor(max_workers=min(8, len(names) or 1)) as pool:
+    with ThreadPoolExecutor(max_workers=min(12, len(names) or 1)) as pool:
         results = list(pool.map(lambda n: get_indicator(n, country), names))
     return results

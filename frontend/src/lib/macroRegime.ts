@@ -10,7 +10,8 @@
  *  rather than silently landing in "Other".
  */
 
-export type MacroGroup = "growth" | "inflation" | "policy" | "labour" | "other";
+export type MacroGroup =
+  "growth" | "inflation" | "policy" | "labour" | "external" | "other";
 
 export type MacroIndicator = {
   name: string;
@@ -25,12 +26,25 @@ export type MacroIndicator = {
 export const GROUP_LABEL: Record<MacroGroup, string> = {
   growth: "Growth & activity",
   inflation: "Inflation",
-  policy: "Policy & rates",
+  policy: "Policy, rates & money",
   labour: "Labour",
+  external: "External balance & currency",
   other: "Other series",
 };
 
-export const GROUP_ORDER: MacroGroup[] = ["growth", "inflation", "policy", "labour", "other"];
+/** What each block tells you, shown next to the heading. */
+export const GROUP_BLURB: Record<MacroGroup, string> = {
+  growth: "How much the economy is producing and how confident it feels.",
+  inflation: "What prices are doing, which sets the ceiling on policy easing.",
+  policy: "The price of money and how much of it there is.",
+  labour: "Whether the economy is creating work — the slowest-moving pillar.",
+  external: "Trade, the current account, reserves and the exchange rate.",
+  other: "Series that don't fit the four standard blocks.",
+};
+
+export const GROUP_ORDER: MacroGroup[] = [
+  "growth", "inflation", "policy", "labour", "external", "other",
+];
 
 /**
  * Which block a series belongs to.
@@ -42,9 +56,14 @@ export const GROUP_ORDER: MacroGroup[] = ["growth", "inflation", "policy", "labo
 export function groupOf(name: string): MacroGroup {
   const n = (name || "").toLowerCase();
   if (/unemploy|payroll|jobless|employment|labou?r|wage|claims/.test(n)) return "labour";
-  if (/\bcpi\b|inflat|price index|ppi|deflator|core pce|pce/.test(n)) return "inflation";
-  if (/fed funds|policy rate|repo|bank rate|treasury|yield|bond|spread|\brate\b/.test(n)) return "policy";
-  if (/gdp|industrial|production|retail|pmi|manufactur|output|sales|confidence|sentiment/.test(n)) return "growth";
+  if (/\bcpi\b|inflat|price index|ppi|deflator|core pce|pce|hicp/.test(n)) return "inflation";
+  // External before policy: "Real effective exchange RATE" contains "rate",
+  // and an exchange rate is not a policy rate.
+  if (/current account|export|import|trade balance|reserves|exchange rate|reer|\/\s*(inr|usd|jpy|cny|eur|gbp)|\b(usd|eur|gbp|jpy|cny)\s*\//.test(n)) {
+    return "external";
+  }
+  if (/fed funds|policy rate|repo|bank rate|treasury|yield|bond|spread|money supply|broad money|\bm[23]\b|\bdebt\b|\brate\b/.test(n)) return "policy";
+  if (/gdp|industrial|production|retail|pmi|manufactur|output|sales|confidence|sentiment|housing|leading indicator/.test(n)) return "growth";
   return "other";
 }
 
@@ -77,10 +96,20 @@ export function directionOf(name: string, change: number | null | undefined): Di
   const up = change > 0;
   if (/unemploy|jobless|claims/.test(n)) return up ? "bad" : "good";
   if (/\bcpi\b|inflat|price index|ppi|deflator|pce/.test(n)) return up ? "bad" : "good";
-  if (/gdp|industrial|production|retail|payroll|employment|pmi|output|sales/.test(n)) {
+  // Before the growth rule: "Federal debt (% GDP)" contains "gdp", and
+  // rising public debt is not an improvement the way rising output is.
+  if (/\bdebt\b|deficit/.test(n)) return "neutral";
+  if (/gdp|industrial|production|retail|payroll|employment|pmi|output|sales|confidence|sentiment|housing|leading indicator/.test(n)) {
     return up ? "good" : "bad";
   }
-  // Rates, FX, spreads and anything unrecognised: no inherent direction.
+  // External strength: more reserves, a bigger current-account balance and
+  // rising exports all describe a stronger external position. Imports are
+  // deliberately left unsigned — rising imports can be domestic demand
+  // (healthy) or a widening deficit (not), and the series alone can't say.
+  if (/reserves|current account|export/.test(n)) return up ? "good" : "bad";
+  // Rates, FX, spreads, debt levels and anything unrecognised: no inherent
+  // direction. A weaker rupee helps exporters and hurts importers; calling
+  // it "bad" would be a view, not a reading.
   return "neutral";
 }
 
@@ -105,6 +134,42 @@ export function regimeSummary(inds: MacroIndicator[]): Regime {
     else r.neutral += 1;
   }
   return r;
+}
+
+/** Per-pillar read: the same counting, done block by block. */
+export type Pillar = Regime & {
+  group: MacroGroup;
+  /** Series that reported nothing at all — the feed had no observation. */
+  missing: number;
+  /** "improving" | "deteriorating" | "mixed" | null when nothing is signed. */
+  lean: "improving" | "deteriorating" | "mixed" | null;
+};
+
+export function pillarReports(inds: MacroIndicator[]): Pillar[] {
+  return groupIndicators(inds).map(([group, list]) => {
+    const r = regimeSummary(list);
+    const missing = list.filter((i) => i.value == null).length;
+    const lean = r.good + r.bad === 0
+      ? null
+      : r.good > r.bad ? "improving"
+      : r.bad > r.good ? "deteriorating" : "mixed";
+    return { group, ...r, missing, lean };
+  });
+}
+
+/**
+ * How much of the requested picture actually arrived.
+ *
+ * Worth showing plainly: several of the series in this app come from OECD
+ * collections FRED has been retiring, so "12 of 17 series reported" is a
+ * fact the reader needs before they weigh anything below it.
+ */
+export function coverage(inds: MacroIndicator[]): {
+  reported: number; total: number; pct: number;
+} {
+  const total = inds.length;
+  const reported = inds.filter((i) => i.value != null).length;
+  return { reported, total, pct: total ? (reported / total) * 100 : 0 };
 }
 
 /**
