@@ -6,6 +6,7 @@ import { Trash2 } from "lucide-react";
 import { DataAge } from "@/components/DataAge";
 import { TickerInput } from "@/components/TickerInput";
 import { Shell } from "@/components/Shell";
+import { PageHeader } from "@/components/ui";
 import { api, type Alert, type AlertEvent } from "@/lib/api";
 import { useLive } from "@/lib/useLive";
 import { fmtNum } from "@/lib/utils";
@@ -306,15 +307,12 @@ export default function AlertsPage() {
 
   return (
     <Shell>
-      <div className="flex items-center gap-3 mb-3">
-        <h1 className="heading">ALERTS</h1>
-        <div className="flex-1" />
-        <DataAge at={updatedAt} onRefresh={refresh} busy={busy} />
-      </div>
-      <div className="text-mut text-xs mb-4">
-        Evaluated server-side every ~60s against live provider data. Triggered
-        alerts deactivate and appear in the feed + header bell.
-      </div>
+      <PageHeader
+        title="ALERTS"
+        subtitle="Evaluated server-side every ~60s against live provider data.
+                  Triggered alerts deactivate and appear in the feed and the
+                  header bell."
+        actions={<DataAge at={updatedAt} onRefresh={refresh} busy={busy} />} />
 
       <DeliveryPanel />
 

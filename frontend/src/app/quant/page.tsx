@@ -7,6 +7,7 @@ import { Shell } from "@/components/Shell";
 import { QuantSkeleton } from "@/components/Skeleton";
 import { TickerInput } from "@/components/TickerInput";
 import { RiskLab } from "@/components/quant/RiskLab";
+import { PageHeader, Tabs, type TabDef } from "@/components/ui";
 import { VolCone } from "@/components/VolCone";
 import { api, type Watchlist } from "@/lib/api";
 import { fmtNum } from "@/lib/utils";
@@ -96,6 +97,13 @@ type QuantResult = {
 
 type Tab = "corr" | "bt" | "vol" | "risk";
 
+const TABS: readonly TabDef<Tab>[] = [
+  { id: "corr", label: "Correlation & beta", hint: "Pearson correlation of daily returns and rolling beta" },
+  { id: "risk", label: "Risk lab", hint: "Distribution, drawdown and benchmark-relative statistics" },
+  { id: "bt", label: "Backtest", hint: "Rule-based strategy over historical bars" },
+  { id: "vol", label: "Volatility", hint: "Realised-volatility cone by horizon" },
+];
+
 export default function QuantPage() {
   const [tab, setTab] = useState<Tab>("corr");
   // Heavy tabs fetch on mount, so they're created on first visit and then
@@ -171,19 +179,14 @@ export default function QuantPage() {
 
   return (
     <Shell>
-      <div className="flex items-center gap-1 mb-4 border-b border-line">
-        {([["corr", "Correlation & beta"], ["risk", "Risk lab"],
-           ["bt", "Backtest"], ["vol", "Volatility"]] as const).map(([id, label]) => (
-          <button key={id}
-                  onClick={() => { setTab(id); setOpened((o) => ({ ...o, [id]: true })); }}
-                  className={`px-3 py-2 text-xs uppercase tracking-wider border-b-2 -mb-px ${
-                    tab === id
-                      ? "border-amber text-amber"
-                      : "border-transparent text-mut hover:text-txt"}`}>
-            {label}
-          </button>
-        ))}
-      </div>
+      <PageHeader
+        title="QUANT"
+        subtitle="Correlation, risk, backtesting and volatility — all computed
+                  in your browser from the same 1-year history feed the charts
+                  use, so nothing here depends on a server-side model." />
+
+      <Tabs tabs={TABS} value={tab}
+            onChange={(t) => { setTab(t); setOpened((o) => ({ ...o, [t]: true })); }} />
 
       <div className={tab === "bt" ? "" : "hidden"}>
         {opened.bt && <Backtester seedTicker={firstTicker} />}
@@ -196,7 +199,6 @@ export default function QuantPage() {
       </div>
 
       <div className={tab === "corr" ? "" : "hidden"}>
-      <h1 className="heading mb-3">QUANT — CORRELATION & BETA</h1>
       <div className="text-mut text-xs mb-3">
         Pearson correlation of daily returns (1Y, aligned trading days) and rolling
         60-day / full-period beta vs the benchmark. Computed in your browser from

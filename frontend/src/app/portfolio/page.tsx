@@ -10,6 +10,7 @@ import { ScrollX } from "@/components/ScrollX";
 import { TickerInput } from "@/components/TickerInput";
 import { MetricCard } from "@/components/MetricCard";
 import { Shell } from "@/components/Shell";
+import { PageHeader } from "@/components/ui";
 import { StressTest } from "@/components/StressTest";
 import {
   api,
@@ -319,11 +320,9 @@ export default function PortfolioPage() {
 
   return (
     <Shell>
-      <div className="flex items-center gap-3 mb-3">
-        <h1 className="heading">PORTFOLIO</h1>
-        <div className="flex-1" />
-        <DataAge at={updatedAt} onRefresh={refresh} busy={busy} />
-      </div>
+      <PageHeader
+        title="PORTFOLIO"
+        actions={<DataAge at={updatedAt} onRefresh={refresh} busy={busy} />} />
 
       {/* Portfolio tabs + CSV import */}
       <div className="flex flex-wrap items-center gap-2 mb-3">

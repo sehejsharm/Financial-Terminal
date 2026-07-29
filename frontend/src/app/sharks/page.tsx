@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useEffect, useState } from "react";
 
 import { Shell } from "@/components/Shell";
+import { PageHeader } from "@/components/ui";
 import { StatusBadge } from "@/components/StatusBadge";
 import { Pager, SortableTh, TableToolbar, useTableControls } from "@/components/tableControls";
 import { api, type DealRow, type FlowRow, type InsiderRow } from "@/lib/api";
@@ -186,15 +187,13 @@ export default function SharksPage() {
 
   return (
     <Shell>
-      <div className="flex items-center gap-3 mb-3">
-        <h1 className="heading">BIG SHARK UPDATES</h1>
-        <StatusBadge kind="eod" />
-      </div>
-      <div className="panel-2 p-3 mb-4 text-[11px] text-mut">
-        A true real-time feed of bulk/block deals requires a paid data subscription.
-        NSE publishes these end-of-day only, so this is the latest <strong>END-OF-DAY</strong> activity
-        (best-effort from NSE archives), not a live tick feed.
-      </div>
+      <PageHeader
+        title="BIG SHARK UPDATES"
+        actions={<StatusBadge kind="eod" />}
+        subtitle={<>A true real-time feed of bulk/block deals requires a paid
+          data subscription. NSE publishes these end-of-day only, so this is
+          the latest <strong className="text-txt">end-of-day</strong> activity
+          (best-effort from NSE archives), not a live tick feed.</>} />
       <div className="flex flex-wrap items-center gap-2 mb-4">
         <button onClick={() => setTab("flow")} className={`btn ${tab === "flow" ? "btn-primary" : "btn-ghost"}`}>Flow intel</button>
         <button onClick={() => setTab("bulk")} className={`btn ${tab === "bulk" ? "btn-primary" : "btn-ghost"}`}>Bulk deals</button>

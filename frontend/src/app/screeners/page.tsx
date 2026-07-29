@@ -8,6 +8,7 @@ import { Shell } from "@/components/Shell";
 import { StatusBadge } from "@/components/StatusBadge";
 import { Pager, SortableTh, TableToolbar, useTableControls } from "@/components/tableControls";
 import { ScreenBuilder } from "@/components/screeners/ScreenBuilder";
+import { PageHeader } from "@/components/ui";
 import { api, type ScreenClause, type ScreenResult } from "@/lib/api";
 
 type ScreenDef = {
@@ -117,7 +118,11 @@ export default function ScreenersPage() {
 
   return (
     <Shell>
-      <h1 className="heading mb-3">SCREENERS</h1>
+      <PageHeader
+        title="SCREENERS"
+        subtitle="Fundamental screens over an Indian universe. Presets run a
+                  fresh scan on click; Custom builds a filter set from any of
+                  the metrics the feed actually populates." />
 
       <div className="flex flex-wrap gap-2 mb-3">
         {SCREENS.map((s, i) => (

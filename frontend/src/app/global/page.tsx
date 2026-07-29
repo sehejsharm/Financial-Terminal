@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 
 import { DataAge } from "@/components/DataAge";
 import { Shell } from "@/components/Shell";
+import { PageHeader } from "@/components/ui";
 import { StatusBadge } from "@/components/StatusBadge";
 import { CrossRates, Heatmap, SessionStrip } from "@/components/global/WorldBoard";
 import { api, type Indicator } from "@/lib/api";
@@ -138,10 +139,10 @@ export default function GlobalPage() {
 
   return (
     <Shell>
-      <div className="flex flex-wrap items-center gap-3 mb-4">
-        <h1 className="heading">GLOBAL MARKETS</h1>
-        <span className="text-[10px] text-mut num">{total} instruments</span>
-      </div>
+      <PageHeader
+        title="GLOBAL MARKETS"
+        subtitle={`${total} instruments across equity indices, commodities and
+                   currencies, tinted by the size of the day's move.`} />
 
       <SessionStrip />
 

@@ -359,6 +359,9 @@ export type Ratings = { targets: Record<string, number | string | null>; recomme
 export type NewsItem = {
   title: string; publisher: string; link: string;
   summary: string; published: string | null;
+  /** Which configured feed delivered it — not always the outlet named in
+   *  `publisher`, since Google News reports the originating publisher. */
+  source?: string | null;
 };
 export type Indicator = {
   name: string; value: number | null; prior: number | null;
@@ -366,6 +369,36 @@ export type Indicator = {
   /** True when the last observation is older than a sane threshold for the
    *  indicator's cadence — render a STALE badge, don't present as current. */
   stale?: boolean;
+};
+/** One sector's bull/bear rating, with the arithmetic behind it. */
+export type SectorRow = {
+  key: string; label: string; index: string;
+  score: number | null;
+  rating: string | null;
+  /** Share of the weight that was measurable (0–1). */
+  coverage: number;
+  /** Per-component points, already weighted; they sum to `score`. */
+  contributions: Record<string, number>;
+  /** Each component on a common −1…+1 scale, or null when unmeasurable. */
+  components: Record<string, number | null>;
+  measures: {
+    last: number | null; ma50: number | null; ma200: number | null;
+    ret_1m: number | null; ret_3m: number | null; ret_6m: number | null;
+    bench_3m: number | null; relative_3m: number | null;
+    high_52w: number | null; low_52w: number | null;
+    from_high_pct: number | null; breadth: number | null; bars: number;
+  };
+  advancers: number; decliners: number;
+  members_quoted: number; members_total: number;
+  reason: string | null;
+};
+export type SectorBoard = {
+  benchmark: string;
+  sectors: SectorRow[];
+  rated: number;
+  weights: Record<string, number>;
+  component_labels: Record<string, string>;
+  note: string;
 };
 export type YieldPoint = { maturity: string; years: number; yield: number };
 export type YieldCurve = {
@@ -443,6 +476,8 @@ export const api = {
   macroCountries: () => apiFetch<string[]>("/api/v1/macro/countries"),
   macroIndicators: (country = "US", opts?: FetchOpts) =>
     apiFetchMeta<Indicator[]>(`/api/v1/macro/indicators?country=${encodeURIComponent(country)}`, {}, opts),
+  macroSectors: (opts?: FetchOpts) =>
+    apiFetchMeta<SectorBoard>("/api/v1/macro/sectors", {}, opts),
   yieldCurve: (country = "US", opts?: FetchOpts) =>
     apiFetchMeta<YieldCurve>(`/api/v1/macro/yield-curve?country=${encodeURIComponent(country)}`, {}, opts),
 
