@@ -191,11 +191,15 @@ def chain(ticker: str, refresh: bool = False,
         data = vc.get_chain_data(canonical, company_name, sector=sector,
                                  industry=industry, nonce=nonce)
     except ai_analyst.AnalystError as e:
+        # 502 is honest here: an upstream we depend on gave us something we
+        # could not use. The message carries the specific validation failure
+        # so the UI can print it instead of "check your connection".
         raise HTTPException(status.HTTP_502_BAD_GATEWAY, str(e))
     if not data:
         raise HTTPException(status.HTTP_502_BAD_GATEWAY,
-                            "The AI did not return a valid structured map "
-                            "after a retry — use Regenerate to try again.")
+                            "The AI did not return a usable map after three "
+                            "attempts. Regenerate to try again — a different "
+                            "sampling run often succeeds.")
     data = _apply_overrides(canonical, dict(data))
     data = _annotate_roles(data)
     out = {"ticker": canonical, "name": company_name, "sector": sector, **data}

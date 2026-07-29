@@ -14,7 +14,7 @@ import {
   coverage, directionOf, GROUP_BLURB, GROUP_LABEL, groupIndicators,
   pillarReports, regimeNote, regimeSummary,
 } from "@/lib/macroRegime";
-import { fmtNum } from "@/lib/utils";
+import { fmtNum, humanNumber } from "@/lib/utils";
 
 // India first, and the default. This is an India-first terminal; opening the
 // macro screen on the US meant the home market was always one click away.
@@ -87,13 +87,11 @@ function YieldCurveChart({ points }: { points: YieldPoint[] }) {
 function inUnit(v: number, u: string): string {
   if (u === "%") return `${fmtNum(v, 2)}%`;
   if (u === "count") return fmtNum(v, 0);
-  if (u === "USD") {
-    // World Bank GDP and reserves arrive in raw dollars; billions is the
-    // only unit anyone reads them in — and the change has to be shown the
-    // same way, or a card reports "+300,000,000,000.00 vs prior".
-    const bn = Math.abs(v) / 1e9;
-    return bn >= 1 ? `$${fmtNum(v / 1e9, 1)}bn` : `$${fmtNum(v, 0)}`;
-  }
+  // World Bank GDP and reserves arrive in raw dollars. humanNumber is the
+  // app's one compact formatter ("$4.10T"); rolling a local "bn" variant
+  // here is how this card ended up rendering an unrounded 13-digit number
+  // while every other screen showed a scaled one.
+  if (u === "USD") return humanNumber(v, "$");
   if (u === "index" || u === "k") return fmtNum(v, 1);
   return `${fmtNum(v, 2)} ${u}`;
 }

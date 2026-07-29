@@ -161,6 +161,13 @@ test("the snapshot cards do NOT repeat what the header already shows",
     // them again below would be two places to read one number.
     await expect(page.getByText("Market cap", { exact: true })).toHaveCount(1);
     await expect(page.getByText("52-week range", { exact: true })).toHaveCount(1);
-    await expect(page.getByText("Trailing P/E", { exact: true })).toBeVisible();
-    await expect(page.getByText("Forward P/E", { exact: true })).toBeVisible();
+    // These two render from the snapshot endpoint, which is a live provider
+    // call — under a full-suite run it queues behind everything else the
+    // single-worker backend is doing, and the default 15s expect timeout is
+    // not enough. The rest of this file asserts app-owned structure and
+    // needs no such allowance.
+    await expect(page.getByText("Trailing P/E", { exact: true }))
+      .toBeVisible({ timeout: 45_000 });
+    await expect(page.getByText("Forward P/E", { exact: true }))
+      .toBeVisible({ timeout: 45_000 });
   });

@@ -109,32 +109,144 @@ def _parse_chain_json(raw: str) -> dict | None:
         return None
 
 
+ROLES = ("suppliers", "customers", "competitors")
+
+#: A map needs at least this many supplier/customer nodes to be worth
+#: rendering. One node is not a value chain, and drawing a near-empty graph
+#: is worse than saying the generation failed.
+MIN_CHAIN_NODES = 2
+
+
+def _clean_node(node) -> dict | None:
+    """One relationship, or None if it isn't usable.
+
+    The model occasionally returns a bare string, a node with no name, or a
+    revenue share as the string "about 15%". Those are repaired where the
+    intent is unambiguous and dropped where it isn't — never guessed at.
+    """
+    if isinstance(node, str):
+        node = {"name": node}
+    if not isinstance(node, dict):
+        return None
+    name = str(node.get("name") or "").strip()
+    if not name or len(name) > 120:
+        return None
+
+    pct = node.get("revenue_pct")
+    if isinstance(pct, str):
+        try:
+            pct = float(pct.strip().rstrip("%").strip())
+        except ValueError:
+            pct = None
+    if isinstance(pct, (int, float)) and 0 <= float(pct) <= 100:
+        pct = float(pct)
+    else:
+        pct = None
+
+    out = {"name": name, "revenue_pct": pct}
+    for key in ("note", "ticker", "confidence"):
+        v = node.get(key)
+        if isinstance(v, str) and v.strip():
+            out[key] = v.strip()[:400]
+    return out
+
+
+def validate_chain(data) -> tuple[dict | None, list[str]]:
+    """Check a parsed map against the shape the UI actually renders.
+
+    Returns (cleaned, problems). `cleaned` is None when the payload cannot
+    be salvaged. Parsing as JSON is not the same as being a value chain:
+    `{"answer": "I don't know"}` parses perfectly and renders an empty
+    diagram, which is how a failed generation used to reach the screen
+    looking like a real result.
+    """
+    problems: list[str] = []
+    if not isinstance(data, dict):
+        return None, ["response was not a JSON object"]
+
+    out: dict = {}
+    kept = 0
+    for role in ROLES:
+        raw = data.get(role)
+        if raw is None:
+            problems.append(f"missing '{role}'")
+            out[role] = []
+            continue
+        if not isinstance(raw, list):
+            problems.append(f"'{role}' was {type(raw).__name__}, not a list")
+            out[role] = []
+            continue
+        nodes = []
+        for node in raw:
+            c = _clean_node(node)
+            if c:
+                nodes.append(c)
+            else:
+                problems.append(f"dropped an unusable node in '{role}'")
+        out[role] = nodes
+        if role in ("suppliers", "customers"):
+            kept += len(nodes)
+
+    if isinstance(data.get("summary"), str):
+        out["summary"] = data["summary"].strip()[:2000]
+
+    if kept < MIN_CHAIN_NODES:
+        problems.append(
+            f"only {kept} supplier/customer relationships survived validation "
+            f"({MIN_CHAIN_NODES} needed)")
+        return None, problems
+    return out, problems
+
+
 @st.cache_data(ttl=43200, show_spinner=False)   # 12-hour cache per ticker
 def get_chain_data(ticker: str, company_name: str, sector: str | None = None,
                    industry: str | None = None, nonce: int = 0) -> dict | None:
     """Structured value-chain JSON, grounded in the RESOLVED company's
-    verified sector/industry. `nonce` busts the cache for user-requested
-    regeneration. One stricter retry on parse failure."""
+    verified sector/industry.
+
+    `nonce` busts the cache for user-requested regeneration.
+
+    Three attempts, and every attempt is validated against the schema the UI
+    renders — not merely parsed. The previous version accepted any valid
+    JSON, so a model reply that parsed but carried no relationships produced
+    an empty diagram rather than an error. Each retry is told specifically
+    what was wrong with the last answer, which is a far better prompt than
+    "try again".
+    """
     grounding = ""
     if sector or industry:
         grounding = (f"\n- VERIFIED DATA: sector = {sector or 'n/a'}, "
                      f"industry = {industry or 'n/a'}.")
-    prompt = _JSON_PROMPT.format(name=company_name, ticker=ticker,
-                                 grounding=grounding)
+    base = _JSON_PROMPT.format(name=company_name, ticker=ticker,
+                               grounding=grounding)
+    prompt = base
     data = None
-    for attempt in range(2):
+    last_problems: list[str] = []
+    for attempt in range(3):
         try:
             raw = ai_analyst._call(prompt, max_tokens=2200)
         except ai_analyst.AnalystError:
             raise
-        data = _parse_chain_json(raw)
-        if data is not None:
-            break
-        # Stricter re-prompt: parse failures are usually prose leakage.
-        prompt = (prompt + "\n\nIMPORTANT: your previous answer was not valid "
-                  "JSON. Return ONLY the JSON object — no prose, no fences.")
+        parsed = _parse_chain_json(raw)
+        if parsed is None:
+            last_problems = ["the reply was not valid JSON"]
+        else:
+            data, last_problems = validate_chain(parsed)
+            if data is not None:
+                break
+        if attempt < 2:
+            prompt = (base + "\n\nIMPORTANT: your previous answer was "
+                      "rejected because " + "; ".join(last_problems[:4])
+                      + ". Return ONLY the JSON object — no prose, no code "
+                        "fences — with real named companies in `suppliers` "
+                        "and `customers`.")
     if data is None:
-        return None
+        # Surfaced to the user verbatim, so it says what went wrong rather
+        # than "something went wrong".
+        raise ai_analyst.AnalystError(
+            "The AI returned a map that failed validation three times: "
+            + "; ".join(last_problems[:3] or ["no usable relationships"])
+            + ".")
     # Provenance: this is generated content, not filing-sourced data. Stamped
     # inside the cached payload so the timestamp reflects actual generation
     # time, not cache-serve time.

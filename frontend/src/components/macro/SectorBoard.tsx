@@ -1,11 +1,14 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { ChevronDown, ChevronRight } from "lucide-react";
 
 import { DataAge } from "@/components/DataAge";
-import { EmptyState, ErrorState, Loading, Note, SectionHeader } from "@/components/ui";
-import { api, type SectorBoard as Board, type SectorRow } from "@/lib/api";
+import {
+  AsyncPanel, Note, SectionHeader, SkeletonCards,
+} from "@/components/ui";
+import { useAsync } from "@/lib/useAsync";
+import { api, type SectorRow } from "@/lib/api";
 import { tintBg, tintBorder } from "@/lib/heat";
 import { fmtNum } from "@/lib/utils";
 
@@ -163,25 +166,21 @@ function SectorCard({ row, labels, weights }: {
 }
 
 export function SectorBoard() {
-  const [board, setBoard] = useState<Board | null>(null);
+  // The board fans out over nine index histories and ~70 quotes server-side.
+  // It is the slowest screen in the app, which is exactly why it gets an
+  // explicit deadline: it used to spin forever with no timeout and no error
+  // state when the backend didn't answer.
+  const [nonce, setNonce] = useState(0);
   const [at, setAt] = useState<number | null>(null);
-  const [err, setErr] = useState<string | null>(null);
-  const [busy, setBusy] = useState(false);
+  const state = useAsync(
+    () => api.macroSectors({ fresh: nonce > 0, timeoutMs: 40_000 })
+      .then((m) => { setAt(m.fetchedAt); return m.data; }),
+    [nonce],
+    { timeoutMs: 45_000 },
+  );
 
-  function load(fresh = false) {
-    setBusy(true); setErr(null);
-    api.macroSectors({ fresh })
-      .then((m) => { setBoard(m.data); setAt(m.fetchedAt); })
-      .catch((e) => setErr(e?.detail || "Sector data unavailable."))
-      .finally(() => setBusy(false));
-  }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  useEffect(() => load(), []);
-
-  if (err) return <ErrorState message={err} onRetry={() => load(true)} />;
-  if (!board) return <Loading what="sector ratings" />;
-
-  const rated = board.sectors.filter((s) => s.score != null);
+  const board = state.data;
+  const rated = (board?.sectors ?? []).filter((s) => s.score != null);
   const leader = rated[0];
   const laggard = rated[rated.length - 1];
 
@@ -189,8 +188,9 @@ export function SectorBoard() {
     <>
       <SectionHeader
         title="Sector ratings — India"
-        count={`${board.rated}/${board.sectors.length} rated`}
-        actions={<DataAge at={at} onRefresh={() => load(true)} busy={busy} />}
+        count={board ? `${board.rated}/${board.sectors.length} rated` : undefined}
+        actions={<DataAge at={at} onRefresh={() => setNonce((n) => n + 1)}
+                          busy={state.busy} />}
         note={leader && laggard && leader.key !== laggard.key ? (
           <>
             Strongest <span className="text-green">{leader.label}</span> at{" "}
@@ -202,20 +202,26 @@ export function SectorBoard() {
         ) : undefined}
       />
 
-      {board.sectors.length === 0 && (
-        <EmptyState title="No sectors returned."
-                    detail="The market-data provider returned nothing for the sector indices." />
-      )}
-
-      <div className="grid gap-2.5 mb-stagger mb-4"
-           style={{ gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))" }}>
-        {board.sectors.map((s) => (
-          <SectorCard key={s.key} row={s}
-                      labels={board.component_labels} weights={board.weights} />
-        ))}
-      </div>
-
-      <Note>{board.note}</Note>
+      <AsyncPanel
+        state={state}
+        skeleton={<SkeletonCards n={8} rows={4} />}
+        isEmpty={(b) => b.sectors.length === 0}
+        emptyTitle="No sectors returned."
+        emptyDetail="The market-data provider returned nothing for the sector indices."
+      >
+        {(b) => (
+          <>
+            <div className="grid gap-2.5 mb-stagger mb-4"
+                 style={{ gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))" }}>
+              {b.sectors.map((s) => (
+                <SectorCard key={s.key} row={s}
+                            labels={b.component_labels} weights={b.weights} />
+              ))}
+            </div>
+            <Note>{b.note}</Note>
+          </>
+        )}
+      </AsyncPanel>
     </>
   );
 }

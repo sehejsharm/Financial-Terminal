@@ -197,6 +197,68 @@ export function EmptyState({
   );
 }
 
+/** Skeleton block — a shape where content will be, not a spinner. */
+export function Skel({ h = 14, w = "100%", className = "" }:
+  { h?: number; w?: number | string; className?: string }) {
+  return (
+    <span className={`mb-shimmer block rounded ${className}`}
+          style={{ height: h, width: w }} aria-hidden />
+  );
+}
+
+/** The loading shape of a grid of cards. */
+export function SkeletonCards({ n = 6, rows = 3 }: { n?: number; rows?: number }) {
+  return (
+    <div className="grid gap-3"
+         style={{ gridTemplateColumns: "repeat(auto-fit, minmax(210px, 1fr))" }}>
+      {Array.from({ length: n }, (_, i) => (
+        <div key={i} className="hud p-3.5 flex flex-col gap-2">
+          <Skel h={9} w="55%" />
+          <Skel h={20} w="70%" />
+          {Array.from({ length: rows - 2 }, (_, j) => <Skel key={j} h={8} w="85%" />)}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+/**
+ * The one way a panel renders its four states.
+ *
+ * Applied everywhere so no screen can invent a fifth — in particular, no
+ * screen can render a spinner with no timeout behind it, which is how the
+ * sector board came to hang indefinitely.
+ */
+export function AsyncPanel<T>({
+  state, children, skeleton, emptyTitle, emptyDetail, isEmpty,
+}: {
+  state: {
+    data: T | null; busy: boolean; error: string | null;
+    serverFault?: boolean; retry: () => void;
+  };
+  children: (data: T) => ReactNode;
+  skeleton?: ReactNode;
+  emptyTitle?: string;
+  emptyDetail?: ReactNode;
+  isEmpty?: (data: T) => boolean;
+}) {
+  if (state.error) {
+    return (
+      <ErrorState
+        message={state.error}
+        onRetry={state.retry}
+        hint={state.serverFault
+          ? "This failed on the server, not on your connection."
+          : undefined} />
+    );
+  }
+  if (state.busy && state.data == null) return <>{skeleton ?? <SkeletonCards />}</>;
+  if (state.data == null || (isEmpty?.(state.data) ?? false)) {
+    return <EmptyState title={emptyTitle ?? "Nothing to show."} detail={emptyDetail} />;
+  }
+  return <>{children(state.data)}</>;
+}
+
 export function ErrorState({
   message, onRetry, hint,
 }: { message: string; onRetry?: () => void; hint?: ReactNode }) {
