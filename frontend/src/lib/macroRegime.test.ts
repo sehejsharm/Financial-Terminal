@@ -1,0 +1,145 @@
+import { describe, expect, it } from "vitest";
+
+import {
+  directionOf, GROUP_ORDER, groupIndicators, groupOf, regimeNote,
+  regimeSummary, type MacroIndicator,
+} from "./macroRegime";
+
+const ind = (name: string, change: number | null = null,
+             stale = false): MacroIndicator => ({
+  name, value: 1, prior: 1, change, date: "2026-01-01", unit: "%", stale,
+});
+
+describe("groupOf", () => {
+  it("files the obvious ones correctly", () => {
+    expect(groupOf("Real GDP")).toBe("growth");
+    expect(groupOf("Industrial Production")).toBe("growth");
+    expect(groupOf("CPI (YoY)")).toBe("inflation");
+    expect(groupOf("Core PCE")).toBe("inflation");
+    expect(groupOf("Fed Funds Rate")).toBe("policy");
+    expect(groupOf("10Y Treasury Yield")).toBe("policy");
+    expect(groupOf("Nonfarm Payrolls")).toBe("labour");
+  });
+
+  it("puts the UNEMPLOYMENT RATE under labour, not policy", () => {
+    // It contains "rate", and a naive order would file joblessness under
+    // interest rates.
+    expect(groupOf("Unemployment Rate")).toBe("labour");
+    expect(groupOf("Initial Jobless Claims")).toBe("labour");
+  });
+
+  it("falls back to 'other' rather than guessing", () => {
+    expect(groupOf("Some Novel Series")).toBe("other");
+    expect(groupOf("")).toBe("other");
+  });
+
+  it("is case insensitive", () => {
+    expect(groupOf("real gdp")).toBe("growth");
+    expect(groupOf("REAL GDP")).toBe("growth");
+  });
+});
+
+describe("groupIndicators", () => {
+  it("returns groups in the declared order and omits empty ones", () => {
+    const out = groupIndicators([ind("CPI"), ind("Real GDP"), ind("Fed Funds Rate")]);
+    expect(out.map(([g]) => g)).toEqual(["growth", "inflation", "policy"]);
+    for (const [, list] of out) expect(list.length).toBeGreaterThan(0);
+  });
+
+  it("keeps every indicator exactly once", () => {
+    const inds = [ind("CPI"), ind("Real GDP"), ind("Unemployment Rate"),
+                  ind("Mystery Series")];
+    const flat = groupIndicators(inds).flatMap(([, l]) => l);
+    expect(flat).toHaveLength(inds.length);
+    expect(new Set(flat.map((i) => i.name)).size).toBe(inds.length);
+  });
+
+  it("handles an empty list", () => {
+    expect(groupIndicators([])).toEqual([]);
+  });
+
+  it("only ever emits declared groups", () => {
+    for (const [g] of groupIndicators([ind("x"), ind("CPI"), ind("GDP")])) {
+      expect(GROUP_ORDER).toContain(g);
+    }
+  });
+});
+
+describe("directionOf", () => {
+  it("rising unemployment and inflation are bad; falling is good", () => {
+    expect(directionOf("Unemployment Rate", 0.3)).toBe("bad");
+    expect(directionOf("Unemployment Rate", -0.3)).toBe("good");
+    expect(directionOf("CPI (YoY)", 0.4)).toBe("bad");
+    expect(directionOf("CPI (YoY)", -0.4)).toBe("good");
+  });
+
+  it("rising growth is good", () => {
+    expect(directionOf("Real GDP", 0.5)).toBe("good");
+    expect(directionOf("Industrial Production", -0.5)).toBe("bad");
+  });
+
+  it("REFUSES to sign a rate or an exchange rate", () => {
+    // "Rates went up" is not good or bad without a view; asserting one
+    // would colour the card on an opinion the data doesn't carry.
+    expect(directionOf("Fed Funds Rate", 0.25)).toBe("neutral");
+    expect(directionOf("10Y Treasury Yield", -0.2)).toBe("neutral");
+    expect(directionOf("USD/INR", 0.5)).toBe("neutral");
+    expect(directionOf("Anything Unknown", 1)).toBe("neutral");
+  });
+
+  it("treats a missing or zero change as neutral", () => {
+    expect(directionOf("Real GDP", null)).toBe("neutral");
+    expect(directionOf("Real GDP", 0)).toBe("neutral");
+    expect(directionOf("Real GDP", Number.NaN)).toBe("neutral");
+  });
+});
+
+describe("regimeSummary", () => {
+  it("counts directions and staleness", () => {
+    const r = regimeSummary([
+      ind("Real GDP", 0.4),                 // good
+      ind("Unemployment Rate", 0.2),        // bad
+      ind("Fed Funds Rate", 0.25),          // neutral
+      ind("CPI", -0.1, true),               // good, stale
+    ]);
+    expect(r).toEqual({ good: 2, bad: 1, neutral: 1, stale: 1, n: 4 });
+  });
+
+  it("every indicator lands in exactly one bucket", () => {
+    const inds = [ind("Real GDP", 1), ind("CPI", 1), ind("Fed Funds Rate", 1),
+                  ind("Unknown", null)];
+    const r = regimeSummary(inds);
+    expect(r.good + r.bad + r.neutral).toBe(r.n);
+  });
+
+  it("handles an empty list", () => {
+    expect(regimeSummary([])).toEqual({ good: 0, bad: 0, neutral: 0, stale: 0, n: 0 });
+  });
+});
+
+describe("regimeNote", () => {
+  it("says so when there is nothing to read", () => {
+    expect(regimeNote(regimeSummary([]))).toMatch(/No indicators/);
+  });
+
+  it("does not claim a direction when none of the series carry one", () => {
+    const note = regimeNote(regimeSummary([ind("Fed Funds Rate", 0.25)]));
+    expect(note).toMatch(/no clear directional reading|none with a clear/i);
+    expect(note).not.toMatch(/improving|deteriorating/);
+  });
+
+  it("STATES ITS OWN LIMITS rather than presenting a count as a forecast", () => {
+    const note = regimeNote(regimeSummary([ind("Real GDP", 1), ind("CPI", 1)]));
+    expect(note).toMatch(/not a forecast/i);
+    expect(note).toMatch(/magnitude/i);
+  });
+
+  it("reports the balance and mentions stale series", () => {
+    const note = regimeNote(regimeSummary([
+      ind("Real GDP", 1), ind("Industrial Production", 1),
+      ind("CPI", 1, true),
+    ]));
+    expect(note).toMatch(/improving/);
+    expect(note).toMatch(/1 of them are stale|1 of them is stale|1 of them are stale\./);
+  });
+});

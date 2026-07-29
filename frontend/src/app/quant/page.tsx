@@ -6,6 +6,7 @@ import { Backtester } from "@/components/Backtester";
 import { Shell } from "@/components/Shell";
 import { QuantSkeleton } from "@/components/Skeleton";
 import { TickerInput } from "@/components/TickerInput";
+import { RiskLab } from "@/components/quant/RiskLab";
 import { VolCone } from "@/components/VolCone";
 import { api, type Watchlist } from "@/lib/api";
 import { fmtNum } from "@/lib/utils";
@@ -93,7 +94,7 @@ type QuantResult = {
   betas: { ticker: string; b60: number; bfull: number }[] | null;
 };
 
-type Tab = "corr" | "bt" | "vol";
+type Tab = "corr" | "bt" | "vol" | "risk";
 
 export default function QuantPage() {
   const [tab, setTab] = useState<Tab>("corr");
@@ -171,8 +172,8 @@ export default function QuantPage() {
   return (
     <Shell>
       <div className="flex items-center gap-1 mb-4 border-b border-line">
-        {([["corr", "Correlation & beta"], ["bt", "Backtest"],
-           ["vol", "Volatility"]] as const).map(([id, label]) => (
+        {([["corr", "Correlation & beta"], ["risk", "Risk lab"],
+           ["bt", "Backtest"], ["vol", "Volatility"]] as const).map(([id, label]) => (
           <button key={id}
                   onClick={() => { setTab(id); setOpened((o) => ({ ...o, [id]: true })); }}
                   className={`px-3 py-2 text-xs uppercase tracking-wider border-b-2 -mb-px ${
@@ -189,6 +190,9 @@ export default function QuantPage() {
       </div>
       <div className={tab === "vol" ? "" : "hidden"}>
         {opened.vol && <VolCone seedTicker={firstTicker} />}
+      </div>
+      <div className={tab === "risk" ? "" : "hidden"}>
+        {opened.risk && <RiskLab seedTicker={firstTicker} />}
       </div>
 
       <div className={tab === "corr" ? "" : "hidden"}>

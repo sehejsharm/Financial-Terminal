@@ -1,11 +1,14 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useState, useMemo } from "react";
 
 import { DataAge } from "@/components/DataAge";
 import { MetricCard } from "@/components/MetricCard";
 import { Shell } from "@/components/Shell";
 import { api, type CalendarRow, type Indicator, type YieldCurve, type YieldPoint } from "@/lib/api";
+import {
+  directionOf, GROUP_LABEL, groupIndicators, regimeNote, regimeSummary,
+} from "@/lib/macroRegime";
 import { fmtNum } from "@/lib/utils";
 
 const COUNTRY_LABELS: Record<string, { label: string; flag: string }> = {
@@ -109,6 +112,9 @@ export default function MacroPage() {
   // Derive INVERTED/NORMAL from the same spread the badge displays (falling
   // back to curve shape only when the spread is unknown) so the two labels
   // can never contradict each other.
+  const grouped = useMemo(() => groupIndicators(inds ?? []), [inds]);
+  const regime = useMemo(() => regimeSummary(inds ?? []), [inds]);
+
   const inversion = spread10y2y != null
     ? spread10y2y < 0
     : (pts.length >= 2 ? pts[0].yield > pts[pts.length - 1].yield : false);
@@ -147,31 +153,71 @@ export default function MacroPage() {
             <div className="flex-1" />
             <DataAge at={indsAt} onRefresh={() => { loadInds(true); loadCurve(true); }} busy={busy} />
           </div>
-          <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3 mb-8">
-            {inds.map((ind) => (
-              <div key={ind.name} className="panel-2 p-3.5 flex flex-col gap-1">
-                <div className="flex items-center gap-2">
-                  <div className="label-xs flex-1">{ind.name}</div>
-                  {ind.stale && (
-                    <span className="text-[9px] px-1.5 py-0.5 rounded border border-amber/50 text-amber uppercase tracking-wider"
-                          title={`Last observation ${ind.date ?? "unknown"} — older than expected for this indicator's release cadence.`}>
-                      Stale
-                    </span>
-                  )}
-                </div>
-                <div className={`num text-xl ${ind.stale ? "text-mut" : "text-white"}`}>
-                  {ind.value != null ? `${fmtNum(ind.value, 2)}${ind.unit === "%" ? "%" : ""}` : "—"}
-                </div>
-                <div className="flex items-center justify-between text-[11px]">
-                  <span className={ind.change == null ? "text-mut" : ind.change >= 0 ? "text-green" : "text-red"}>
-                    {ind.change != null ? `${ind.change >= 0 ? "▲" : "▼"} ${Math.abs(ind.change).toFixed(2)}` : "—"}
-                  </span>
-                  <span className="text-mut">as of {ind.date ?? "—"}</span>
-                </div>
-                <div className="text-[10px] text-mut">prior {ind.prior != null ? fmtNum(ind.prior, 2) : "—"} · {ind.unit}</div>
-              </div>
-            ))}
+          {/* Regime read, before the detail — the count is honest about
+              what it is and is not. */}
+          <div className="hud mb-lift p-3 mb-4">
+            <div className="flex flex-wrap items-center gap-3">
+              <span className="label-xs">Balance of latest prints</span>
+              <span className="num text-[13px] text-green">{regime.good} improving</span>
+              <span className="num text-[13px] text-red">{regime.bad} deteriorating</span>
+              <span className="num text-[13px] text-mut">{regime.neutral} no signed direction</span>
+              {regime.stale > 0 && (
+                <span className="num text-[13px] text-amber">{regime.stale} stale</span>
+              )}
+            </div>
+            <div className="text-[10.5px] text-mut mt-1.5 leading-relaxed">
+              {regimeNote(regime)}
+            </div>
           </div>
+
+          {/* Grouped into the blocks a macro desk actually thinks in, rather
+              than one undifferentiated grid the reader has to sort. */}
+          {grouped.map(([group, list]) => (
+            <section key={group} className="mb-5">
+              <div className="flex items-center gap-2 mb-2 pb-1.5 border-b border-line2">
+                <h2 className="heading">{GROUP_LABEL[group]}</h2>
+                <span className="text-[10px] text-mut num">{list.length}</span>
+              </div>
+              <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3 mb-stagger">
+                {list.map((ind) => {
+                  const dir = directionOf(ind.name, ind.change);
+                  return (
+                    <div key={ind.name} className="hud mb-lift p-3.5 flex flex-col gap-1">
+                      <div className="flex items-center gap-2">
+                        <div className="label-xs flex-1">{ind.name}</div>
+                        {ind.stale && (
+                          <span className="text-[9px] px-1.5 py-0.5 rounded border border-amber/50 text-amber uppercase tracking-wider"
+                                title={`Last observation ${ind.date ?? "unknown"} — older than expected for this indicator's release cadence.`}>
+                            Stale
+                          </span>
+                        )}
+                      </div>
+                      <div className={`num text-xl ${ind.stale ? "text-mut" : "text-txt"}`}>
+                        {ind.value != null ? `${fmtNum(ind.value, 2)}${ind.unit === "%" ? "%" : ""}` : "—"}
+                      </div>
+                      <div className="flex items-center justify-between text-[11px]">
+                        <span title={dir === "neutral" && ind.change != null
+                          ? "This series has no inherently good or bad direction, so it isn't coloured."
+                          : undefined}
+                              className={
+                                ind.change == null ? "text-mut"
+                                  : dir === "good" ? "text-green"
+                                  : dir === "bad" ? "text-red" : "text-txt"}>
+                          {ind.change != null
+                            ? `${ind.change >= 0 ? "▲" : "▼"} ${Math.abs(ind.change).toFixed(2)}`
+                            : "—"}
+                        </span>
+                        <span className="text-mut">as of {ind.date ?? "—"}</span>
+                      </div>
+                      <div className="text-[10px] text-mut">
+                        prior {ind.prior != null ? fmtNum(ind.prior, 2) : "—"} · {ind.unit}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </section>
+          ))}
         </>
       )}
 
