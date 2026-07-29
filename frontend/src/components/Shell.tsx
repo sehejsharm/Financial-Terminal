@@ -70,6 +70,11 @@ export function Shell({ children }: { children: React.ReactNode }) {
   const router = useRouter();
   const pathname = usePathname();
   const [me, setMe] = useState<{ username: string; role: string } | null>(null);
+  // Auth is assumed good while a token exists. /auth/me only fetches the
+  // display name and role — gating the ENTIRE page on it meant a slow auth
+  // round trip showed nothing but the nav, which reads as the app hanging.
+  // Only a real rejection blanks the page.
+  const [rejected, setRejected] = useState(false);
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
   const [unseenAlerts, setUnseenAlerts] = useState(0);
@@ -129,6 +134,7 @@ export function Shell({ children }: { children: React.ReactNode }) {
           if (!alive) return;
           const status = e instanceof ApiError ? e.status : 0;
           if (status === 401 || status === 403) {
+            setRejected(true);
             token.clear();
             router.replace("/login");
             return;
@@ -342,7 +348,12 @@ export function Shell({ children }: { children: React.ReactNode }) {
           </div>
         </header>
 
-        <main className="p-3 md:p-5 animate-in min-w-0 max-w-full overflow-x-hidden">{me ? children : null}</main>
+        {/* Keyed on the route so each navigation replays the entrance — the page
+            should feel like it arrived, not like text was swapped underneath you. */}
+        <main key={pathname}
+              className="p-3 md:p-5 mb-rise min-w-0 max-w-full overflow-x-hidden">
+          {rejected ? null : children}
+        </main>
       </div>
 
       <CommandPalette open={paletteOpen} onOpenChange={setPaletteOpen} />

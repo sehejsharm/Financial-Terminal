@@ -6,6 +6,7 @@ import { useMemo } from "react";
 import { LiveNumber } from "@/components/LiveNumber";
 import { useNow } from "@/lib/clock";
 import { crossMatrix, fxDigits, FX_CCYS } from "@/lib/fxCross";
+import { heatBg } from "@/lib/heat";
 import { instrument } from "@/lib/instruments";
 import { exchange, fmtCountdown, sessionState } from "@/lib/marketSessions";
 import { useLiveTicks, useQuote, useQuotes } from "@/lib/useQuote";
@@ -63,16 +64,6 @@ export function SessionStrip() {
 
 // ── regional heatmap ──────────────────────────────────────────────────────
 
-/** Background for a move, saturating at ±2% — beyond that the exact size
- *  matters less than the direction, and a full cell reads faster. */
-function heatBg(cp: number | null): string {
-  if (cp == null) return "transparent";
-  const a = Math.min(1, Math.abs(cp) / 2);
-  return cp >= 0
-    ? `rgb(var(--c-green) / ${(0.08 + a * 0.42).toFixed(3)})`
-    : `rgb(var(--c-red) / ${(0.08 + a * 0.42).toFixed(3)})`;
-}
-
 function HeatCell({ sym }: { sym: string }) {
   const meta = instrument(sym);
   const tick = useQuote(sym);
@@ -82,7 +73,7 @@ function HeatCell({ sym }: { sym: string }) {
   return (
     <Link href={`/terminal?t=${encodeURIComponent(sym)}`}
           title={`${meta.label} — open in Terminal`}
-          className="hud px-2.5 py-2 flex flex-col justify-between min-h-[74px] relative overflow-hidden">
+          className="hud mb-lift px-2.5 py-2 flex flex-col justify-between min-h-[74px] relative overflow-hidden">
       <span aria-hidden className="absolute inset-0 pointer-events-none transition-colors duration-500"
             style={{ background: heatBg(cp) }} />
       <span className="label-xs truncate relative">{meta.short}</span>
@@ -111,7 +102,7 @@ export function Heatmap({ groups }: { groups: { title: string; syms: string[] }[
             <h2 className="heading">{g.title}</h2>
             <span className="text-[10px] text-mut num">{g.syms.length}</span>
           </div>
-          <div className="grid gap-2"
+          <div className="grid gap-2 mb-stagger"
                style={{ gridTemplateColumns: "repeat(auto-fit, minmax(136px, 1fr))" }}>
             {g.syms.map((s) => <HeatCell key={s} sym={s} />)}
           </div>

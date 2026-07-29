@@ -114,7 +114,7 @@ export function TileSection({
 
       {!section.collapsed && (
         <>
-          <div className="grid gap-2"
+          <div className="grid gap-2 mb-stagger"
                style={{
                  gridTemplateColumns: `repeat(auto-fit, minmax(${dense ? 132 : 158}px, 1fr))`,
                }}>

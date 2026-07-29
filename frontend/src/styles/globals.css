@@ -188,6 +188,76 @@ a > .hud:hover, button > .hud:hover {
   .hud-fill, .hud-bar { transition: none; }
 }
 
+/* ── Motion ───────────────────────────────────────────────────────────────
+   Every animation here is tied to something real: a panel arriving, a value
+   changing, work being in flight. None of it loops forever for decoration —
+   perpetual motion on a data screen competes with the numbers, which are the
+   thing you're actually trying to read. All of it is disabled wholesale under
+   prefers-reduced-motion at the bottom of this file. */
+
+/* Panels ease in on mount, staggered down the page so a screen assembles
+   rather than snapping into place. */
+@keyframes mbRise {
+  from { opacity: 0; transform: translateY(6px); }
+  to   { opacity: 1; transform: none; }
+}
+.mb-rise { animation: mbRise 0.28s cubic-bezier(0.22, 1, 0.36, 1) both; }
+.mb-stagger > * { animation: mbRise 0.28s cubic-bezier(0.22, 1, 0.36, 1) both; }
+.mb-stagger > *:nth-child(1) { animation-delay: 0ms; }
+.mb-stagger > *:nth-child(2) { animation-delay: 30ms; }
+.mb-stagger > *:nth-child(3) { animation-delay: 60ms; }
+.mb-stagger > *:nth-child(4) { animation-delay: 90ms; }
+.mb-stagger > *:nth-child(5) { animation-delay: 120ms; }
+.mb-stagger > *:nth-child(6) { animation-delay: 150ms; }
+.mb-stagger > *:nth-child(n+7) { animation-delay: 180ms; }
+
+/* Interactive surfaces lift slightly. transform + opacity only, so this is
+   composited and never triggers layout. */
+.mb-lift { transition: transform 0.16s ease, box-shadow 0.16s ease, border-color 0.16s ease; }
+.mb-lift:hover { transform: translateY(-1px); }
+.mb-lift:active { transform: translateY(0); }
+
+/* Buttons get a quick press response — the app should feel like it heard you
+   before the network does. */
+.btn { transition: transform 0.1s ease, background-color 0.15s ease,
+                   border-color 0.15s ease, color 0.15s ease; }
+.btn:active:not(:disabled) { transform: scale(0.97); }
+
+/* Indeterminate progress: a sweep along the top edge of whatever is loading.
+   Communicates "working" without reserving layout space like a spinner. */
+@keyframes mbLoadSweep {
+  0%   { transform: translateX(-100%); }
+  100% { transform: translateX(400%); }
+}
+.mb-loading { position: relative; overflow: hidden; }
+.mb-loading::after {
+  content: "";
+  position: absolute; top: 0; left: 0; height: 2px; width: 25%;
+  background: linear-gradient(90deg, transparent, rgb(var(--c-amber)), transparent);
+  animation: mbLoadSweep 1.1s ease-in-out infinite;
+  pointer-events: none;
+}
+
+/* A value that just changed gets a brief ring — used where a flash on the
+   number itself would be lost inside a dense table. */
+@keyframes mbPing {
+  0%   { box-shadow: 0 0 0 0 rgb(var(--c-amber) / 0.5); }
+  100% { box-shadow: 0 0 0 7px rgb(var(--c-amber) / 0); }
+}
+.mb-ping { animation: mbPing 0.7s ease-out; }
+
+/* Skeleton shimmer, so a loading block reads as pending rather than empty. */
+@keyframes mbShimmer {
+  0%   { background-position: -200% 0; }
+  100% { background-position: 200% 0; }
+}
+.mb-shimmer {
+  background-image: linear-gradient(90deg,
+    rgb(var(--c-panel2)) 0%, rgb(var(--c-line2)) 50%, rgb(var(--c-panel2)) 100%);
+  background-size: 200% 100%;
+  animation: mbShimmer 1.4s ease-in-out infinite;
+}
+
 /* ── Streaming <LiveNumber> tick flash ────────────────────────────────────
    Colours come from the --c-green/--c-red vars, so html.cb (colorblind-safe
    blue/orange) remaps the flash automatically. Respects reduced-motion. */
@@ -203,6 +273,12 @@ a > .hud:hover, button > .hud:hover {
 .live-flash-down { animation: mbFlashDown 0.6s ease-out; border-radius: 3px; }
 @media (prefers-reduced-motion: reduce) {
   .live-flash-up, .live-flash-down { animation: none; }
+  /* Honour the OS setting across the whole motion layer, not just the tick
+     flash — a user who asks for less motion means all of it. */
+  .mb-rise, .mb-stagger > *, .mb-ping, .mb-shimmer,
+  .mb-loading::after { animation: none !important; }
+  .mb-lift, .btn { transition: none !important; }
+  .mb-lift:hover, .btn:active:not(:disabled) { transform: none !important; }
 }
 
 /* ── value-chain: "a headline just landed on this node" pulse ─────────────

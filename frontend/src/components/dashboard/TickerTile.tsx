@@ -4,6 +4,7 @@ import Link from "next/link";
 import { ChevronLeft, ChevronRight, X } from "lucide-react";
 
 import { LiveNumber } from "@/components/LiveNumber";
+import { heatBg, heatBorder } from "@/lib/heat";
 import { instrument } from "@/lib/instruments";
 import { useQuote } from "@/lib/useQuote";
 import { curForTicker, fmtNum } from "@/lib/utils";
@@ -43,10 +44,16 @@ export function TickerTile({
 
   const body = (
     <div data-testid={`tile-${sym}`}
-         className={`hud relative overflow-hidden group h-full
-                     ${has ? "hover:hud-glow" : ""} transition-shadow
+         style={{ borderColor: heatBorder(cp) }}
+         className={`hud relative overflow-hidden group h-full transition-all duration-300
+                     ${has ? "hover:-translate-y-[1px] hover:hud-glow" : ""}
                      ${dense ? "px-2.5 py-2" : "px-3 py-2.5"}`}>
-      <div className="flex items-center gap-1.5">
+      {/* Same heat shading as the Global board, so a 1.4% move looks the
+          same wherever you meet it. */}
+      <span aria-hidden
+            className="absolute inset-0 pointer-events-none transition-colors duration-500"
+            style={{ background: heatBg(cp) }} />
+      <div className="flex items-center gap-1.5 relative">
         <span className={`label-xs truncate flex-1 min-w-0 ${dense ? "text-[9.5px]" : ""}`}
               title={meta.label}>
           {meta.short}
@@ -60,7 +67,7 @@ export function TickerTile({
       {/* Price left, change right on ONE baseline. A tile stretched wide by
           the grid then reads as a deliberate row rather than a narrow card
           with a gap bolted onto its right-hand side. */}
-      <div className="flex items-baseline justify-between gap-2 mt-1.5 min-w-0">
+      <div className="flex items-baseline justify-between gap-2 mt-1.5 min-w-0 relative">
         <span className={`num text-txt tracking-tight leading-none truncate
                           ${dense ? "text-[15px]" : "text-[19px]"}`}>
           {has

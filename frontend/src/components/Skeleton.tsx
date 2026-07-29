@@ -5,7 +5,7 @@ import { cn } from "@/lib/utils";
 /** Shimmer placeholder block — replaces bare "Loading…" text states so each
  *  widget's final layout is visible while data arrives. */
 export function Skeleton({ className }: { className?: string }) {
-  return <div className={cn("animate-pulse rounded bg-panel2", className)} />;
+  return <div className={cn("mb-shimmer rounded bg-panel2", className)} />;
 }
 
 /** A row of metric-card placeholders (dashboard / terminal snapshot grids). */
