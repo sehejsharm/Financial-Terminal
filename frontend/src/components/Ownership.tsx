@@ -7,10 +7,10 @@ import { useAsync } from "@/lib/useAsync";
 import { humanNumber } from "@/lib/utils";
 
 export function Ownership({ ticker }: { ticker: string }) {
-  const { data, error, busy, retry } = useAsync<Own>(() => api.ownership(ticker), [ticker]);
+  const { data, error, busy, retry, serverFault } = useAsync<Own>(() => api.ownership(ticker), [ticker]);
 
   if (busy) return <PanelLoading label="Loading ownership…" />;
-  if (error) return <PanelError error={error} retry={retry} />;
+  if (error) return <PanelError error={error} retry={retry} serverFault={serverFault} />;
   if (!data) return null;
 
   const empty = data.major_holders.rows.length === 0

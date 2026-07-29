@@ -8,10 +8,10 @@ import { useAsync } from "@/lib/useAsync";
 import { curSymbol, fmtNum } from "@/lib/utils";
 
 export function StreetRatings({ ticker, currency }: { ticker: string; currency: string }) {
-  const { data, error, busy, retry } = useAsync<Ratings>(() => api.ratings(ticker), [ticker]);
+  const { data, error, busy, retry, serverFault } = useAsync<Ratings>(() => api.ratings(ticker), [ticker]);
 
   if (busy) return <PanelLoading label="Loading street ratings…" />;
-  if (error) return <PanelError error={error} retry={retry} />;
+  if (error) return <PanelError error={error} retry={retry} serverFault={serverFault} />;
   if (!data) return null;
 
   const cur = curSymbol(currency);

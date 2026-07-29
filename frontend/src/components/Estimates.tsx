@@ -56,10 +56,10 @@ function EstTable({ title, block, cur }: { title: string; block?: Record<string,
 }
 
 export function EstimatesView({ ticker, currency }: { ticker: string; currency: string }) {
-  const { data, error, busy, retry } = useAsync<Est>(() => api.estimates(ticker), [ticker]);
+  const { data, error, busy, retry, serverFault } = useAsync<Est>(() => api.estimates(ticker), [ticker]);
 
   if (busy) return <PanelLoading label="Loading estimates…" />;
-  if (error) return <PanelError error={error} retry={retry} />;
+  if (error) return <PanelError error={error} retry={retry} serverFault={serverFault} />;
   if (!data) return null;
 
   const pt = data.price_targets;

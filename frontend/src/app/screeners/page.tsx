@@ -7,6 +7,7 @@ import { DataAge } from "@/components/DataAge";
 import { Shell } from "@/components/Shell";
 import { StatusBadge } from "@/components/StatusBadge";
 import { Pager, SortableTh, TableToolbar, useTableControls } from "@/components/tableControls";
+import { ScrollX } from "@/components/ScrollX";
 import { ScreenBuilder } from "@/components/screeners/ScreenBuilder";
 import { PageHeader } from "@/components/ui";
 import { api, type ScreenClause, type ScreenResult } from "@/lib/api";
@@ -207,7 +208,11 @@ export default function ScreenersPage() {
               );
             })}
           </div>
-          <div className="panel overflow-auto hidden md:block">
+          {/* ScrollX, not a bare overflow container: a screener result is
+              twenty-odd columns wide and the ones past the edge were simply
+              invisible — no scrollbar rendered until you happened to drag.
+              ScrollX fades the edge and says "scroll →" while there is more. */}
+          <ScrollX className="panel hidden md:block">
             <table className="w-full text-xs">
               <thead className="text-mut uppercase tracking-wider">
                 <tr className="border-b border-line">
@@ -235,7 +240,7 @@ export default function ScreenersPage() {
                 ))}
               </tbody>
             </table>
-          </div>
+          </ScrollX>
           <Pager ctl={ctl} />
         </>
       )}

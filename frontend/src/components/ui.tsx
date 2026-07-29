@@ -170,6 +170,44 @@ export function Stat({
   );
 }
 
+/**
+ * Hover/focus explainer.
+ *
+ * A `title` attribute can hold one sentence and can't be styled, reached by
+ * keyboard reliably, or read on a touch screen. Anything that needs to
+ * explain what a number MEANS — a status badge, a Bloomberg function code,
+ * a model assumption — needs more room than that.
+ */
+export function InfoTip({
+  children, title, body, align = "left", width = 280,
+}: {
+  children: ReactNode;
+  title?: ReactNode;
+  body: ReactNode;
+  align?: "left" | "right";
+  width?: number;
+}) {
+  return (
+    <span className="relative inline-flex group/tip">
+      <button type="button"
+              className="inline-flex items-center gap-1 cursor-help text-left"
+              // Focusable so the explanation is reachable without a mouse.
+              aria-label={typeof title === "string" ? title : undefined}>
+        {children}
+      </button>
+      <span role="tooltip"
+            style={{ width }}
+            className={`pointer-events-none absolute top-full mt-1.5 z-50 opacity-0
+                        group-hover/tip:opacity-100 group-focus-within/tip:opacity-100
+                        transition-opacity panel-2 shadow-panel p-2.5 max-w-[86vw]
+                        ${align === "right" ? "right-0" : "left-0"}`}>
+        {title && <span className="label-xs block mb-1">{title}</span>}
+        <span className="block text-[11px] text-txt leading-relaxed">{body}</span>
+      </span>
+    </span>
+  );
+}
+
 export function Note({ children }: { children: ReactNode }) {
   return (
     <div className="text-[10.5px] text-mut leading-relaxed max-w-4xl">{children}</div>

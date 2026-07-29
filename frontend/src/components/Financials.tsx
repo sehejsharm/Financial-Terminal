@@ -23,7 +23,7 @@ export function Financials({ ticker, currency }: { ticker: string; currency: str
   // Set before retry() to force a cache-bypassing reload (DataAge refresh).
   const freshRef = useRef(false);
 
-  const { data: meta, error, busy, retry } = useAsync<{ data: Statement; fetchedAt: number | null }>(
+  const { data: meta, error, busy, retry, serverFault } = useAsync<{ data: Statement; fetchedAt: number | null }>(
     () => {
       const fresh = freshRef.current;
       freshRef.current = false;
@@ -59,7 +59,7 @@ export function Financials({ ticker, currency }: { ticker: string; currency: str
 
       {busy && <PanelLoading label="Loading statement…" />}
 
-      {error && !busy && <PanelError error={error} retry={retry} />}
+      {error && !busy && <PanelError error={error} retry={retry} serverFault={serverFault} />}
 
       {data && !busy && data.rows.length === 0 && (
         <div className="panel-2 p-4 text-mut text-sm">

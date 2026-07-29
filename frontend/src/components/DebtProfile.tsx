@@ -11,12 +11,12 @@ import { curSymbol, fmtNum, humanNumber } from "@/lib/utils";
  * Pulls total debt from capital-structure and ratios from the snapshot.
  */
 export function DebtProfile({ ticker, snap }: { ticker: string; snap: Snapshot | null }) {
-  const { data: cap, error, busy, retry } = useAsync<CapStructure>(
+  const { data: cap, error, busy, retry, serverFault } = useAsync<CapStructure>(
     () => api.capitalStructure(ticker), [ticker],
   );
 
   if (busy) return <PanelLoading label="Loading debt profile…" />;
-  if (error) return <PanelError error={error} retry={retry} />;
+  if (error) return <PanelError error={error} retry={retry} serverFault={serverFault} />;
 
   const cur = curSymbol((cap?.currency || (snap?.currency as string)) ?? "USD");
   const de = snap?.debt_to_equity as number | undefined;

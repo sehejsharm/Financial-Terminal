@@ -8,12 +8,12 @@ import { curSymbol, humanNumber } from "@/lib/utils";
 
 /** Capital stack: debt / cash / equity with a proportional bar (enterprise value). */
 export function CapitalStructureView({ ticker }: { ticker: string }) {
-  const { data, error, busy, retry } = useAsync<CapStructure>(
+  const { data, error, busy, retry, serverFault } = useAsync<CapStructure>(
     () => api.capitalStructure(ticker), [ticker],
   );
 
   if (busy) return <PanelLoading label="Loading capital structure…" />;
-  if (error) return <PanelError error={error} retry={retry} />;
+  if (error) return <PanelError error={error} retry={retry} serverFault={serverFault} />;
   if (!data) return null;
 
   if (data.market_cap == null && data.total_debt == null && data.cash == null) {

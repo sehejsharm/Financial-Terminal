@@ -9,9 +9,11 @@ import {
 import { ContagionPathFinder } from "@/components/ContagionPath";
 import { DataAge } from "@/components/DataAge";
 import { Markdown } from "@/components/Markdown";
+import { PanelError, PanelLoading } from "@/components/PanelStates";
 import { StatusBadge } from "@/components/StatusBadge";
 import {
-  api, type ChainNode, type Quote, type ValueChain, type VcHistoryEntry,
+  api, ApiError, type ChainNode, type Quote, type ValueChain,
+  type VcHistoryEntry,
   type VcReportCount,
 } from "@/lib/api";
 import {
@@ -689,6 +691,7 @@ export function ValueChainMap({ ticker }: { ticker: string }) {
   const [pinnedAt, setPinnedAt] = useState<number | null>(null);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
+  const [errServerFault, setErrServerFault] = useState(false);
   const [selected, setSelected] = useState<Selected | null>(null);
   const svgRef = useRef<SVGSVGElement | null>(null);
 
@@ -758,7 +761,8 @@ export function ValueChainMap({ ticker }: { ticker: string }) {
 
   const load = useCallback((t: string, refresh = false) => {
     const reqId = ++loadReqRef.current;
-    setBusy(true); setErr(null); setData(null); setSelected(null); setPinnedAt(null);
+    setBusy(true); setErr(null); setErrServerFault(false);
+    setData(null); setSelected(null); setPinnedAt(null);
     setSnapshotTs(null); setCompareTs(null); setView({ ...DEFAULT_VIEW });
     setPlaying(false); setPlayIdx(0); framedRef.current = null;
     const pin = !refresh && loadPin(t);
@@ -768,7 +772,11 @@ export function ValueChainMap({ ticker }: { ticker: string }) {
     }
     api.valueChain(t, refresh)
       .then((m) => { if (loadReqRef.current === reqId) { setData(m.data); setFetchedAt(m.fetchedAt); } })
-      .catch((e) => { if (loadReqRef.current === reqId) setErr(e?.detail || "Value-chain mapping failed."); })
+      .catch((e) => {
+        if (loadReqRef.current !== reqId) return;
+        setErr(e?.detail || "Value-chain mapping failed.");
+        setErrServerFault(e instanceof ApiError ? e.serverFault : false);
+      })
       .finally(() => { if (loadReqRef.current === reqId) setBusy(false); });
     api.vcHistory(t)
       .then((h) => { if (loadReqRef.current === reqId) setHistory(h); })
@@ -990,8 +998,26 @@ export function ValueChainMap({ ticker }: { ticker: string }) {
     ]));
   }, [layout]);
 
-  if (busy) return <div className="text-mut text-xs">Mapping value chain (AI)…</div>;
-  if (err) return <div className="text-red text-sm">{err}</div>;
+  if (busy) return <PanelLoading label="Mapping value chain (AI)…" rows={5} />;
+  if (err) {
+    // The failure message names Regenerate as the recovery, so Regenerate
+    // has to be ON SCREEN. It used to live only in the header that renders
+    // when a map exists — telling the user to click a button that wasn't
+    // there.
+    return (
+      <PanelError
+        error={err}
+        serverFault={errServerFault}
+        retry={() => load(current)}
+        action={
+          <button onClick={() => load(current, true)}
+                  className="btn-primary text-xs"
+                  title="Discard the cached map and ask the model again">
+            Regenerate
+          </button>
+        } />
+    );
+  }
   if (!data || !layout) return null;
 
   const { suppliers, customers, competitors } = layout;

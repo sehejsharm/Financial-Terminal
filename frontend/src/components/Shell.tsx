@@ -8,6 +8,7 @@ import {
   LogOut, Menu, Moon, Newspaper, Search, Shield, Sigma, Sun, Terminal, Waves, X,
 } from "lucide-react";
 
+import { InfoTip } from "@/components/ui";
 import { ApiError, api, token, type AlertEvent, type Quote } from "@/lib/api";
 import { useLiveStatus } from "@/lib/useLive";
 import { useStreamStatus } from "@/lib/useQuote";
@@ -37,9 +38,38 @@ function StreamBadge({ polling }: { polling: boolean }) {
       : { label: "STATIC", cls: "text-mut", tip: "No auto-refresh on this page — data loads on demand." };
 
   return (
-    <div className="hidden sm:flex items-center gap-2 text-[11px] text-mut" title={s.tip}>
-      <Activity size={12} className={s.cls} />
-      {s.label}
+    <div className="hidden sm:flex items-center gap-2 text-[11px] text-mut">
+      <InfoTip
+        align="right"
+        width={330}
+        title="What this badge measures"
+        body={
+          <>
+            <span className="block mb-1.5">{s.tip}</span>
+            <span className="block mb-1.5">
+              It describes <strong className="text-amber">this page&apos;s data
+              connection as a whole</strong> — not one ticker. A single symbol
+              can be stale while the socket is healthy; tiles show their own
+              age for that.
+            </span>
+            <span className="block">
+              <strong className="text-green">LIVE</strong> ticks are arriving
+              (or panels auto-refresh).{" "}
+              <strong className="text-amber">RECONNECTING</strong> the socket
+              dropped and is backing off.{" "}
+              <strong className="text-red">STALE</strong> connected, but
+              nothing has arrived recently.{" "}
+              <strong>CLOSED</strong> the market is shut, so these are the
+              last session&apos;s values.{" "}
+              <strong>STATIC</strong> this page doesn&apos;t auto-refresh at
+              all.
+            </span>
+          </>
+        }
+      >
+        <Activity size={12} className={s.cls} />
+        <span>{s.label}</span>
+      </InfoTip>
     </div>
   );
 }
@@ -230,8 +260,11 @@ export function Shell({ children }: { children: React.ReactNode }) {
               : "text-mut hover:text-txt hover:bg-panel border border-transparent",
           )}
         >
-          <Icon size={14} strokeWidth={2} />
-          {label}
+          <Icon size={14} strokeWidth={2} className="shrink-0" />
+          {/* nowrap + truncate: the wide letter-spacing pushed longer
+              labels onto a second line in the ~290px mobile drawer, so the
+              nav read as a ragged list of one- and two-line rows. */}
+          <span className="truncate whitespace-nowrap">{label}</span>
         </Link>
       );
     });
@@ -285,29 +318,39 @@ export function Shell({ children }: { children: React.ReactNode }) {
       <div className="flex flex-col min-w-0">
         {/* Top bar */}
         <header className="border-b border-line bg-bg/80 backdrop-blur sticky top-0 z-30">
-          <div className="flex items-center gap-3 px-3 md:px-5 py-2.5">
-            <button onClick={() => setMenuOpen(true)} className="md:hidden text-mut hover:text-txt">
+          <div className="flex items-center gap-2 md:gap-3 px-2.5 md:px-5 py-2.5 min-w-0">
+            <button onClick={() => setMenuOpen(true)} aria-label="Open navigation"
+                    className="md:hidden text-mut hover:text-txt shrink-0">
               <Menu size={18} />
             </button>
+            {/* On a phone this takes the space that's left rather than
+                asking for 420px and being squeezed. The old version let the
+                search ICON shrink too (flex items shrink by default), so at
+                390px the control rendered as an empty box with no icon and
+                no placeholder — it looked broken rather than narrow. */}
             <button
               onClick={() => setPaletteOpen(true)}
-              className="flex items-center gap-2 px-3 py-1.5 rounded border border-line bg-panel hover:border-amber text-sm text-mut transition-colors w-[420px] max-w-full min-w-0"
+              aria-label="Search ticker, function, or run a command"
+              className="flex items-center gap-2 px-2.5 sm:px-3 py-1.5 rounded border border-line bg-panel hover:border-amber text-sm text-mut transition-colors flex-1 md:flex-none md:w-[420px] min-w-0"
             >
-              <Search size={14} />
-              <span className="flex-1 text-left truncate">Search ticker, function, or run command…</span>
-              <kbd className="hidden md:inline text-[10px] px-1.5 py-0.5 rounded border border-line2 text-mut">⌘K</kbd>
+              <Search size={14} className="shrink-0" />
+              <span className="flex-1 text-left truncate">
+                <span className="sm:hidden">Search…</span>
+                <span className="hidden sm:inline">Search ticker, function, or run command…</span>
+              </span>
+              <kbd className="hidden md:inline text-[10px] px-1.5 py-0.5 rounded border border-line2 text-mut shrink-0">⌘K</kbd>
             </button>
-            <div className="flex-1" />
-            <button onClick={toggleTheme} className="text-mut hover:text-amber"
+            <div className="hidden md:block flex-1" />
+            <button onClick={toggleTheme} className="text-mut hover:text-amber shrink-0"
                     title={lightTheme ? "Switch to dark theme" : "Switch to light theme"}>
               {lightTheme ? <Moon size={15} /> : <Sun size={15} />}
             </button>
             <button onClick={toggleCb}
-                    className={cbPalette ? "text-amber" : "text-mut hover:text-amber"}
+                    className={`shrink-0 ${cbPalette ? "text-amber" : "text-mut hover:text-amber"}`}
                     title={cbPalette ? "Colorblind-safe palette ON (blue=up, orange=down)" : "Enable colorblind-safe gain/loss colors"}>
               <Eye size={15} />
             </button>
-            <div className="relative">
+            <div className="relative shrink-0">
               <button onClick={toggleBell} className="relative text-mut hover:text-amber" title="Notifications">
                 <Bell size={15} />
                 {unseenAlerts > 0 && (

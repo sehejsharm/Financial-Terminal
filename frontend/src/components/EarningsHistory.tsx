@@ -6,10 +6,10 @@ import { api, type Frame } from "@/lib/api";
 import { useAsync } from "@/lib/useAsync";
 
 export function EarningsHistory({ ticker }: { ticker: string }) {
-  const { data, error, busy, retry } = useAsync<Frame>(() => api.earningsHistory(ticker), [ticker]);
+  const { data, error, busy, retry, serverFault } = useAsync<Frame>(() => api.earningsHistory(ticker), [ticker]);
 
   if (busy) return <PanelLoading label="Loading earnings history…" />;
-  if (error) return <PanelError error={error} retry={retry} />;
+  if (error) return <PanelError error={error} retry={retry} serverFault={serverFault} />;
 
   // Find actual vs estimate columns for a beat/miss bar (case-insensitive).
   const cols = data?.columns ?? [];

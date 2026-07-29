@@ -1,6 +1,7 @@
 "use client";
 
-import { ExternalLink } from "lucide-react";
+import { useEffect, useState } from "react";
+import { ChevronDown, ChevronUp, ExternalLink } from "lucide-react";
 
 import { DataAge } from "@/components/DataAge";
 import { LiveNumber } from "@/components/LiveNumber";
@@ -33,6 +34,8 @@ function Field({ label, children, title, className = "" }: {
     </div>
   );
 }
+
+const COMPACT_KEY = "mb_quote_header_compact";
 
 /** Where the price sits between two bounds, as a labelled track. */
 function RangeBar({ low, high, at, label, lowLabel, highLabel }: {
@@ -107,6 +110,23 @@ export function QuoteHeader({
   const tick = useQuote(ticker);
   const now = useNow();
 
+  // The stat strip repeats on every one of the sixteen screens, and on a
+  // laptop it pushed the screen's own content below the fold. It collapses
+  // to the price line, and the choice is remembered — a daily user sets it
+  // once. Everything in the strip is still one click away, and the price,
+  // the change and the session state never collapse.
+  const [compact, setCompact] = useState(false);
+  useEffect(() => {
+    try { setCompact(localStorage.getItem(COMPACT_KEY) === "1"); } catch { /* ignore */ }
+  }, []);
+  function toggleCompact() {
+    setCompact((c) => {
+      const next = !c;
+      try { localStorage.setItem(COMPACT_KEY, next ? "1" : "0"); } catch { /* ignore */ }
+      return next;
+    });
+  }
+
   const price = tick?.ltp ?? fallbackPrice;
   const cp = tick?.chgPct ?? fallbackCp;
   const up = cp != null && cp >= 0;
@@ -178,8 +198,21 @@ export function QuoteHeader({
             )}
           </div>
           <div className="text-lg font-bold tracking-tight truncate mt-0.5" title={name}>{name}</div>
-          <div className="text-mut text-[11px]">
-            {(snap?.sector as string) || "—"} · {(snap?.industry as string) || "—"}
+          <div className="text-mut text-[11px] flex items-center gap-2 flex-wrap">
+            <span className="truncate">
+              {(snap?.sector as string) || "—"} · {(snap?.industry as string) || "—"}
+            </span>
+            <button onClick={toggleCompact}
+                    aria-expanded={!compact}
+                    title={compact
+                      ? "Show the full stat strip (prev close, bid/ask, volume, ranges)"
+                      : "Collapse the stat strip — it repeats on every screen"}
+                    className="inline-flex items-center gap-1 text-mut hover:text-amber
+                               border border-line2 rounded px-1.5 py-[1px] shrink-0
+                               text-[10px] uppercase tracking-wider">
+              {compact ? <ChevronDown size={10} /> : <ChevronUp size={10} />}
+              {compact ? "Stats" : "Compact"}
+            </button>
           </div>
         </div>
 
@@ -204,7 +237,8 @@ export function QuoteHeader({
       </div>
 
       {/* ── the stat strip ── */}
-      <div className="flex flex-wrap items-stretch border-t border-line2">
+      <div className={`flex-wrap items-stretch border-t border-line2 ${
+        compact ? "hidden" : "flex"}`}>
         <Field label="Prev close" title="Previous session's closing price">
           {prevClose != null ? fmtNum(prevClose, 2) : <span className="text-mut">—</span>}
         </Field>

@@ -459,9 +459,18 @@ export default function PortfolioPage() {
             <div className="panel-2 p-4 flex flex-col gap-2">
               {(data.sectors ?? []).map((s) => (
                 <div key={s.sector}>
-                  <div className="flex justify-between text-xs mb-0.5">
-                    <span>{s.sector}</span>
-                    <span className="num text-mut">{fmtNum(s.weight, 1)}%</span>
+                  {/* min-w-0 + truncate on the label, shrink-0 on the
+                      number. Without them a long sector name ("Consumer
+                      Defensive") could not shrink, so at narrow widths it
+                      ran into the percentage instead of ellipsing. The
+                      number is the part you cannot afford to lose. */}
+                  <div className="flex items-baseline gap-2 text-xs mb-0.5">
+                    <span className="flex-1 min-w-0 truncate" title={s.sector}>
+                      {s.sector}
+                    </span>
+                    <span className="num text-mut shrink-0 whitespace-nowrap">
+                      {fmtNum(s.weight, 1)}%
+                    </span>
                   </div>
                   <div className="h-1.5 bg-panel rounded overflow-hidden">
                     <div className="h-full bg-amber/70" style={{ width: `${Math.min(100, s.weight)}%` }} />
