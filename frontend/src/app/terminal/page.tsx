@@ -49,6 +49,8 @@ function TerminalInner() {
   const initialTicker = (sp.get("t") || "RELIANCE.NS").toUpperCase();
 
   const [ticker, setTicker] = useState(initialTicker);
+  /** Wraps the command line so "/" can focus it without a brittle selector. */
+  const cmdRef = useRef<HTMLDivElement>(null);
   const [fn, setFn] = useState<Fn>("Snapshot");
 
   // Keep state in sync with the URL: in-app navigations (value-chain
@@ -212,6 +214,21 @@ function TerminalInner() {
   // ── keyboard ──
   // "/" focuses the command line, "[" / "]" cycle screens. Ignored while the
   // user is typing anywhere, so they never eat a character.
+  //
+  // Registered ONCE. The handler reads the current function and callback
+  // through refs rather than closing over them, because re-running this
+  // effect on every state change tore the listener down and re-added it —
+  // and a keystroke landing in that window was silently dropped. That was a
+  // real source of "I pressed it and nothing happened".
+  // Flipped once the listener above is attached. The markup is server
+  // rendered, so a visible rail button is NOT evidence that the shortcuts are
+  // live — a keystroke sent between paint and hydration goes nowhere. This is
+  // the signal the e2e suite waits on instead of guessing with a sleep.
+  const [kbReady, setKbReady] = useState(false);
+  const fnRef = useRef(fn);
+  const pickRef = useRef(pickFn);
+  useEffect(() => { fnRef.current = fn; pickRef.current = pickFn; }, [fn, pickFn]);
+
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
       const el = e.target as HTMLElement | null;
@@ -220,16 +237,19 @@ function TerminalInner() {
       if (typing || e.metaKey || e.ctrlKey || e.altKey) return;
       if (e.key === "/") {
         e.preventDefault();
-        document.querySelector<HTMLInputElement>('input[placeholder^="Symbol, function"]')?.focus();
+        // A ref, not a placeholder-prefix query: the placeholder is copy and
+        // will change, and focus management should not depend on it.
+        cmdRef.current?.querySelector("input")?.focus();
       } else if (e.key === "[") {
-        e.preventDefault(); pickFn(stepFn(fn, -1));
+        e.preventDefault(); pickRef.current(stepFn(fnRef.current, -1));
       } else if (e.key === "]") {
-        e.preventDefault(); pickFn(stepFn(fn, 1));
+        e.preventDefault(); pickRef.current(stepFn(fnRef.current, 1));
       }
     }
     window.addEventListener("keydown", onKey);
+    setKbReady(true);
     return () => window.removeEventListener("keydown", onKey);
-  }, [fn, pickFn]);
+  }, []);
 
   function commitTicker(v: string, withFn?: string) {
     const t = v.trim().toUpperCase();
@@ -257,9 +277,12 @@ function TerminalInner() {
     <Shell>
       {/* Command line: a symbol, a mnemonic, or both ("TCS.NS FA"). */}
       <div className="flex flex-wrap items-center gap-2 mb-3">
-        <div className="flex-1 min-w-[260px]">
+        <div ref={cmdRef} className="flex-1 min-w-[260px]"
+             data-shortcuts={kbReady ? "live" : "pending"}>
+          {/* No key={ticker}: TickerInput already syncs its text from the
+              value prop, and remounting it on every ticker change threw away
+              focus — and would discard a half-typed command. */}
           <TickerInput
-            key={ticker}
             value={ticker}
             onCommit={runEntry}
             commitOnBlur={false}  /* commit = navigation here; keep it explicit */

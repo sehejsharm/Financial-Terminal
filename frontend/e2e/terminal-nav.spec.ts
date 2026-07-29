@@ -32,6 +32,15 @@ test.beforeEach(async ({ page }) => {
 const cmd = (page: import("@playwright/test").Page) =>
   page.locator('input[placeholder^="Symbol, function"]');
 
+/**
+ * Keyboard shortcuts live on a window listener attached after hydration. The
+ * rail is server rendered, so waiting for a button to be visible proves
+ * nothing about whether a keystroke will be heard — pressing before the
+ * listener exists was the whole source of the intermittent failures here.
+ */
+const shortcutsLive = (page: import("@playwright/test").Page) =>
+  expect(page.locator('[data-shortcuts="live"]')).toBeAttached({ timeout: 30_000 });
+
 test("every function is reachable from the rail without opening a menu", async ({ page }) => {
   // The old UI hid 16 screens behind a <select>.
   for (const code of ["DES", "GIP", "FA", "EE", "CS", "DDIS", "ERN",
@@ -93,6 +102,7 @@ test("command line: a plain symbol navigates and keeps the current screen",
   });
 
 test("[ and ] cycle screens", async ({ page }) => {
+  await shortcutsLive(page);
   await expect(page.getByRole("button", { name: "DES", exact: true }))
     .toHaveAttribute("aria-current", "page");
   await page.locator("body").press("]");
@@ -104,11 +114,13 @@ test("[ and ] cycle screens", async ({ page }) => {
 });
 
 test("'/' focuses the command line", async ({ page }) => {
+  await shortcutsLive(page);
   await page.locator("body").press("/");
   await expect(cmd(page)).toBeFocused();
 });
 
 test("shortcuts do NOT fire while typing in a field", async ({ page }) => {
+  await shortcutsLive(page);
   await cmd(page).click();
   await cmd(page).fill("");
   await cmd(page).type("]");

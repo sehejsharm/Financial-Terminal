@@ -6,10 +6,17 @@ test("create and delete a price alert; test-alert reports a result", async ({ pa
   await login(page);
   await page.goto("/alerts");
 
-  await page.getByPlaceholder("RELIANCE.NS").fill("RELIANCE.NS");
+  // Commit the symbol with Enter rather than relying on the click to blur it
+  // first: the form reads committed state, and leaning on event ordering
+  // between blur and click is what made this flake under a loaded backend.
+  const sym = page.getByPlaceholder("RELIANCE.NS");
+  await sym.fill("RELIANCE.NS");
+  await sym.press("Enter");
+  await expect(sym).toHaveValue("RELIANCE.NS");
   await page.locator('input[type="number"]').first().fill("1");
   await page.getByRole("button", { name: "Create alert" }).click();
-  await expect(page.getByText("RELIANCE.NS").first()).toBeVisible();
+  // The POST queues behind whatever else the single-worker backend is doing.
+  await expect(page.getByText("RELIANCE.NS").first()).toBeVisible({ timeout: 30_000 });
 
   // Delivery test always reports SOMETHING (sent/failed/no channels).
   await page.getByRole("button", { name: "Send test alert" }).click();

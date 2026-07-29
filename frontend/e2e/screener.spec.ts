@@ -18,7 +18,7 @@ test("preset screen runs: rows or an honest empty note", async ({ page }) => {
       // Providers unreachable (CI) → the honest failure line still counts
       // as "the page responded, didn't blank".
       .or(page.getByText(/screen failed/i))
-      .or(page.getByText(/timed out|network error/i)),
+      .or(page.getByText(/timed out|network error/i)).first(),
   ).toBeVisible({ timeout: 90_000 });
 });
 
@@ -39,6 +39,6 @@ test("custom screen builder renders and accepts conditions", async ({ page }) =>
       .or(page.getByText(/no matches/i))
       .or(page.getByText(/matched/i))
       .or(page.getByText(/screen failed/i))
-      .or(page.getByText(/timed out|network error/i)),
+      .or(page.getByText(/timed out|network error/i)).first(),
   ).toBeVisible({ timeout: 90_000 });
 });
