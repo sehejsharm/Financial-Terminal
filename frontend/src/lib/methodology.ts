@@ -489,6 +489,45 @@ export const METHODOLOGY: Record<string, Methodology> = {
     ],
   },
 
+  wireDigest: {
+    kind: "computed",
+    what: "Which listed companies the wire is writing about, what subject keeps "
+      + "recurring, and whether the feeds are actually reporting.",
+    formula: "whole-word alias matching against a fixed universe · two-word "
+      + "phrases counted once per story",
+    inputs: [
+      "The headlines and summaries already on the page — no extra request, no "
+        + "model.",
+      "A fixed universe of the NIFTY 50 plus a few frequently written-about "
+        + "listings, each with the aliases headlines actually use (“HDFC Bank”, "
+        + "not the registered name).",
+    ],
+    assumptions: [
+      "A company is mentioned when a headline contains its name or a known "
+        + "alias as whole words. Substring matching would tag “Titan” inside "
+        + "“titanium”.",
+      "A recurring two-word phrase names a subject. Single words are too "
+        + "blunt — “rate” covers rate cut, rate hike and exchange rate — and "
+        + "longer phrases are too sparse to recur.",
+    ],
+    limits: [
+      "The universe is FIXED. A company outside it is never tagged, so the "
+        + "counts are a floor rather than a census of what is in the news.",
+      "Group words (“Tata”, “Adani”, “Bajaj”) are deliberately not matched on "
+        + "their own — each names several listed companies, and pinning a group "
+        + "story to one of them fabricates a link.",
+      "Themes describe what is being written about, which is not the same as "
+        + "what matters. Coverage volume follows price moves that have already "
+        + "happened.",
+      "Counts are per story after clustering, so a syndicated piece is one "
+        + "observation — but two outlets covering the same event independently "
+        + "still count twice.",
+      "A silent feed is reported because a quiet page with sources down looks "
+        + "identical to a quiet market. It cannot tell you WHY a feed is "
+        + "silent.",
+    ],
+  },
+
   newsSentiment: {
     kind: "ai",
     what: "A language model's read on the tone of each headline, averaged.",

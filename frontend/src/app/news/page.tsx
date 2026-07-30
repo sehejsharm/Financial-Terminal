@@ -7,6 +7,7 @@ import { News } from "@/components/News";
 import { Shell } from "@/components/Shell";
 import { TickerInput } from "@/components/TickerInput";
 import { NewsFeed } from "@/components/news/NewsFeed";
+import { WireDigest } from "@/components/news/WireDigest";
 import { ErrorState, Loading, PageHeader, Tabs, type TabDef } from "@/components/ui";
 import { api, type NewsItem } from "@/lib/api";
 
@@ -24,6 +25,8 @@ export default function NewsPage() {
   const [err, setErr] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [ticker, setTicker] = useState("RELIANCE.NS");
+  // Lifted out of the feed so the digest's theme chips can drive it.
+  const [query, setQuery] = useState("");
 
   const load = useCallback(() => {
     setBusy(true); setErr(null);
@@ -53,11 +56,18 @@ export default function NewsPage() {
           {err && <ErrorState message={err} onRetry={load} />}
           {!err && !items && <Loading what="headlines" />}
           {items && (
-            <NewsFeed
-              items={items}
-              emptyTitle="No headlines available right now."
-              emptyDetail="Every configured feed returned nothing. That is usually
-                           the network rather than a quiet news day." />
+            <>
+              {/* What the day is about, before the hundred and twenty lines
+                  the reader would otherwise scan to work it out. */}
+              <WireDigest items={items} onPickTheme={setQuery} />
+              <NewsFeed
+                items={items}
+                query={query}
+                onQueryChange={setQuery}
+                emptyTitle="No headlines available right now."
+                emptyDetail="Every configured feed returned nothing. That is usually
+                             the network rather than a quiet news day." />
+            </>
           )}
         </>
       )}

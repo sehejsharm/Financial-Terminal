@@ -94,6 +94,7 @@ function Row({ cluster, now, compact, badge }: {
 
 export function NewsFeed({
   items, emptyTitle = "No headlines right now.", emptyDetail, compact, badge,
+  query, onQueryChange,
 }: {
   items: FeedItem[];
   emptyTitle?: string;
@@ -102,9 +103,17 @@ export function NewsFeed({
   compact?: boolean;
   /** Optional prefix for a headline (the ticker view tags sentiment here). */
   badge?: (it: FeedItem) => ReactNode;
+  /** Controlled search text. Supply both to let a parent drive the filter —
+   *  the wire digest does this so clicking a theme filters to it. Omit both
+   *  and the box keeps its own state, as every other caller expects. */
+  query?: string;
+  onQueryChange?: (q: string) => void;
 }) {
   const now = useNow();
-  const [q, setQ] = useState("");
+  const [ownQ, setOwnQ] = useState("");
+  const controlled = query != null && onQueryChange != null;
+  const q = controlled ? query : ownQ;
+  const setQ = controlled ? onQueryChange : setOwnQ;
   const [source, setSource] = useState("all");
   const [within, setWithin] = useState("0");
 
