@@ -44,3 +44,6 @@ frontend/test-results/
 test-results/
 frontend/test-results/
 frontend/playwright-report/
+
+# Node (the root has no package.json, but a tool run from here creates these)
+node_modules/
