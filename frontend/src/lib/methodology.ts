@@ -530,6 +530,49 @@ export const METHODOLOGY: Record<string, Methodology> = {
     ],
   },
 
+  dealFlow: {
+    kind: "computed",
+    what: "Bulk, block and insider disclosures, read for what they actually "
+      + "say — how one-sided the flow was, how many separate parties were "
+      + "involved, and which insider rows are decisions rather than "
+      + "compensation.",
+    formula: "net skew = (buy − sell) / (buy + sell) · conviction from the "
+      + "disclosed participant count · insider rows classified from the "
+      + "disclosed type and mode",
+    inputs: [
+      "NSE's end-of-day bulk and block deal files, aggregated per symbol over "
+        + "the selected window.",
+      "SEBI PIT insider disclosures, scraped best-effort.",
+    ],
+    assumptions: [
+      "A higher participant count means more independent decisions. One "
+        + "participant is one desk; a dozen is a dozen desks arriving at the "
+        + "same view separately.",
+      "Insider rows are classified by keyword from the disclosed type and "
+        + "mode. An ESOP grant is treated as an allotment, not a buy.",
+      "Net skew below 20% of gross activity is a transfer between holders "
+        + "rather than accumulation.",
+    ],
+    limits: [
+      "Bulk-deal disclosure is triggered by SIZE — 0.5% of listed shares — not "
+        + "by conviction. Every disclosed trade also has a counterparty who "
+        + "took the other side willingly.",
+      "This is END-OF-DAY. The price has already reacted by the time the file "
+        + "exists, so it is a record of who moved rather than a trade to "
+        + "follow.",
+      "Net quantity alone cannot distinguish a lopsided week from noise, which "
+        + "is why the skew column is there — and a name with a huge net value "
+        + "that nets to zero is a large transfer, not a large signal.",
+      "Insiders sell for reasons unrelated to the business — tax, a house, "
+        + "diversification — so sales carry much less information than buys. "
+        + "Pledges are borrowing against stock and say nothing about the view.",
+      "Insider classification is keyword-based on free-text disclosure fields. "
+        + "An unusual wording lands in “other” rather than being guessed at.",
+      "NSE archive retrieval is best-effort. A short window may reflect what "
+        + "was retrievable rather than what was disclosed.",
+    ],
+  },
+
   wireDigest: {
     kind: "computed",
     what: "Which listed companies the wire is writing about, what subject keeps "
