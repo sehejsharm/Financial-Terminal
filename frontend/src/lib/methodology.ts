@@ -449,25 +449,64 @@ export const METHODOLOGY: Record<string, Methodology> = {
     ],
   },
 
+  newsSentiment: {
+    kind: "ai",
+    what: "A language model's read on the tone of each headline, averaged.",
+    formula: "score = (bullish − bearish) / tagged",
+    inputs: [
+      "The headlines on screen, after the entity filter has decided which "
+        + "stories are about this company.",
+      "Nothing else: no price, no fundamentals, no article body beyond the "
+        + "summary the feed provides.",
+    ],
+    assumptions: [
+      "A headline's tone is a reasonable proxy for its content, which is "
+        + "generous to headline writers.",
+      "Every story counts equally. A hundred reprints of one press release "
+        + "outweigh a single genuinely important piece.",
+    ],
+    limits: [
+      "It measures TONE, not importance, and certainly not what happens next.",
+      "Coverage volume follows the price. A bearish tally after a fall is "
+        + "usually the fall being reported, so the score lags by construction.",
+      "Only tagged items count. Where coverage is partial, the score describes "
+        + "a subset of the list and the screen says what share.",
+      "Two runs can disagree — the model is not deterministic, and a borderline "
+        + "headline can flip.",
+      "It is not a recommendation and knows nothing about your position.",
+    ],
+  },
+
   aiAnalysis: {
     kind: "ai",
     what: "A written analysis produced by a language model from the figures on "
       + "this screen.",
     inputs: [
-      "The quantitative data already shown on the page.",
+      "A fixed set of fundamentals from this app's own providers, listed in "
+        + "full under the analysis — that list IS the whole of what the model "
+        + "was told about the company.",
       "The model's general knowledge of how to read those figures.",
     ],
     assumptions: [
       "The underlying data is correct — the model does not verify it.",
+      "The figures are formatted before they reach the prompt (₹17.77T rather "
+        + "than 17768137097216), so the narrative quotes them the way the rest "
+        + "of the app displays them.",
     ],
     limits: [
       "It can be fluent and wrong, and fluency is not evidence.",
       "It has no access to anything after its training cutoff except the "
-        + "figures passed to it.",
+        + "figures passed to it — no filings, no transcripts, no news.",
+      "Fields the providers didn't supply are named as missing. A model with no "
+        + "margin figure will still write a paragraph about profitability, and "
+        + "that paragraph carries no information.",
+      "Any number in the prose that is not in the input list was produced by "
+        + "the model rather than read from data.",
       "It is not investment advice, and it has no knowledge of your "
         + "position, horizon or constraints.",
-      "Two runs can disagree. If a conclusion matters, check the numbers it "
-        + "was given.",
+      "Two runs can disagree. Regenerating is worth doing: a second run that "
+        + "contradicts the first tells you the conclusion was never in the "
+        + "figures.",
     ],
   },
 };

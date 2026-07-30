@@ -148,3 +148,36 @@ def test_ai_normalize_units_humanizes():
     assert f["debt_to_equity"] == "0.37x"
     assert f["shares_outstanding"] == "6.77B"   # count — no currency sign
     assert f["trailing_pe"] == 27.12
+
+
+def test_ai_analysis_payload_exposes_the_figures_the_model_was_GIVEN():
+    """An analysis whose inputs are hidden is unfalsifiable.
+
+    A reader cannot check a claim about margins without knowing which margin
+    the model was handed, or whether it was handed one at all — a confident
+    sentence written off a missing field is the failure mode, and it is
+    invisible unless the inputs are shown.
+    """
+    from backend.routes.ai import _analysis_payload, _normalize_units
+
+    f = _normalize_units({
+        "currency": "INR", "name": "Reliance Industries Ltd",
+        "market_cap": 17768137097216, "trailing_pe": 27.12,
+        "profit_margin": 0.0812, "roe": None, "sector": "",
+    })
+    p = _analysis_payload("RELIANCE.NS", "## Bull case\n\nsomething", f)
+
+    assert p["ticker"] == "RELIANCE.NS"
+    assert p["markdown"].startswith("## Bull case")
+    # The figures, in the same human form the prompt saw.
+    assert p["inputs"]["market_cap"] == "₹17.77T"
+    assert p["inputs"]["profit_margin"] == "8.12%"
+    # Provenance and empty fields are not "figures the analysis is based on".
+    assert "currency" not in p["inputs"]
+    assert "name" not in p["inputs"]
+    # A field the provider didn't supply must be ABSENT rather than listed as
+    # an input, so the reader can see the model had nothing to go on.
+    assert "roe" not in p["inputs"]
+    assert "sector" not in p["inputs"]
+    # Stamped, so a cached narrative can't be mistaken for a fresh one.
+    assert p["generated_at"].endswith("+00:00")

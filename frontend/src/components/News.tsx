@@ -1,18 +1,28 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { Sparkles } from "lucide-react";
 
+import { Methodology } from "@/components/Methodology";
 import { NewsFeed } from "@/components/news/NewsFeed";
-import { ErrorState, Loading } from "@/components/ui";
-import { api, type NewsItem, type SentimentResp } from "@/lib/api";
+import { ErrorState, Loading, Note, SectionHeader } from "@/components/ui";
+import { api, type SentimentResp, type TickerNews } from "@/lib/api";
 import type { FeedItem } from "@/lib/newsFeed";
+import {
+  filterNote, matchLabel, normTitle, sentimentIndex, sentimentNote, summarise,
+} from "@/lib/newsSentiment";
 import { fmtNum } from "@/lib/utils";
 
 const SENT_STYLE: Record<string, string> = {
   bull: "border-green/60 text-green",
   bear: "border-red/60 text-red",
   neutral: "border-line2 text-mut",
+};
+
+const MATCH_STYLE: Record<string, string> = {
+  symbol: "border-amber/50 text-amber",
+  name: "border-line2 text-mut",
+  loose: "border-red/40 text-red/80",
 };
 
 /** Tiny inline sentiment-trend sparkline from the rollup history. */
@@ -31,28 +41,39 @@ function TrendBars({ history }: { history: SentimentResp["history"] }) {
 }
 
 /**
- * Headlines for one symbol, with an optional AI sentiment pass.
+ * CN — headlines for one symbol, with an optional model sentiment pass.
  *
- * The list is the shared NewsFeed — same search, recency filter, source
- * filter, age headings and story clustering as the market wire. A ticker's
- * news used to be a plain list that behaved differently from the news page
- * for no reason anyone had chosen.
+ * The list is the shared NewsFeed, so search, recency, source filtering, age
+ * headings and story clustering behave exactly as they do on the market wire.
+ *
+ * What is new is that the entity filter is now visible. The backend does real
+ * work deciding which stories are about THIS company — the fix for a search on
+ * RELIANCE.NS returning news about Reliance Steel — and reports what it kept,
+ * what it dropped and which name it matched on. That was all being discarded,
+ * so a reader looking at four headlines had no way to tell whether the company
+ * is quiet or twelve namesake stories were filtered out. It can also be turned
+ * off, which is the only way to check what the filter is excluding.
  */
 export function News({ ticker }: { ticker: string }) {
-  const [items, setItems] = useState<NewsItem[] | null>(null);
+  const [feed, setFeed] = useState<TickerNews | null>(null);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
+  const [strict, setStrict] = useState(true);
   const [sent, setSent] = useState<SentimentResp | null>(null);
   const [sentBusy, setSentBusy] = useState(false);
   const [sentErr, setSentErr] = useState<string | null>(null);
 
   const load = useCallback(() => {
-    setBusy(true); setErr(null); setItems(null); setSent(null); setSentErr(null);
-    api.news(ticker, 40)
-      .then(setItems)
+    setBusy(true); setErr(null); setFeed(null);
+    api.tickerNews(ticker, 40, strict)
+      .then(setFeed)
       .catch((e) => setErr(e?.detail || "Failed to load news."))
       .finally(() => setBusy(false));
-  }, [ticker]);
+  }, [ticker, strict]);
+
+  // The sentiment pass is per ticker, not per filter setting, so it survives a
+  // strict toggle — the tags are keyed by title and match either way.
+  useEffect(() => { setSent(null); setSentErr(null); }, [ticker]);
   useEffect(() => { load(); }, [load]);
 
   // Explicit button (not auto) — each analysis is a Groq call; results are
@@ -68,59 +89,120 @@ export function News({ ticker }: { ticker: string }) {
     }
   }
 
-  if (busy && !items) return <Loading what={`headlines for ${ticker}`} />;
+  const items = feed?.items ?? [];
+  // Matched on a NORMALISED title: an exact string compare loses the tag the
+  // moment the feed re-encodes an apostrophe, and a lost tag renders as an
+  // untagged story rather than as an error.
+  const index = useMemo(() => sentimentIndex(sent?.items ?? []), [sent]);
+  const summary = useMemo(() => summarise(items, index), [items, index]);
+
+  if (busy && !feed) return <Loading what={`headlines for ${ticker}`} />;
   if (err) return <ErrorState message={err} onRetry={load} />;
 
-  const sentimentOf = (it: FeedItem) =>
-    sent?.items.find((s) => s.title === it.title)?.sentiment;
-
-  const counts = (["bull", "bear", "neutral"] as const).map((k) => ({
-    k, n: (items ?? []).filter((i) => sentimentOf(i) === k).length,
-  }));
+  const outcome = {
+    entity: feed?.entity ?? null,
+    matched: feed?.matched ?? null,
+    dropped: feed?.dropped ?? null,
+    strict: feed?.strict ?? strict,
+  };
 
   return (
     <div>
-      <div className="flex flex-wrap items-center gap-3 mb-3">
-        {sent?.score != null && (
-          <span className={`text-sm num ${sent.score > 0.15 ? "text-green" : sent.score < -0.15 ? "text-red" : "text-mut"}`}>
-            Sentiment {sent.score > 0 ? "+" : ""}{fmtNum(sent.score, 2)}
-            <span className="text-[10px] text-mut ml-1">(−1 bearish … +1 bullish, AI-tagged)</span>
-            <TrendBars history={sent.history} />
-          </span>
-        )}
-        {sent && (
-          <span className="flex flex-wrap gap-1">
-            {counts.filter((c) => c.n > 0).map(({ k, n }) => (
-              <span key={k}
-                    className={`px-1.5 py-0.5 rounded border text-[9px] uppercase tracking-wider ${SENT_STYLE[k]}`}>
-                {n} {k}
+      <SectionHeader
+        title={outcome.entity ? `News — ${outcome.entity}` : `News — ${ticker}`}
+        count={`${items.length} stories`}
+        actions={
+          <div className="flex flex-wrap items-center gap-2">
+            {outcome.dropped != null && outcome.dropped > 0 && outcome.strict && (
+              <span className="text-[10.5px] text-amber/90 whitespace-nowrap">
+                {outcome.dropped} namesake{outcome.dropped === 1 ? "" : "s"} filtered out
               </span>
-            ))}
+            )}
+            <button onClick={() => setStrict((s) => !s)}
+                    className={`btn ${strict ? "btn-primary" : "btn-ghost"} text-xs`}
+                    title={strict
+                      ? "Filtering to this company only — click to see the raw feed"
+                      : "Showing the raw feed, including similar-named companies"}>
+              {strict ? "This company only" : "Raw feed"}
+            </button>
+            <button onClick={analyze} disabled={sentBusy}
+                    className="btn-ghost flex items-center gap-1.5 text-xs">
+              <Sparkles size={12} />
+              {sentBusy ? "Analyzing…" : sent ? "Re-analyze" : "Analyze sentiment (AI)"}
+            </button>
+          </div>
+        }
+      />
+
+      {summary.score != null && (
+        <div className="flex flex-wrap items-center gap-3 mb-2">
+          <span className={`text-sm num ${
+            summary.score > 0.15 ? "text-green"
+              : summary.score < -0.15 ? "text-red" : "text-mut"}`}>
+            Sentiment {summary.score > 0 ? "+" : ""}{fmtNum(summary.score, 2)}
+            <span className="text-[10px] text-mut ml-1">(−1 bearish … +1 bullish)</span>
+            {sent && <TrendBars history={sent.history} />}
           </span>
-        )}
-        <div className="flex-1" />
-        {sentErr && <span className="text-red text-[11px]">{sentErr}</span>}
-        <button onClick={analyze} disabled={sentBusy}
-                className="btn-ghost flex items-center gap-1.5 text-xs">
-          <Sparkles size={12} />
-          {sentBusy ? "Analyzing…" : sent ? "Re-analyze" : "Analyze sentiment (AI)"}
-        </button>
+          <span className="flex flex-wrap gap-1">
+            {([["bull", summary.bull], ["bear", summary.bear],
+               ["neutral", summary.neutral]] as const)
+              .filter(([, n]) => n > 0)
+              .map(([k, n]) => (
+                <span key={k}
+                      className={`px-1.5 py-0.5 rounded border text-[9px] uppercase tracking-wider ${SENT_STYLE[k]}`}>
+                  {n} {k}
+                </span>
+              ))}
+          </span>
+          {summary.coveragePct != null && summary.coveragePct < 100 && (
+            <span className="text-[10.5px] text-mut num">
+              {fmtNum(summary.coveragePct, 0)}% of the list tagged
+            </span>
+          )}
+        </div>
+      )}
+
+      {sentErr && <div className="text-red text-[11px] mb-2">{sentErr}</div>}
+
+      <div className="flex flex-col gap-1.5 mb-3">
+        <Note>{filterNote(outcome)}</Note>
+        {sent && <Note>{sentimentNote(summary)}</Note>}
       </div>
 
       <NewsFeed
-        items={items ?? []}
-        badge={(it) => {
-          const s = sentimentOf(it);
-          if (!s) return null;
+        items={items}
+        badge={(it: FeedItem) => {
+          const s = index.get(normTitle(it.title));
+          // The provider labels how each story was matched; on the raw feed
+          // that is the only thing separating this company from its namesake.
+          const m = matchLabel((it as { match?: string | null }).match as never);
+          if (!s && !m) return null;
           return (
-            <span className={`inline-block align-middle mr-2 px-1.5 py-0.5 rounded border text-[9px] uppercase tracking-wider ${SENT_STYLE[s]}`}>
-              {s}
-            </span>
+            <>
+              {s && (
+                <span className={`inline-block align-middle mr-2 px-1.5 py-0.5 rounded border text-[9px] uppercase tracking-wider ${SENT_STYLE[s]}`}>
+                  {s}
+                </span>
+              )}
+              {m && (
+                <span title={m.hint}
+                      className={`inline-block align-middle mr-2 px-1.5 py-0.5 rounded border text-[9px] uppercase tracking-wider ${MATCH_STYLE[m.label]}`}>
+                  {m.label}
+                </span>
+              )}
+            </>
           );
         }}
-        emptyTitle={`No recent headlines for ${ticker}.`}
-        emptyDetail="Yahoo, its RSS mirror and a Google News search all came back
-                     empty for this symbol." />
+        emptyTitle={strict
+          ? `No headlines matched ${outcome.entity || ticker}.`
+          : `No recent headlines for ${ticker}.`}
+        emptyDetail={strict && (outcome.dropped ?? 0) > 0
+          ? `${outcome.dropped} stories came back but none of them were about this
+             company. Switch to the raw feed to see them.`
+          : `Yahoo, its RSS mirror and a Google News search all came back
+             empty for this symbol.`} />
+
+      {sent && <Methodology id="newsSentiment" className="mt-3" />}
     </div>
   );
 }

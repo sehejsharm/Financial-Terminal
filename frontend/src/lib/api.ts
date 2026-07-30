@@ -271,7 +271,15 @@ export type OptionChain = {
   ticker: string; expiry: string; spot: number; years_to_expiry: number;
   calls: OptionRow[]; puts: OptionRow[]; max_pain: number | null;
 };
-export type AIResp = { ticker: string; markdown: string };
+export type AIResp = {
+  ticker: string; markdown: string;
+  /** The figures the model was actually handed, already humanised. Present so
+   *  a claim in the prose can be checked against its input — and so a field
+   *  the provider never supplied is visibly ABSENT rather than assumed. */
+  inputs?: Record<string, string | number> | null;
+  generated_at?: string | null;
+  provider?: string | null;
+};
 export type VcReport = {
   ts: string; user: string | null; ticker: string;
   node_name: string; role: string; reason: string;
@@ -536,10 +544,15 @@ export const api = {
     apiFetchMeta<Snapshot>(`/api/v1/market/snapshot/${encodeURIComponent(ticker)}`, {}, opts),
   movers: (kind: "gainers" | "losers" = "gainers", count = 8) =>
     apiFetch<Mover[]>(`/api/v1/market/movers?kind=${kind}&count=${count}`),
-  /** Entity-filtered headlines for one listing, plus the filter outcome. */
-  tickerNews: (ticker: string, limit = 15) =>
+  /** Entity-filtered headlines for one listing, plus the filter outcome.
+   *
+   *  `strict=false` returns the raw feed including similar-named companies —
+   *  the only way to see what the filter is excluding, which is what makes the
+   *  filter's own claims checkable. */
+  tickerNews: (ticker: string, limit = 15, strict = true) =>
     apiFetch<TickerNews>(
-      `/api/v1/market/news/${encodeURIComponent(ticker)}?limit=${limit}`),
+      `/api/v1/market/news/${encodeURIComponent(ticker)}?limit=${limit}`
+      + `&strict=${strict ? "true" : "false"}`),
   /** Just the items, for callers that don't surface the filter counts. */
   news: async (ticker: string, limit = 15) =>
     (await apiFetch<TickerNews>(

@@ -1,6 +1,8 @@
 """AI endpoints — bull/bear, deep analysis."""
 from __future__ import annotations
 
+from datetime import datetime, timezone
+
 from fastapi import APIRouter, Depends, HTTPException, status
 
 from backend import auth
@@ -76,6 +78,35 @@ def provider(_user: dict = Depends(auth.current_user)):
             "provider": ai_analyst.active_provider()}
 
 
+# Keys that are provenance rather than analysis — the model sees them, but
+# listing them back as "figures the analysis is based on" is noise.
+_PROMPT_INPUT_SKIP = {"currency", "symbol", "ticker", "name", "longName",
+                      "shortName", "quoteType", "exchange", "website", "logo",
+                      "summary", "longBusinessSummary", "description"}
+
+
+def _prompt_inputs(f: dict) -> dict:
+    """The figures actually handed to the model, for the UI to display.
+
+    Without this the analysis is unfalsifiable: a reader cannot check a claim
+    about margins without knowing which margin the model was given, or whether
+    it was given one at all. A confident sentence written off a missing field
+    is the failure mode, and it is invisible unless the inputs are shown.
+    """
+    return {k: v for k, v in f.items()
+            if k not in _PROMPT_INPUT_SKIP and v is not None and v != ""}
+
+
+def _analysis_payload(ticker: str, text: str, f: dict) -> dict:
+    return {
+        "ticker": ticker,
+        "markdown": text,
+        "inputs": _prompt_inputs(f),
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "provider": ai_analyst.active_provider(),
+    }
+
+
 @router.post("/bull-bear")
 def bull_bear(body: AIRequest, _user: dict = Depends(auth.current_user)):
     _guard()
@@ -84,7 +115,7 @@ def bull_bear(body: AIRequest, _user: dict = Depends(auth.current_user)):
         text = ai_analyst.bull_bear_case(body.ticker, f, None)
     except ai_analyst.AnalystError as e:
         raise HTTPException(status.HTTP_502_BAD_GATEWAY, str(e))
-    return {"ticker": body.ticker, "markdown": text}
+    return _analysis_payload(body.ticker, text, f)
 
 
 @router.post("/deep-analysis")
@@ -95,7 +126,7 @@ def deep(body: AIRequest, _user: dict = Depends(auth.current_user)):
         text = ai_analyst.deep_analysis(body.ticker, f, None)
     except ai_analyst.AnalystError as e:
         raise HTTPException(status.HTTP_502_BAD_GATEWAY, str(e))
-    return {"ticker": body.ticker, "markdown": text}
+    return _analysis_payload(body.ticker, text, f)
 
 
 # ── news sentiment ───────────────────────────────────────────────────────
