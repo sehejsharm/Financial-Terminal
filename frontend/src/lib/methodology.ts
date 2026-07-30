@@ -530,6 +530,41 @@ export const METHODOLOGY: Record<string, Methodology> = {
     ],
   },
 
+  alerts: {
+    kind: "computed",
+    what: "Server-side tripwires on price, valuation, day move, volume or the "
+      + "US curve — checked against the live value before they are armed.",
+    formula: "condition is current op threshold · distance = |threshold − "
+      + "current|, as a share of the current value",
+    inputs: [
+      "The threshold and side you set.",
+      "The live quote or snapshot for the ticker, fetched when you pick the "
+        + "condition, so the threshold can be checked against reality.",
+    ],
+    assumptions: [
+      "The current value the form checks against is the one the evaluator will "
+        + "see a minute later. On a fast-moving name it will not be.",
+      "Each condition has a sensible range — a volume spike is a MULTIPLE of "
+        + "average volume, not a percentage — and a value outside it is treated "
+        + "as a likely units mistake rather than a deliberate choice.",
+    ],
+    limits: [
+      "An alert fires ONCE and deactivates. It is a tripwire, not a standing "
+        + "monitor, and a fired alert tells you nothing about the next move.",
+      "Evaluation runs roughly once a minute, so a move that reverses inside "
+        + "that window is never seen, and the price that triggered an alert is "
+        + "not necessarily one you could have traded at.",
+      "The already-true check uses the value at the moment you type. It cannot "
+        + "prevent a condition becoming true between creation and the first "
+        + "evaluation.",
+      "Where no current value loads — an unlisted symbol, a loss-making "
+        + "company with no P/E — the alert is armed unchecked, and the form "
+        + "says so rather than implying it was validated.",
+      "Delivery to email or Telegram adds its own delay and can fail; the "
+        + "event feed records which channels actually succeeded.",
+    ],
+  },
+
   dealFlow: {
     kind: "computed",
     what: "Bulk, block and insider disclosures, read for what they actually "

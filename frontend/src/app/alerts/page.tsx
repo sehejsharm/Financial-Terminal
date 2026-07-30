@@ -6,8 +6,13 @@ import { Trash2 } from "lucide-react";
 import { DataAge } from "@/components/DataAge";
 import { TickerInput } from "@/components/TickerInput";
 import { Shell } from "@/components/Shell";
-import { PageHeader } from "@/components/ui";
+import { Methodology } from "@/components/Methodology";
+import { Note, PageHeader } from "@/components/ui";
 import { api, type Alert, type AlertEvent } from "@/lib/api";
+import {
+  alertsNote, distanceLabel, findDuplicate, health, KINDS, metaFor, validate,
+  type Kind, type Op,
+} from "@/lib/alertCheck";
 import { useLive } from "@/lib/useLive";
 import { fmtNum } from "@/lib/utils";
 
@@ -275,11 +280,34 @@ function AdminDeliverySetup({ onSaved }: { onSaved: () => void }) {
  *  Conditions are evaluated server-side every ~60s; triggered alerts
  *  deactivate and land in the feed (and the header bell). */
 export default function AlertsPage() {
-  const [kind, setKind] = useState<"price" | "pe" | "spread_10y2y" | "move" | "volume_spike">("price");
+  const [kind, setKind] = useState<Kind>("price");
   const [ticker, setTicker] = useState("");
-  const [op, setOp] = useState<">" | "<">("<");
+  const [op, setOp] = useState<Op>("<");
   const [value, setValue] = useState("");
   const [err, setErr] = useState<string | null>(null);
+
+  // The live value of whatever the draft condition measures. Without it an
+  // alert that can never fire looks exactly like a good one.
+  const [current, setCurrent] = useState<number | null>(null);
+  const [currentBusy, setCurrentBusy] = useState(false);
+  useEffect(() => {
+    const t = ticker.trim().toUpperCase();
+    if (!metaFor(kind).needsTicker || !t) { setCurrent(null); return; }
+    let alive = true;
+    setCurrentBusy(true);
+    // Price and day-move come off the quote; P/E off the snapshot. A kind
+    // with no cheap source stays null, and the validator says so rather than
+    // implying the alert is fine.
+    const src = kind === "pe"
+      ? api.snapshot(t).then((sn) => (sn?.trailing_pe as number | undefined) ?? null)
+      : api.quote(t).then((q) => (kind === "move"
+          ? (q?.change_pct != null ? Math.abs(q.change_pct) : null)
+          : q?.price ?? null));
+    src.then((v) => { if (alive) setCurrent(typeof v === "number" ? v : null); })
+       .catch(() => { if (alive) setCurrent(null); })
+       .finally(() => { if (alive) setCurrentBusy(false); });
+    return () => { alive = false; };
+  }, [kind, ticker]);
 
   const { data, busy, updatedAt, refresh } = useLive<{ alerts: Alert[]; events: AlertEvent[] }>(
     () => api.alerts(), 30_000,
@@ -290,6 +318,10 @@ export default function AlertsPage() {
     const v = parseFloat(value);
     if (Number.isNaN(v)) { setErr("Threshold value required."); return; }
     if (kind !== "spread_10y2y" && !ticker.trim()) { setErr("Ticker required for this alert kind."); return; }
+    const dupe = findDuplicate(data?.alerts ?? [], { kind, ticker, op, value: v });
+    if (dupe && !confirm(
+      `You already have this exact alert (${dupe.active ? "armed" : "fired"}). `
+      + "Create a second one anyway?")) return;
     try {
       await api.createAlert({ kind, ticker: kind === "spread_10y2y" ? null : ticker.trim().toUpperCase(), op, value: v });
       setValue(""); refresh();
@@ -304,6 +336,12 @@ export default function AlertsPage() {
 
   const alerts = data?.alerts ?? [];
   const events = [...(data?.events ?? [])].reverse();
+  const parsed = value.trim() === "" ? null : parseFloat(value);
+  const problems = value.trim() === "" ? []
+    : validate({ kind, op, value: parsed, ticker }, current);
+  // Only a hard error blocks. A warning is information, not a veto — the user
+  // may well mean the unusual number.
+  const blocked = problems.some((p) => p.severity === "error");
 
   return (
     <Shell>
@@ -316,7 +354,8 @@ export default function AlertsPage() {
 
       <DeliveryPanel />
 
-      <div className="panel-2 p-3 mb-6 flex flex-wrap items-end gap-2">
+      <div className="panel-2 p-3 mb-6 flex flex-wrap items-end gap-2"
+           data-testid="alert-form">
         <label className="flex flex-col gap-1 w-44">
           <span className="label-xs">Condition</span>
           <select value={kind} onChange={(e) => setKind(e.target.value as any)} className="input-bare cursor-pointer">
@@ -345,14 +384,43 @@ export default function AlertsPage() {
           <input value={value} onChange={(e) => setValue(e.target.value)} type="number" className="input-bare"
                  placeholder={kind === "spread_10y2y" ? "0" : "18"} />
         </label>
-        <button onClick={create} className="btn-primary">Create alert</button>
+        <button onClick={create} disabled={blocked} className="btn-primary">
+          Create alert
+        </button>
         {err && <div className="text-red text-xs w-full">{err}</div>}
+
+        {/* What is wrong with this alert, before it is armed. An alert that
+            can never fire looked exactly like a good one. */}
+        <div className="w-full flex flex-col gap-1">
+          {metaFor(kind).needsTicker && ticker.trim() && (
+            <div className="text-[10.5px] text-mut num">
+              {currentBusy ? "checking current value…"
+                : current != null
+                  ? `${metaFor(kind).label} now: ${fmtNum(current, 2)}${metaFor(kind).unit}`
+                  : "current value unavailable for this listing"}
+            </div>
+          )}
+          {problems.map((p) => (
+            <div key={p.text}
+                 className={`text-[10.5px] leading-relaxed ${
+                   p.severity === "error" ? "text-red"
+                     : p.severity === "warn" ? "text-amber/90" : "text-mut"}`}>
+              {p.text}
+            </div>
+          ))}
+          {!problems.length && value.trim() && (
+            <div className="text-[10.5px] text-green">
+              {distanceLabel(op, parseFloat(value), current, kind)}
+            </div>
+          )}
+        </div>
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         <div>
           <div className="heading mb-2">Active & recent</div>
           {alerts.length === 0 && <div className="panel-2 p-4 text-mut text-sm">No alerts yet.</div>}
+          <div className="mb-2"><Note>{alertsNote(health(alerts))}</Note></div>
           <div className="flex flex-col gap-2">
             {alerts.map((a) => (
               <div key={a.id} className="panel-2 p-3 flex items-center gap-3">
@@ -363,6 +431,11 @@ export default function AlertsPage() {
                   {a.ticker ? <span className="text-amber">{a.ticker} </span> : null}
                   {KIND_LABELS[a.kind]} {a.op} <span className="num">{fmtNum(a.value, 2)}</span>
                 </span>
+                {a.active && a.ticker === ticker.trim().toUpperCase() && current != null && (
+                  <span className="text-[10px] text-mut whitespace-nowrap num">
+                    {distanceLabel(a.op as Op, a.value, current, a.kind as Kind)}
+                  </span>
+                )}
                 {a.triggered_at && <span className="text-[10px] text-mut">fired {a.triggered_at.slice(0, 16).replace("T", " ")}</span>}
                 <button onClick={() => del(a.id)} className="text-mut hover:text-red" title="Delete alert">
                   <Trash2 size={13} />
@@ -400,6 +473,7 @@ export default function AlertsPage() {
           </div>
         </div>
       </div>
+      <Methodology id="alerts" className="mt-4" />
     </Shell>
   );
 }
