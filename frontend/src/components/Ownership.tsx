@@ -1,15 +1,38 @@
 "use client";
 
+import { useMemo } from "react";
+
 import { FrameTable } from "@/components/FrameTable";
+import { MetricCard } from "@/components/MetricCard";
+import { Methodology } from "@/components/Methodology";
 import { PanelError, PanelLoading } from "@/components/PanelStates";
+import { Note } from "@/components/ui";
 import { api, type Ownership as Own } from "@/lib/api";
+import { holderConcentration, ownershipNote } from "@/lib/streetView";
 import { useAsync } from "@/lib/useAsync";
-import { humanNumber } from "@/lib/utils";
+import { fmtNum, humanNumber } from "@/lib/utils";
 
+/**
+ * OWN — who holds it, and how tightly.
+ *
+ * The screen listed the top holders and stopped. A list answers "who owns
+ * this"; a position needs the other question — can one of them selling move
+ * the price — and that is concentration, which the list does not show.
+ */
 export function Ownership({ ticker }: { ticker: string }) {
-  const { data, error, busy, retry, serverFault } = useAsync<Own>(() => api.ownership(ticker), [ticker]);
+  const { data, error, busy, retry, serverFault } =
+    useAsync<Own>(() => api.ownership(ticker), [ticker]);
 
-  if (busy) return <PanelLoading label="Loading ownership…" />;
+  // Institutional and fund registers are two disclosures of the same thing;
+  // concentration is measured over the larger of them rather than summing,
+  // because a fund can appear in both and would be double-counted.
+  const conc = useMemo(() => {
+    const inst = holderConcentration(data?.institutional_holders ?? null);
+    const fund = holderConcentration(data?.mutualfund_holders ?? null);
+    return (inst.top5Pct ?? 0) >= (fund.top5Pct ?? 0) ? inst : fund;
+  }, [data]);
+
+  if (busy) return <PanelLoading label="Loading ownership…" rows={5} />;
   if (error) return <PanelError error={error} retry={retry} serverFault={serverFault} />;
   if (!data) return null;
 
@@ -22,6 +45,26 @@ export function Ownership({ ticker }: { ticker: string }) {
 
   return (
     <div className="space-y-6">
+      {conc.top5Pct != null && (
+        <>
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+            <MetricCard label="Top 5 holders own"
+                        value={`${fmtNum(conc.top5Pct, 1)}%`}
+                        tone={conc.top5Pct > 40 ? "negative" : "neutral"} />
+            <MetricCard label="Largest single stake"
+                        value={`${fmtNum(conc.top1Pct!, 1)}%`}
+                        tone={conc.top1Pct! > 10 ? "negative" : "neutral"} />
+            <MetricCard label="Largest holder"
+                        value={conc.largest!.name.length > 22
+                          ? `${conc.largest!.name.slice(0, 21)}…`
+                          : conc.largest!.name}
+                        title={conc.largest!.name} />
+            <MetricCard label="Disclosed holders" value={conc.n} />
+          </div>
+          <Note>{ownershipNote(conc)}</Note>
+        </>
+      )}
+
       {data.major_holders.rows.length > 0 && (
         <div><div className="heading mb-2">Ownership summary</div><FrameTable frame={data.major_holders} /></div>
       )}
@@ -58,6 +101,8 @@ export function Ownership({ ticker }: { ticker: string }) {
           </div>
         </div>
       )}
+
+      <Methodology id="ownership" />
     </div>
   );
 }

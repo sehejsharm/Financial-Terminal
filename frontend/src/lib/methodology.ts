@@ -232,6 +232,85 @@ export const METHODOLOGY: Record<string, Methodology> = {
     ],
   },
 
+  comparables: {
+    kind: "computed",
+    what: "Where this company's multiples sit against a peer set.",
+    formula: "premium = (value − peer median) / |peer median|",
+    inputs: [
+      "Trailing and forward P/E, P/B, P/S, an EV/EBITDA proxy and ROE for "
+        + "every name in the set.",
+      "The peer list — auto-selected by sector and exchange, and editable.",
+    ],
+    assumptions: [
+      "The peers are actually comparable. Sector and exchange is a crude "
+        + "screen and the list is editable for exactly that reason.",
+      "The MEDIAN is the fair reference, not the mean: one peer whose "
+        + "earnings collapsed carries a P/E that would drag a mean somewhere "
+        + "useless and make everything else look cheap.",
+    ],
+    limits: [
+      "No adjustment for growth, leverage, returns or accounting policy. "
+        + "Peers with different fundamentals SHOULD trade at different "
+        + "multiples, so a discount here is a question, not an answer.",
+      "EV/EBITDA uses market cap as the enterprise-value proxy — the free "
+        + "feed has no debt layer for peers — so an indebted peer looks "
+        + "cheaper on that column than it is.",
+      "A multiple more than five times the peer median is nulled rather than "
+        + "shown: at that distance it is almost always a provider error.",
+      "Below three reporting peers no comparison is made at all; a median of "
+        + "two is not a market view.",
+    ],
+  },
+
+  street: {
+    kind: "computed",
+    what: "The analyst consensus, its distribution, and how both have moved.",
+    formula: "score = Σ(ratings × 1..5) / count, where 1 is strong buy",
+    inputs: [
+      "The provider's recommendation counts per bucket, by month.",
+      "Published price targets: low, mean, high and the current price.",
+    ],
+    assumptions: [
+      "Bucket names map cleanly across providers — outperform and overweight "
+        + "are read as buy, neutral as hold.",
+    ],
+    limits: [
+      "Ratings are a poor timing signal. The street is structurally long, so "
+        + "'hold' is closer to a negative view than the word suggests and the "
+        + "distribution is skewed before you read it.",
+      "Targets follow the price more often than they lead it, so a wide "
+        + "implied upside after a fall is not by itself a signal.",
+      "No analyst count comes with the targets on the free feed: a mean set "
+        + "by two analysts and one set by thirty are indistinguishable here.",
+      "Coverage changes are visible; WHO changed their mind is not.",
+    ],
+  },
+
+  ownership: {
+    kind: "computed",
+    what: "How concentrated the disclosed share register is.",
+    formula: "top-5 share, largest single stake, and an HHI over the stakes",
+    inputs: [
+      "Institutional and mutual-fund holdings as disclosed to the provider.",
+    ],
+    assumptions: [
+      "The percentage column is a share of the company. Providers send it as "
+        + "either a fraction or a percentage, and the scale is inferred from "
+        + "the whole column rather than row by row.",
+    ],
+    limits: [
+      "These are DISCLOSED institutional stakes only. They do not sum to "
+        + "100% — promoters, retail and everyone below the disclosure "
+        + "threshold are simply absent.",
+      "Filings lag by weeks to months, so the register shown is not the "
+        + "register today, and a position may already be gone.",
+      "No history: the screen shows who holds it, not who has been buying, "
+        + "which is usually the more interesting question.",
+      "Free-tier coverage of Indian promoters is poor, so an Indian listing "
+        + "can look institution-free when it is closely held.",
+    ],
+  },
+
   chainExposure: {
     kind: "computed",
     what: "Concentration, money at risk, and whether the resulting trade can "

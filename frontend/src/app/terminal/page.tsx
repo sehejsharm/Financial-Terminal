@@ -7,6 +7,7 @@ import {
 import { ChevronLeft, ChevronRight } from "lucide-react";
 
 import { AIPanel } from "@/components/AIPanel";
+import { PerformancePanel } from "@/components/terminal/PerformancePanel";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
 import { CapitalStructureView } from "@/components/CapitalStructure";
 import { Comparables } from "@/components/Comparables";
@@ -398,6 +399,10 @@ function TerminalInner() {
               names, NSE covers Indian price/valuation but not every ratio).
             </div>
           )}
+          {/* Performance from the candles the chart already has — no extra
+              fetch, and it moves with the period selector below. */}
+          <PerformancePanel candles={candles} />
+
           <div className="flex items-center gap-1.5 flex-wrap mb-2">
             <div className="heading flex-1">Price Chart</div>
             {PERIODS.map((p) => (
