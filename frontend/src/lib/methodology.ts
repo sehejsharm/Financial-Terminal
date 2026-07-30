@@ -238,6 +238,47 @@ export const METHODOLOGY: Record<string, Methodology> = {
     ],
   },
 
+  correlation: {
+    kind: "computed",
+    what: "How closely these names move together, how many independent bets "
+      + "they really represent, and each one's sensitivity to the benchmark.",
+    formula: "Pearson r on daily simple returns · effective bets = N / (1 + "
+      + "(N−1)·r̄) · β = cov(asset, bench) / var(bench), reported with R²",
+    inputs: [
+      "One year of daily closes per ticker, from the same history feed the "
+        + "charts use. Everything is computed in your browser.",
+      "Only the trading days ALL the series share — the count is shown, along "
+        + "with which ticker's short history capped it.",
+    ],
+    assumptions: [
+      "Daily simple returns, equally weighted, with no decay: a move eleven "
+        + "months ago counts as much as yesterday's.",
+      "The significance floor is the two-sided 5% critical value for r, "
+        + "approximated as 1.96/√(n−1). It errs slightly conservative.",
+      "The effective-bets formula assumes a single average correlation across "
+        + "all pairs, which is a simplification of the full covariance "
+        + "structure.",
+    ],
+    limits: [
+      "Alignment is an INTERSECTION. One recently-listed ticker truncates every "
+        + "pair in the grid to the days it shares, and the resulting matrix "
+        + "describes that shorter window rather than the year.",
+      "Cells below the significance floor are dimmed, not dropped — an absent "
+        + "number reads as missing data, which is a different and worse claim "
+        + "than “too small to call”.",
+      "A beta without its R² is a slope with no claim about fit. A beta of 1.8 "
+        + "explaining 4% of the variance is an artefact of the regression, and "
+        + "the table greys it for exactly that reason.",
+      "Correlations across equities converge towards 1 in a selloff — precisely "
+        + "when the diversification they imply is being relied on. This is a "
+        + "realised, backward-looking measure and not a forecast of that.",
+      "Betas here differ from the provider figure on the Snapshot and WACC "
+        + "screens, which is typically five years of monthly returns against "
+        + "the listing exchange's index. Neither is more correct; the "
+        + "difference is the window.",
+    ],
+  },
+
   riskMetrics: {
     kind: "computed",
     what: "Distribution and drawdown statistics for a return series.",
