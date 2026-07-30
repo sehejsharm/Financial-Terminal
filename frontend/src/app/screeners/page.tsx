@@ -9,8 +9,12 @@ import { StatusBadge } from "@/components/StatusBadge";
 import { Pager, SortableTh, TableToolbar, useTableControls } from "@/components/tableControls";
 import { ScrollX } from "@/components/ScrollX";
 import { ScreenBuilder } from "@/components/screeners/ScreenBuilder";
-import { PageHeader } from "@/components/ui";
+import { Note, PageHeader } from "@/components/ui";
 import { api, type ScreenClause, type ScreenResult } from "@/lib/api";
+import {
+  columnCoverage, columnNote, coverage, coverageNote, isPercent, labelFor,
+  sparseColumns,
+} from "@/lib/screenResult";
 
 type ScreenDef = {
   label: string;
@@ -31,13 +35,12 @@ const SCREENS: ScreenDef[] = [
   { label: "Top ETFs", desc: "ETF universe ranked by trailing return.", run: () => api.screenEtfs() },
 ];
 
-const PCT_KEYS = new Set(["roe", "roce", "eps_growth", "sales_growth", "promoter", "ytd_return", "return_1y", "margin_of_safety", "mos"]);
-
 function fmtCell(key: string, v: unknown): string {
   if (v === null || v === undefined || v === "") return "—";
   if (typeof v === "number") {
+    if (!Number.isFinite(v)) return "—";
     const out = v.toLocaleString(undefined, { maximumFractionDigits: 2 });
-    return PCT_KEYS.has(key) ? `${out}%` : out;
+    return isPercent(key) ? `${out}%` : out;
   }
   return String(v);
 }
@@ -116,6 +119,10 @@ export default function ScreenersPage() {
     ? Array.from(new Set(rows.flatMap((r) => Object.keys(r)))).filter((c) => c !== "symbol")
     : [];
   const ctl = useTableControls(rows, 25);
+  // Coverage is computed for EVERY result, not just empty ones — a screen that
+  // returned rows is exactly where a coverage problem hides.
+  const cov = result ? coverage(result) : null;
+  const sparse = rows && rows.length ? sparseColumns(columnCoverage(rows, cols)) : [];
 
   return (
     <Shell>
@@ -153,26 +160,24 @@ export default function ScreenersPage() {
 
       {err && <div className="text-red text-sm mb-3">{err}</div>}
 
-      {result && rows && rows.length === 0 && (
+      {result && rows && rows.length === 0 && cov && (
         <div className="panel-2 p-4 text-mut">
-          <div>{result.note || "No matches for this screen."}</div>
-          {typeof result.scanned === "number" && (
-            <div className="text-xs mt-2 opacity-80">
-              Scanned {result.scanned} names
-              {typeof result.evaluable === "number" ? `, ${result.evaluable} returned usable data` : ""}.
-            </div>
-          )}
+          <div className="mb-2">{result.note || "No matches for this screen."}</div>
+          <Note>{coverageNote(cov)}</Note>
         </div>
       )}
 
-      {/* ROCE availability note on EVERY preset, not just empty states:
-          free providers only supply real ROCE for FMP-covered names, so the
-          column is often all "—" — say so instead of looking broken. */}
-      {rows && rows.length > 0 && cols.includes("roce") && rows.every((r) => r.roce == null) && (
-        <div className="text-[10.5px] text-amber/90 mb-2">
-          ROCE is unavailable for these names on free data (FMP key-metrics covers
-          mostly US listings; NSE names lack a free ROCE source) — the column shows
-          “—” rather than an ROE substitute.
+      {/* Coverage on EVERY result. A dash cannot distinguish "this company
+          doesn't have it" from "the feed doesn't carry it", and the reader
+          needs that distinction before ranking anything. */}
+      {rows && rows.length > 0 && cov && (
+        <div className="mb-3 flex flex-col gap-1.5">
+          <Note>{coverageNote(cov)}</Note>
+          {columnNote(sparse) && (
+            <div className="text-[10.5px] text-amber/90 leading-relaxed max-w-4xl">
+              {columnNote(sparse)}
+            </div>
+          )}
         </div>
       )}
 
@@ -199,7 +204,7 @@ export default function ScreenersPage() {
                   <div className="grid grid-cols-2 gap-x-4 gap-y-1">
                     {numeric.map((c) => (
                       <div key={c} className="flex justify-between text-xs">
-                        <span className="label-xs">{c.replace(/_/g, " ")}</span>
+                        <span className="label-xs">{labelFor(c)}</span>
                         <span className="num">{fmtCell(c, r[c])}</span>
                       </div>
                     ))}
@@ -217,7 +222,7 @@ export default function ScreenersPage() {
               <thead className="text-mut uppercase tracking-wider">
                 <tr className="border-b border-line">
                   {cols.map((c) => (
-                    <SortableTh key={c} label={c.replace(/_/g, " ")} k={c} ctl={ctl}
+                    <SortableTh key={c} label={labelFor(c)} k={c} ctl={ctl}
                                 align={typeof rows[0]?.[c] === "number" ? "right" : "left"} />
                   ))}
                   <th className="px-3 py-2"></th>
