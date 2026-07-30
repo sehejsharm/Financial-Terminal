@@ -10,8 +10,9 @@ import { ScrollX } from "@/components/ScrollX";
 import { TickerInput } from "@/components/TickerInput";
 import { MetricCard } from "@/components/MetricCard";
 import { Shell } from "@/components/Shell";
-import { PageHeader } from "@/components/ui";
+import { Note, PageHeader } from "@/components/ui";
 import { StressTest } from "@/components/StressTest";
+import { BookAnalytics } from "@/components/portfolio/BookAnalytics";
 import {
   api,
   type PortfolioHistoryPoint,
@@ -20,6 +21,7 @@ import {
   type PortfolioSummary,
 } from "@/lib/api";
 import { useLive } from "@/lib/useLive";
+import { historyNote, historyStats, sortRows, type SortKey } from "@/lib/portfolioAnalytics";
 import { useLiveTicks, useQuote } from "@/lib/useQuote";
 import { curSymbol, fmtNum, fmtPct, formatPercent, humanNumber } from "@/lib/utils";
 
@@ -152,6 +154,34 @@ function parseCsv(text: string): { rows: ImportRow[]; skipped: string[] } {
   return { rows, skipped };
 }
 
+/** The header cell for a sortable column. A book of forty positions is
+ *  unreadable without this — the interesting rows are the extremes, and
+ *  finding them by eye is the work the table should be doing. */
+function SortHead({ label, col, sort, setSort, align = "right" }: {
+  label: string; col: SortKey | null;
+  sort: { key: SortKey; dir: "asc" | "desc" };
+  setSort: (s: { key: SortKey; dir: "asc" | "desc" }) => void;
+  align?: "left" | "right";
+}) {
+  if (!col) return <th className="px-3 py-2" />;
+  const active = sort.key === col;
+  return (
+    <th className={`px-3 py-2 font-medium whitespace-nowrap ${
+      align === "left" ? "text-left" : "text-right"}`}>
+      <button
+        onClick={() => setSort({
+          key: col,
+          // Re-clicking the active column flips it; a new column starts
+          // descending, which is the direction anyone wants first.
+          dir: active && sort.dir === "desc" ? "asc" : "desc",
+        })}
+        className={`hover:text-amber transition-colors ${active ? "text-amber" : ""}`}>
+        {label}{active && (sort.dir === "desc" ? " ↓" : " ↑")}
+      </button>
+    </th>
+  );
+}
+
 /** Lightweight inline SVG line chart: portfolio value (amber) vs cost basis
  *  (muted, dashed). No charting library — two paths in a viewBox. */
 function HistoryChart({ points, ccy = "" }: { points: PortfolioHistoryPoint[]; ccy?: string }) {
@@ -185,6 +215,9 @@ function HistoryChart({ points, ccy = "" }: { points: PortfolioHistoryPoint[]; c
  *  breakdown, weighted factor exposure. */
 export default function PortfolioPage() {
   const [ticker, setTicker] = useState("");
+  // Weight descending: the biggest exposures are what anyone checks first.
+  const [sort, setSort] = useState<{ key: SortKey; dir: "asc" | "desc" }>(
+    { key: "weight", dir: "desc" });
   const [qty, setQty] = useState("");
   const [cost, setCost] = useState("");
   const [err, setErr] = useState<string | null>(null);
@@ -308,6 +341,7 @@ export default function PortfolioPage() {
 
   const t = data?.totals;
   const f = data?.factors;
+  const hist = historyStats(history ?? []);
   // A portfolio can hold mixed-currency positions (e.g. AAPL in $ + RELIANCE
   // in ₹). Only stamp a currency symbol on the AGGREGATE totals when every
   // position shares one currency; otherwise the summed total isn't a single-
@@ -423,9 +457,45 @@ export default function PortfolioPage() {
                 History accrues one point per day you view the portfolio — check back tomorrow.
               </div>
             ) : (
-              <HistoryChart points={history} ccy={cur} />
+              <>
+                <HistoryChart points={history} ccy={cur} />
+                {/* The line alone hides the ride. These say how rough it was —
+                    and the note refuses to call any of it a return, because
+                    both series step up when a position is added. */}
+                <div className="grid gap-2.5 mt-3"
+                     style={{ gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))" }}>
+                  <div className="hud p-2.5">
+                    <div className="label-xs">Value vs cost</div>
+                    <div className={`num text-base mt-0.5 ${
+                      hist.returnPct == null ? "text-mut"
+                        : hist.returnPct >= 0 ? "text-green" : "text-red"}`}>
+                      {hist.returnPct == null ? "—"
+                        : `${hist.returnPct >= 0 ? "+" : ""}${fmtNum(hist.returnPct, 1)}%`}
+                    </div>
+                  </div>
+                  <div className="hud p-2.5" title="Deepest fall from a high in book value">
+                    <div className="label-xs">Worst drawdown</div>
+                    <div className={`num text-base mt-0.5 ${
+                      (hist.maxDrawdownPct ?? 0) < -10 ? "text-red" : "text-txt"}`}>
+                      {hist.maxDrawdownPct == null ? "—" : `${fmtNum(hist.maxDrawdownPct, 1)}%`}
+                    </div>
+                  </div>
+                  <div className="hud p-2.5">
+                    <div className="label-xs">Best / worst step</div>
+                    <div className="num text-base mt-0.5 text-txt">
+                      {hist.bestDayPct == null ? "—"
+                        : `+${fmtNum(hist.bestDayPct, 1)}% / ${fmtNum(hist.worstDayPct!, 1)}%`}
+                    </div>
+                  </div>
+                  <div className="hud p-2.5">
+                    <div className="label-xs">Points recorded</div>
+                    <div className="num text-base mt-0.5 text-txt">{hist.days}</div>
+                  </div>
+                </div>
+              </>
             )}
           </div>
+          <div className="mt-2"><Note>{historyNote(hist)}</Note></div>
         </div>
       )}
 
@@ -440,16 +510,25 @@ export default function PortfolioPage() {
       {data && data.positions.length > 0 && (
         <div className="grid grid-cols-1 lg:grid-cols-[2fr_1fr] gap-6">
           <ScrollX className="panel">
-            <table className="w-full text-xs">
+            <table className="w-full text-xs" data-testid="holdings">
               <thead className="text-mut uppercase tracking-wider">
                 <tr className="border-b border-line">
-                  {["Ticker", "Qty", "Cost", "Price", "Value", "P&L", "P&L %", "Day P&L", "Weight", ""].map((h) => (
-                    <th key={h} className={`px-3 py-2 font-medium whitespace-nowrap ${h === "Ticker" ? "text-left" : "text-right"}`}>{h}</th>
-                  ))}
+                  <SortHead label="Ticker" col="ticker" sort={sort} setSort={setSort} align="left" />
+                  <SortHead label="Qty" col="qty" sort={sort} setSort={setSort} />
+                  <SortHead label="Cost" col="cost" sort={sort} setSort={setSort} />
+                  <SortHead label="Price" col="price" sort={sort} setSort={setSort} />
+                  <SortHead label="Value" col="value" sort={sort} setSort={setSort} />
+                  <SortHead label="P&L" col="pnl" sort={sort} setSort={setSort} />
+                  <SortHead label="P&L %" col="pnl_pct" sort={sort} setSort={setSort} />
+                  <SortHead label="Day P&L" col="day_pnl" sort={sort} setSort={setSort} />
+                  <SortHead label="Weight" col="weight" sort={sort} setSort={setSort} />
+                  <SortHead label="" col={null} sort={sort} setSort={setSort} />
                 </tr>
               </thead>
               <tbody>
-                {data.positions.map((p) => <LivePositionRow key={p.id} p={p} onClose={close} />)}
+                {sortRows(data.positions, sort.key, sort.dir).map((p) => (
+                  <LivePositionRow key={(p as PortfolioRow).id} p={p as PortfolioRow} onClose={close} />
+                ))}
               </tbody>
             </table>
           </ScrollX>
@@ -485,6 +564,13 @@ export default function PortfolioPage() {
             </div>
           </div>
         </div>
+      )}
+
+      {/* Concentration, attribution and where the beta comes from — all from
+          the rows already on the page, so no extra request. */}
+      {data && data.positions.length > 0 && (
+        <BookAnalytics positions={data.positions} sectors={data.sectors ?? []}
+                       cur={cur} mixedCcy={mixedCcy} />
       )}
 
       {/* Stress test — collapsed by default, it costs a history fetch per holding */}

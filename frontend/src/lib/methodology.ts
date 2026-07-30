@@ -147,6 +147,46 @@ export const METHODOLOGY: Record<string, Methodology> = {
     ],
   },
 
+  bookAnalytics: {
+    kind: "computed",
+    what: "How concentrated the book is, which positions moved it, and which "
+      + "holdings supply its market sensitivity.",
+    formula: "HHI = Σ(weight²) · effective positions = 1 / HHI · share of "
+      + "movement = |position P&L| / Σ|position P&L| · beta contribution = "
+      + "weight × beta",
+    inputs: [
+      "Position quantities and average cost from your own entries.",
+      "Live prices where the socket has them, the REST snapshot otherwise.",
+      "Each holding's provider beta and sector.",
+    ],
+    assumptions: [
+      "Weights are market value, so concentration reads exposure as it stands "
+        + "rather than as it was bought.",
+      "Beta is normalised over the holdings that HAVE one, not over the whole "
+        + "book — dividing by total value would understate it in proportion to "
+        + "the provider's gaps.",
+      "Share of movement is measured against the sum of absolute P&L. Against "
+        + "the net it is unbounded: a winner offset by a loser would report "
+        + "1,000% and −900%.",
+    ],
+    limits: [
+      "Correlation between holdings is not measured. Twenty names in one "
+        + "industry is one bet however the effective count reads, which is why "
+        + "the sector figure is shown beside it.",
+      "P&L is unrealised, against average cost. It excludes closed positions, "
+        + "dividends received and every cost of trading, so it is not a return.",
+      "Each beta is a backward-looking regression against whichever index and "
+        + "window the provider chose. Betas also converge upward in a selloff, "
+        + "so this understates the book's behaviour in exactly the conditions "
+        + "it is consulted about.",
+      "A mixed-currency book is summed without conversion — the totals are not "
+        + "single-currency figures and are shown unsymboled when that is the "
+        + "case.",
+      "Nothing here knows your horizon, your other assets, or what the "
+        + "positions are for.",
+    ],
+  },
+
   stress: {
     kind: "computed",
     what: "What this book would have done under a chosen shock.",
