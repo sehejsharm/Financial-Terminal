@@ -8,6 +8,7 @@ import { ChevronLeft, ChevronRight } from "lucide-react";
 
 import { AIPanel } from "@/components/AIPanel";
 import { PerformancePanel } from "@/components/terminal/PerformancePanel";
+import { TechnicalReadout } from "@/components/terminal/TechnicalReadout";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
 import { CapitalStructureView } from "@/components/CapitalStructure";
 import { Comparables } from "@/components/Comparables";
@@ -448,6 +449,12 @@ function TerminalInner() {
               <PriceChart data={candles} height={520} config={chartCfg} symbol={ticker} />
             </div>
           </div>
+
+          {/* The chart shows the lines; this says what they read. Same candles,
+              so it moves with the period buttons above and costs no request. */}
+          <div className="mt-6">
+            <TechnicalReadout candles={candles} />
+          </div>
         </>
       )}
 
@@ -473,7 +480,7 @@ function TerminalInner() {
       )}
       {!loading && !err && fn === "AI deep-dive" && <AIPanel ticker={ticker} />}
       {!loading && !err && fn === "Recent news" && <News ticker={ticker} />}
-      {!loading && !err && fn === "Notes" && <Notes ticker={ticker} />}
+      {!loading && !err && fn === "Notes" && <Notes ticker={ticker} price={price} currency={cur} />}
       </ErrorBoundary>
     </Shell>
   );

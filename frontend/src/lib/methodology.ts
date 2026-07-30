@@ -43,23 +43,40 @@ export const METHODOLOGY: Record<string, Methodology> = {
       "D — total debt from the latest reported balance sheet.",
       "β — the provider's levered beta, typically against a local index over "
         + "five years of monthly returns.",
-      "rf, the equity risk premium and the tax rate — your inputs, with "
-        + "regional defaults pre-filled.",
+      "rf, the equity risk premium, the cost of debt and the tax rate — your "
+        + "inputs, pre-filled from the listing's exchange (Indian, US, UK, "
+        + "euro-area, Japanese or Hong Kong rate sets).",
+      "ROCE for the spread comparison — the provider's figure, or EBIT over "
+        + "capital employed computed from the statements when they don't carry "
+        + "one.",
     ],
     assumptions: [
       "CAPM holds: expected equity return is linear in beta.",
       "Today's capital structure is the one that persists.",
-      "The cost of debt is constant across the whole debt stack.",
+      "The cost of debt is constant across the whole debt stack, and "
+        + "independent of how much is borrowed — which stops being true at "
+        + "high leverage.",
       "The marginal tax rate equals the effective one.",
+      "The regional rate defaults are round anchors, not today's quotes. They "
+        + "are there to be overwritten.",
     ],
     limits: [
       "Beta is a backward-looking regression, and the number changes "
         + "materially with the window and index chosen.",
       "Off-balance-sheet obligations (leases, guarantees) are not in D unless "
-        + "the filing capitalised them.",
+        + "the filing capitalised them, and D is at book rather than market.",
       "The equity risk premium is not observable; it is an assumption you are "
-        + "choosing, and the output moves roughly one-for-one with it.",
-      "No country or size premium is applied.",
+        + "choosing, and the output moves roughly one-for-one with it. That is "
+        + "why the sensitivity grid is there — the centre cell is not more "
+        + "true than the corners.",
+      "The country or size premium is whatever you type into the extra-premium "
+        + "field; nothing is applied automatically.",
+      "The terminal multiple is a plain perpetuity, 1/(WACC − g). It has no "
+        + "finite value once growth reaches the discount rate, and the screen "
+        + "refuses rather than printing a very large number.",
+      "The ROCE spread compares a single trailing year against a forward-"
+        + "looking cost of capital. A spread that exists today is not a spread "
+        + "that persists — competition closes most of them.",
     ],
   },
 
@@ -88,6 +105,45 @@ export const METHODOLOGY: Record<string, Methodology> = {
         + "American; early exercise is not modelled.",
       "Greeks are instantaneous. They are wrong the moment anything moves, "
         + "and second-order effects are not shown except gamma.",
+    ],
+  },
+
+  optionChain: {
+    kind: "computed",
+    what: "What the chain is pricing: the move implied by expiry, the cost of "
+      + "protection against participation, where open interest sits, and "
+      + "whether any of it can be traded at the prices shown.",
+    formula: "expected move = (ATM call + ATM put) / spot · skew = 10% OTM put "
+      + "IV − 10% OTM call IV · spread = (ask − bid) / mid",
+    inputs: [
+      "The chain rows already on the page — bids, asks, last prices, volume, "
+        + "open interest and the provider's implied volatilities.",
+      "Mid prices where both sides are quoted; the last trade only as a "
+        + "fallback, because a last price on a contract that didn't trade "
+        + "today is history rather than a quote.",
+    ],
+    assumptions: [
+      "The at-the-money straddle prices the expected move. That holds well "
+        + "enough at the money and gets worse the further out you go.",
+      "The two nearest strikes must be the SAME strike — a call at one strike "
+        + "against a put at another is a strangle, and the screen refuses to "
+        + "price it as a straddle.",
+      "The provider's implied volatilities are comparable across strikes, "
+        + "which requires them to have been fitted consistently.",
+    ],
+    limits: [
+      "The expected move is roughly a one-standard-deviation range, so it is "
+        + "wrong about a third of the time by construction. It is not a bound.",
+      "Open-interest walls say where flow concentrates because dealers hedge "
+        + "there. They do not say where price goes, and open interest never "
+        + "reveals which side initiated a position — a put is as likely to be "
+        + "a hedge on a long as a bet on a fall.",
+      "Equity chains are almost always put-skewed, so the sign of the skew is "
+        + "not information; only its size, and a call-skewed chain, are.",
+      "Free option feeds thin out fast away from the money. A skew or a wall "
+        + "read off two quoted contracts is not a surface.",
+      "Where the median spread is wide, any edge a Greeks model identifies "
+        + "that is smaller than the spread does not exist.",
     ],
   },
 
@@ -351,6 +407,45 @@ export const METHODOLOGY: Record<string, Methodology> = {
         + "zero output.",
       "Private and unlisted counterparties carry no ticker, so they are "
         + "excluded from the trade plan while still being real exposure.",
+    ],
+  },
+
+  technicals: {
+    kind: "computed",
+    what: "What each indicator currently reads, in words, plus the swing "
+      + "levels directly above and below the price.",
+    formula: "textbook definitions throughout · levels = swing pivots (5 bars "
+      + "either side) clustered within 1.5%",
+    inputs: [
+      "Only the daily bars the chart has loaded for the selected period — no "
+        + "extra request, and the readings move when you change the period.",
+      "Wilder's smoothing for RSI, ATR, ADX and MFI, which is what a terminal "
+        + "uses; an EMA in its place gives numbers that look close and never "
+        + "match.",
+    ],
+    assumptions: [
+      "The conventional thresholds (RSI 70/30, stochastic 80/20, ADX 25) mean "
+        + "the same thing across every name and regime, which is a convenience "
+        + "rather than a fact.",
+      "A swing pivot that three separate swings agree on is a level; three "
+        + "lines within 1.5% of each other are one level, not three.",
+    ],
+    limits: [
+      "The bull/bear figure is a COUNT, not a score. Most of these indicators "
+        + "are functions of the same few moving averages, so several agreeing "
+        + "is often one observation repeated rather than independent "
+        + "confirmation.",
+      "Every indicator here is computed from past prices alone. They describe "
+        + "what has happened, and all of them turn late.",
+      "ADX, ATR and Bollinger position carry no direction and are reported "
+        + "rather than scored — a high ADX in a downtrend is not bullish, and "
+        + "price rides the upper band throughout an advance.",
+      "Levels come from this window's bars only, so a different chart period "
+        + "produces different levels. Volume traded at a level matters more "
+        + "than the level itself, and that is not modelled here.",
+      "Gaps, splits handled by the provider, and thin-volume prints all feed "
+        + "straight through. Nothing here knows about earnings dates, index "
+        + "rebalances or anything else that explains a move.",
     ],
   },
 
