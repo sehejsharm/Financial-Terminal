@@ -89,6 +89,52 @@ def _get(path: str, params: dict | None = None, retries: int = 1):
     return None
 
 
+_ARCHIVE_HOSTS = ("nsearchives.nseindia.com", "www.nseindia.com",
+                  "nseindia.com", "archives.nseindia.com")
+
+
+def get_text(url: str, timeout: int = 20) -> str | None:
+    """Fetch an absolute NSE URL as text, reusing the warmed browser session.
+
+    Filing documents live on nsearchives.nseindia.com rather than the API
+    host, so `_get`'s hardcoded base cannot reach them. The session cookie is
+    issued for `.nseindia.com` and so covers the archive subdomain, but the
+    warm-up still has to have happened — hence going through `_session()`
+    rather than a bare request.
+
+    Host-locked on purpose: this takes a URL out of NSE's own JSON, and
+    following that to an arbitrary host would let the feed decide what this
+    server fetches.
+    """
+    global _SESSION
+    if not url or not url.lower().startswith("https://"):
+        return None
+    host = url.split("/", 3)[2].split(":")[0].lower()
+    if host not in _ARCHIVE_HOSTS:
+        return None
+    for attempt in range(2):
+        s = _session()
+        if s is None:
+            return None
+        try:
+            r = s.get(url, headers=_HEADERS, timeout=timeout)
+            if r.status_code == 200:
+                return r.text
+            if r.status_code in (401, 403) and attempt == 0:
+                with _LOCK:
+                    _SESSION = None
+                continue
+            return None
+        except Exception:
+            if attempt == 0:
+                with _LOCK:
+                    _SESSION = None
+                time.sleep(0.4)
+                continue
+            return None
+    return None
+
+
 def _clean_symbol(ticker: str) -> str | None:
     """Strip suffix; NSE API uses bare symbols. Indices not supported here."""
     if not ticker or ticker.startswith("^"):

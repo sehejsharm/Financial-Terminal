@@ -76,7 +76,11 @@ def enrich_indian(ticker: str, f: dict) -> dict:
 
     out = dict(f)
     try:
-        parsed = nf.financial_results(ticker, quarterly=True)
+        # One document per HTTP fetch, and this runs per ticker across a whole
+        # universe — five documents each would turn a screen into minutes of
+        # requests. Two is enough for year-on-year growth, because a filing's
+        # XBRL carries its own quarter and the year-ago comparative together.
+        parsed = nf.financial_results(ticker, quarterly=True, max_docs=2)
     except Exception:
         parsed = {"columns": [], "rows": []}
 

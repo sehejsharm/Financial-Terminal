@@ -83,18 +83,28 @@ def reset_performance(user: dict = Depends(auth.require_master_admin)):
 
 
 @router.get("/nse-probe/{ticker}")
-def nse_probe(ticker: str, quarterly: bool = True,
+def nse_probe(ticker: str, quarterly: bool = True, max_docs: int = 2,
              _user: dict = Depends(auth.require_master_admin)):
-    """NSE's raw financial-results row next to how it got parsed.
+    """A results filing's raw XBRL next to how it got parsed.
 
-    The field names `lib/nse_financials.py` matches against were written from
-    memory, not from a live NSE response — the dev sandbox that built them has
-    no outbound internet. This runs on the real backend, which does, so it is
-    the way to actually confirm the mapping: hit it for a known ticker (e.g.
-    RELIANCE) and check `unmapped_lines` is empty and `mapping[].value` looks
-    like the right order of magnitude. If a line is unmapped or wrong, its
-    `raw_keys`/`raw_sample_row` show the real key to add to `_LINES` or
-    `_FUZZY` in nse_financials.py.
+    The first run of this endpoint is what showed that
+    /api/corporates-financial-results is an announcement index carrying no
+    line items at all — every field it returns is metadata, which is why all
+    twelve statement lines came back unmapped. The numbers are in the XBRL
+    document that index links to, and this now reports on that document.
+
+    Read the response in this order:
+
+      documents[].consistency  — the filing's own identities. Revenue plus
+        other income IS total income in any real filing, whatever the tags
+        are called, and net income over EPS has to give a believable share
+        count. All `ok` means the mapping is right; a `MISMATCH` names which
+        identity broke, which is a mismapped line or a scale error.
+      documents[].unmapped_lines — lines with no tag found. Some are genuine
+        (a bank files no `Depreciation`); the rest are wrong guesses.
+      documents[].all_numeric_facts — every tag present in that period,
+        largest first. This is the definitive answer for anything unmapped:
+        the real element name is in this list.
     """
     from lib import nse_financials
-    return nse_financials.probe(ticker, quarterly=quarterly)
+    return nse_financials.probe(ticker, quarterly=quarterly, max_docs=max_docs)

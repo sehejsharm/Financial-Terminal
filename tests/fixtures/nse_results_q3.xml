@@ -1,0 +1,147 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  A cut-down Ind-AS results filing in the shape NSE serves from
+  nsearchives.nseindia.com/corporate/xbrl/INDAS_*.xml.
+
+  It carries the traps a real filing carries, because those are what the
+  parser has to survive:
+    - the quarter AND its year-ago comparative AND a nine-month cumulative
+      AND a full prior year, all in one document, told apart only by their
+      context's date span
+    - a segment-dimensioned context holding a much smaller revenue, which
+      must never be mistaken for the group figure
+    - decimals="-7" on values that are already absolute rupees, to pin that
+      it is a precision statement and not a multiplier
+    - a nil fact, which means "not reported" rather than zero
+    - DeferredTaxExpense next to TaxExpense, and a discontinued-operations
+      profit line, both of which a loose match would grab by mistake
+
+  Figures are internally consistent so the identity checks can be asserted:
+    revenue + other income = total income
+    total income - expenses  = pre-tax income
+    pre-tax income - tax     = net income
+    net income / basic EPS   = ~1.35e10 shares
+-->
+<xbrli:xbrl
+    xmlns:xbrli="http://www.xbrl.org/2003/instance"
+    xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+    xmlns:xbrldi="http://xbrl.org/2006/xbrldi"
+    xmlns:in-capmkt="http://www.nseindia.com/xbrl/capmkt">
+
+  <!-- The reported quarter. -->
+  <xbrli:context id="Q3FY25">
+    <xbrli:entity>
+      <xbrli:identifier scheme="http://www.nseindia.com">INE002A01018</xbrli:identifier>
+    </xbrli:entity>
+    <xbrli:period>
+      <xbrli:startDate>2024-10-01</xbrli:startDate>
+      <xbrli:endDate>2024-12-31</xbrli:endDate>
+    </xbrli:period>
+  </xbrli:context>
+
+  <!-- The year-ago comparative, in the same document. -->
+  <xbrli:context id="Q3FY24">
+    <xbrli:entity>
+      <xbrli:identifier scheme="http://www.nseindia.com">INE002A01018</xbrli:identifier>
+    </xbrli:entity>
+    <xbrli:period>
+      <xbrli:startDate>2023-10-01</xbrli:startDate>
+      <xbrli:endDate>2023-12-31</xbrli:endDate>
+    </xbrli:period>
+  </xbrli:context>
+
+  <!-- Nine months cumulative: three times a quarter's revenue. -->
+  <xbrli:context id="NineMFY25">
+    <xbrli:entity>
+      <xbrli:identifier scheme="http://www.nseindia.com">INE002A01018</xbrli:identifier>
+    </xbrli:entity>
+    <xbrli:period>
+      <xbrli:startDate>2024-04-01</xbrli:startDate>
+      <xbrli:endDate>2024-12-31</xbrli:endDate>
+    </xbrli:period>
+  </xbrli:context>
+
+  <!-- The prior full year. -->
+  <xbrli:context id="FY24">
+    <xbrli:entity>
+      <xbrli:identifier scheme="http://www.nseindia.com">INE002A01018</xbrli:identifier>
+    </xbrli:entity>
+    <xbrli:period>
+      <xbrli:startDate>2023-04-01</xbrli:startDate>
+      <xbrli:endDate>2024-03-31</xbrli:endDate>
+    </xbrli:period>
+  </xbrli:context>
+
+  <!-- Same quarter, one reporting segment only. -->
+  <xbrli:context id="Q3FY25Retail">
+    <xbrli:entity>
+      <xbrli:identifier scheme="http://www.nseindia.com">INE002A01018</xbrli:identifier>
+      <xbrli:segment>
+        <xbrldi:explicitMember dimension="in-capmkt:BusinessSegmentAxis"
+        >in-capmkt:RetailSegmentMember</xbrldi:explicitMember>
+      </xbrli:segment>
+    </xbrli:entity>
+    <xbrli:period>
+      <xbrli:startDate>2024-10-01</xbrli:startDate>
+      <xbrli:endDate>2024-12-31</xbrli:endDate>
+    </xbrli:period>
+  </xbrli:context>
+
+  <!-- A balance-sheet-style instant, which is not a reporting window at all. -->
+  <xbrli:context id="AsAt31Dec2024">
+    <xbrli:entity>
+      <xbrli:identifier scheme="http://www.nseindia.com">INE002A01018</xbrli:identifier>
+    </xbrli:entity>
+    <xbrli:period><xbrli:instant>2024-12-31</xbrli:instant></xbrli:period>
+  </xbrli:context>
+
+  <xbrli:unit id="INR">
+    <xbrli:measure>iso4217:INR</xbrli:measure>
+  </xbrli:unit>
+  <xbrli:unit id="INRPerShare">
+    <xbrli:divide>
+      <xbrli:unitNumerator><xbrli:measure>iso4217:INR</xbrli:measure></xbrli:unitNumerator>
+      <xbrli:unitDenominator><xbrli:measure>xbrli:shares</xbrli:measure></xbrli:unitDenominator>
+    </xbrli:divide>
+  </xbrli:unit>
+
+  <!-- ── the reported quarter ─────────────────────────────────────────── -->
+  <in-capmkt:RevenueFromOperations contextRef="Q3FY25" unitRef="INR" decimals="-7">2432730000000</in-capmkt:RevenueFromOperations>
+  <in-capmkt:OtherIncome contextRef="Q3FY25" unitRef="INR" decimals="-7">55350000000</in-capmkt:OtherIncome>
+  <in-capmkt:Income contextRef="Q3FY25" unitRef="INR" decimals="-7">2488080000000</in-capmkt:Income>
+  <in-capmkt:Expenses contextRef="Q3FY25" unitRef="INR" decimals="-7">2226570000000</in-capmkt:Expenses>
+  <in-capmkt:FinanceCosts contextRef="Q3FY25" unitRef="INR" decimals="-7">62800000000</in-capmkt:FinanceCosts>
+  <in-capmkt:DepreciationDepletionAndAmortisationExpense contextRef="Q3FY25" unitRef="INR" decimals="-7">134020000000</in-capmkt:DepreciationDepletionAndAmortisationExpense>
+  <in-capmkt:ProfitBeforeTax contextRef="Q3FY25" unitRef="INR" decimals="-7">261510000000</in-capmkt:ProfitBeforeTax>
+  <in-capmkt:TaxExpense contextRef="Q3FY25" unitRef="INR" decimals="-7">66220000000</in-capmkt:TaxExpense>
+  <in-capmkt:CurrentTax contextRef="Q3FY25" unitRef="INR" decimals="-7">54100000000</in-capmkt:CurrentTax>
+  <in-capmkt:DeferredTaxExpense contextRef="Q3FY25" unitRef="INR" decimals="-7">12120000000</in-capmkt:DeferredTaxExpense>
+  <in-capmkt:ProfitLossForPeriod contextRef="Q3FY25" unitRef="INR" decimals="-7">195290000000</in-capmkt:ProfitLossForPeriod>
+  <in-capmkt:ProfitLossForPeriodFromDiscontinuedOperations contextRef="Q3FY25" unitRef="INR" decimals="-7">0</in-capmkt:ProfitLossForPeriodFromDiscontinuedOperations>
+  <in-capmkt:BasicEarningsLossPerShare contextRef="Q3FY25" unitRef="INRPerShare" decimals="2">14.43</in-capmkt:BasicEarningsLossPerShare>
+  <in-capmkt:DilutedEarningsLossPerShare contextRef="Q3FY25" unitRef="INRPerShare" decimals="2">14.41</in-capmkt:DilutedEarningsLossPerShare>
+  <in-capmkt:ExceptionalItems contextRef="Q3FY25" unitRef="INR" xsi:nil="true"/>
+
+  <!-- ── the year-ago comparative ─────────────────────────────────────── -->
+  <in-capmkt:RevenueFromOperations contextRef="Q3FY24" unitRef="INR" decimals="-7">2255350000000</in-capmkt:RevenueFromOperations>
+  <in-capmkt:OtherIncome contextRef="Q3FY24" unitRef="INR" decimals="-7">42910000000</in-capmkt:OtherIncome>
+  <in-capmkt:Income contextRef="Q3FY24" unitRef="INR" decimals="-7">2298260000000</in-capmkt:Income>
+  <in-capmkt:ProfitBeforeTax contextRef="Q3FY24" unitRef="INR" decimals="-7">233740000000</in-capmkt:ProfitBeforeTax>
+  <in-capmkt:ProfitLossForPeriod contextRef="Q3FY24" unitRef="INR" decimals="-7">174650000000</in-capmkt:ProfitLossForPeriod>
+  <in-capmkt:BasicEarningsLossPerShare contextRef="Q3FY24" unitRef="INRPerShare" decimals="2">12.90</in-capmkt:BasicEarningsLossPerShare>
+
+  <!-- ── cumulative, must never land in a quarterly column ────────────── -->
+  <in-capmkt:RevenueFromOperations contextRef="NineMFY25" unitRef="INR" decimals="-7">7050000000000</in-capmkt:RevenueFromOperations>
+  <in-capmkt:ProfitLossForPeriod contextRef="NineMFY25" unitRef="INR" decimals="-7">560000000000</in-capmkt:ProfitLossForPeriod>
+
+  <!-- ── prior full year ──────────────────────────────────────────────── -->
+  <in-capmkt:RevenueFromOperations contextRef="FY24" unitRef="INR" decimals="-7">9000000000000</in-capmkt:RevenueFromOperations>
+  <in-capmkt:ProfitLossForPeriod contextRef="FY24" unitRef="INR" decimals="-7">697040000000</in-capmkt:ProfitLossForPeriod>
+
+  <!-- ── one segment of the same quarter ──────────────────────────────── -->
+  <in-capmkt:RevenueFromOperations contextRef="Q3FY25Retail" unitRef="INR" decimals="-7">300000000000</in-capmkt:RevenueFromOperations>
+
+  <!-- ── a balance-sheet instant ──────────────────────────────────────── -->
+  <in-capmkt:Assets contextRef="AsAt31Dec2024" unitRef="INR" decimals="-7">1900000000000</in-capmkt:Assets>
+
+</xbrli:xbrl>

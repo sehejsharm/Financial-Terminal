@@ -38,17 +38,19 @@ _KINDS = {"income": INCOME_ROWS, "balance": BALANCE_ROWS, "cashflow": CASHFLOW_R
 
 
 _UNAVAIL_NOTE = ("Financial statements are unavailable for this ticker from "
-                 "the configured providers (FMP, then NSE's own results feed "
-                 "for Indian listings, then yfinance). FMP's free tier covers "
-                 "US listings; if FMP_API_KEY isn't set, US coverage is "
-                 "limited to what yfinance allows from this host.")
+                 "the configured providers (FMP, then the company's own XBRL "
+                 "results filing on NSE for Indian listings, then yfinance). "
+                 "FMP's free tier covers US listings; if FMP_API_KEY isn't "
+                 "set, US coverage is limited to what yfinance allows from "
+                 "this host.")
 
-# NSE publishes the filing summary a company submits, which is the income
-# statement only. Asking it for a balance sheet or a cash flow gets a truthful
-# "this source doesn't carry that" rather than an empty frame that reads as a
-# company with no assets.
-_NSE_KIND_NOTE = ("NSE's results feed carries the income statement a company "
-                  "files with the exchange — there is no balance sheet or cash "
+# The XBRL a company files with its quarterly results is an income statement.
+# Asking it for a balance sheet or a cash flow gets a truthful "this source
+# doesn't carry that" rather than an empty frame that reads as a company with
+# no assets.
+_NSE_KIND_NOTE = ("These figures come from the XBRL document a company files "
+                  "with its quarterly results on NSE, which carries the "
+                  "income statement only — there is no balance sheet or cash "
                   "flow in it, and no free API exposes those for Indian "
                   "listings. The income statement above IS available.")
 
@@ -80,9 +82,10 @@ def statement(ticker: str, kind: str, quarterly: bool = False,
                     "columns": fmp["columns"], "rows": fmp["rows"],
                     "source": "FMP"}
 
-    # NSE's own results feed: the only free source of statements for Indian
-    # listings, and the reason FA was empty for the market this app is built
-    # around. Income statement only — the exchange filing carries nothing else.
+    # The company's own XBRL results filing on NSE: the only free source of
+    # statements for Indian listings, and the reason FA was empty for the
+    # market this app is built around. Income statement only — the results
+    # filing carries nothing else.
     if nse.is_indian(ticker):
         try:
             parsed = nse_financials.financial_results(ticker, quarterly=True)
