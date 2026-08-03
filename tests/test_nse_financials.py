@@ -7,8 +7,8 @@ in particular the refusals — a wrong revenue figure is worse than a missing
 one, because it looks exactly like a real one.
 """
 from lib.nse_financials import (
-    financial_results, latest_period, parse_results, series, trailing_twelve,
-    yoy_growth,
+    financial_results, latest_period, parse_results, probe, series,
+    trailing_twelve, yoy_growth,
 )
 
 
@@ -157,3 +157,80 @@ class TestFetch:
         for payload in (QUARTERS, {"data": QUARTERS}):
             monkeypatch.setattr("lib.nse._get", lambda *a, **k: payload)
             assert len(financial_results("RELIANCE.NS")["columns"]) == 5
+
+
+class TestFuzzyFallback:
+    """`_LINES`'s exact spellings were written from memory, never checked
+    against a live NSE response. These pin the fallback that exists because
+    that guess might be wrong: if the exact key isn't present, a filing using
+    a differently-worded but recognisable key should still be found."""
+
+    def test_finds_revenue_under_a_spelling_not_in_the_exact_list(self):
+        row = {"re_to_date": "30-Jun-2025", "re_unit": "Lakhs",
+               "revenue_from_operations": "500000"}
+        p = parse_results([row])
+        assert series(p, "Revenue")[0] == 500000 * 1e5
+
+    def test_finds_net_income_via_the_pat_abbreviation(self):
+        row = {"re_to_date": "30-Jun-2025", "re_unit": "Lakhs", "re_pat_fig": "9000"}
+        p = parse_results([row])
+        assert series(p, "Net Income")[0] == 9000 * 1e5
+
+    def test_does_not_match_an_unrelated_key(self):
+        # "net_worth" shares no fuzzy word-set with any canonical line.
+        row = {"re_to_date": "30-Jun-2025", "re_unit": "Lakhs", "net_worth": "1"}
+        p = parse_results([row])
+        assert series(p, "Revenue") == []
+
+    def test_two_lines_never_claim_the_same_key(self):
+        # A key ambiguous enough to satisfy two word-sets should only ever
+        # feed the first canonical line that claims it (Revenue precedes
+        # Total income in _LINES), never both.
+        row = {"re_to_date": "30-Jun-2025", "re_unit": "Lakhs",
+               "total_revenue_and_income": "100"}
+        p = parse_results([row])
+        matched_lines = [r["line"] for r in p["rows"]
+                         if r.get("2025-06-30") == 100 * 1e5]
+        assert len(matched_lines) == 1
+
+    def test_exact_spelling_still_wins_over_fuzzy_when_both_present(self):
+        row = {"re_to_date": "30-Jun-2025", "re_unit": "Lakhs",
+               "re_net_sal": "500000", "revenue_from_operations": "999999"}
+        p = parse_results([row])
+        assert series(p, "Revenue")[0] == 500000 * 1e5
+
+
+class TestProbe:
+    """The diagnostic meant to close the loop this dev sandbox can't: it has
+    no outbound internet, so `_LINES`/`_FUZZY` were never checked against a
+    real NSE response. `probe()` is meant to run on infrastructure that DOES
+    have NSE access and show exactly what matched."""
+
+    def test_reports_unreachable_nse_honestly(self, monkeypatch):
+        monkeypatch.setattr("lib.nse._get", lambda *a, **k: None)
+        r = probe("RELIANCE.NS")
+        assert r["ok"] is False
+
+    def test_refuses_a_ticker_it_cannot_clean(self):
+        assert probe("^NSEI")["ok"] is False
+
+    def test_reports_the_mapping_for_a_working_feed(self, monkeypatch):
+        monkeypatch.setattr("lib.nse._get", lambda *a, **k: QUARTERS)
+        r = probe("RELIANCE.NS")
+        assert r["ok"] is True
+        # The fixture's own filing only carries these lines — "unmapped" here
+        # correctly means "this filing didn't report it", not "the key guess
+        # was wrong".
+        assert "Revenue" not in r["unmapped_lines"]
+        revenue = next(m for m in r["mapping"] if m["line"] == "Revenue")
+        assert revenue["matched_key"] == "re_net_sal"
+        assert revenue["matched_via"] == "exact"
+        assert revenue["value"] == 1050000 * 1e5
+
+    def test_names_the_unmapped_lines_when_a_key_is_genuinely_wrong(self, monkeypatch):
+        # A filing with none of the recognised spellings for Interest.
+        row = {"re_to_date": "30-Jun-2025", "re_unit": "Lakhs", "re_net_sal": "1"}
+        monkeypatch.setattr("lib.nse._get", lambda *a, **k: [row])
+        r = probe("RELIANCE.NS")
+        assert "Interest" in r["unmapped_lines"]
+        assert r["raw_keys"] == sorted(row.keys())

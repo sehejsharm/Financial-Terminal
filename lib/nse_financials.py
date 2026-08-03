@@ -17,9 +17,20 @@ lakhs or crores depending on what the company declared, with keys that differ
 between the consolidated and standalone filings and occasionally between
 companies. Anything unrecognised is dropped rather than guessed at — a wrong
 revenue figure is worse than a missing one.
+
+The `_LINES` key list below is the exact-spelling guess. It was written from
+memory of NSE's field names, not from a live response — this sandbox has no
+outbound internet, so it could never be checked against the real feed before
+shipping. Two things compensate for that risk rather than pretending it isn't
+there: a token-based fuzzy fallback (`_FUZZY`) that still finds the right
+column if the exact spelling is wrong, and `probe()`, which returns NSE's raw
+row next to what got parsed from it so a wrong mapping is visible and fixable
+in minutes once this runs somewhere with real network access (see
+`backend/routes/admin.py`'s `/admin/nse-probe/{ticker}`).
 """
 from __future__ import annotations
 
+import re
 from datetime import date, datetime
 
 from lib import nse
@@ -43,6 +54,54 @@ _LINES: list[tuple[str, tuple[str, ...]]] = [
     ("EPS (basic)", ("re_basic_eps_for_cont_dic_optd", "re_basic_eps", "eps")),
     ("EPS (diluted)", ("re_dil_eps_for_cont_dic_optd", "re_diluted_eps")),
 ]
+
+# Fallback for when the exact key above is wrong. Each entry is a set of
+# WORDS (not substrings) that must all appear, in any order, among a key's
+# underscore-separated tokens — e.g. {"net", "profit"} matches
+# "re_net_profit_incl_oci" but not "re_net_worth". Tried only for a column
+# where no exact key matched, and only against keys not already claimed by
+# another line in the same row, so two canonical lines can't collapse onto
+# one NSE field.
+_FUZZY: dict[str, tuple[frozenset[str], ...]] = {
+    "Revenue": (frozenset({"net", "sale"}), frozenset({"revenue"}),
+                frozenset({"total", "revenue"}), frozenset({"net", "sales"})),
+    "Other income": (frozenset({"other", "income"}),),
+    "Total income": (frozenset({"total", "income"}),),
+    "Total expenditure": (frozenset({"total", "expenditure"}),
+                          frozenset({"total", "expense"})),
+    "Operating Income": (frozenset({"operating", "profit"}),
+                        frozenset({"op", "profit"})),
+    "Interest": (frozenset({"finance", "cost"}), frozenset({"interest"})),
+    "Depreciation": (frozenset({"depreciation"}), frozenset({"dep", "amort"})),
+    "Pre-Tax Income": (frozenset({"profit", "before", "tax"}),
+                       frozenset({"pbt"})),
+    "Tax Provision": (frozenset({"tax", "expense"}),
+                      frozenset({"provision", "tax"}), frozenset({"total", "tax"})),
+    "Net Income": (frozenset({"profit", "after", "tax"}),
+                  frozenset({"net", "profit"}), frozenset({"pat"}),
+                  frozenset({"profit", "period"})),
+    "EPS (basic)": (frozenset({"basic", "eps"}),),
+    "EPS (diluted)": (frozenset({"diluted", "eps"}),),
+}
+
+
+def _tokens(key: str) -> set[str]:
+    return set(re.split(r"[^a-z0-9]+", str(key).lower())) - {""}
+
+
+def _fuzzy_match(raw: dict, line: str, exclude: set[str]) -> str | None:
+    """The first unclaimed key in `raw` whose tokens satisfy one of `line`'s
+    fuzzy word-sets. Deterministic: keys are tried in sorted order."""
+    wordsets = _FUZZY.get(line)
+    if not wordsets:
+        return None
+    for key in sorted(raw.keys()):
+        if key in exclude or not isinstance(key, str):
+            continue
+        toks = _tokens(key)
+        if any(ws <= toks for ws in wordsets):
+            return key
+    return None
 
 # NSE reports in lakhs unless the filing says otherwise. Everything else in
 # this app is in absolute currency units, so the scale has to be applied here
@@ -92,6 +151,40 @@ def _period_end(row: dict) -> str | None:
     return None
 
 
+def _extract_row(raw: dict) -> dict[str, tuple[str | None, float | None]]:
+    """One filing row → {line: (key_used, scaled_value)} for every canonical
+    line, trying the exact spellings first and the fuzzy word-match second.
+
+    Claiming is per-row: once a key has supplied a value for one line it is
+    removed from consideration for the rest of that same row, so a guessed
+    fuzzy match can't collapse two different lines onto one NSE field.
+    """
+    claimed: set[str] = set()
+    out: dict[str, tuple[str | None, float | None]] = {}
+    for line, keys in _LINES:
+        key_used: str | None = None
+        val: float | None = None
+        for k in keys:
+            if k in claimed:
+                continue
+            val = _num(raw.get(k))
+            if val is not None:
+                key_used = k
+                break
+        if val is None:
+            fuzzy_key = _fuzzy_match(raw, line, claimed)
+            if fuzzy_key is not None:
+                val = _num(raw.get(fuzzy_key))
+                if val is not None:
+                    key_used = fuzzy_key
+        if key_used is not None:
+            claimed.add(key_used)
+        if val is not None and not line.startswith("EPS"):
+            val *= _scale_for(raw)
+        out[line] = (key_used, val)
+    return out
+
+
 def parse_results(rows: list[dict]) -> dict:
     """NSE result filings → {columns: [...], rows: [{line, <col>: value}]}.
 
@@ -122,26 +215,68 @@ def parse_results(rows: list[dict]) -> dict:
     if not columns:
         return {"columns": [], "rows": []}
 
+    extracted = {col: _extract_row(best[col]["_row"]) for col in columns}
+
     out_rows: list[dict] = []
-    for line, keys in _LINES:
-        cells: dict[str, float | None] = {}
-        for col in columns:
-            raw = best[col]["_row"]
-            val = None
-            for k in keys:
-                val = _num(raw.get(k))
-                if val is not None:
-                    break
-            # Per-share figures are already per share — scaling them by the
-            # filing's lakh/crore unit would produce an EPS in the millions.
-            if val is not None and not line.startswith("EPS"):
-                val *= _scale_for(raw)
-            cells[col] = val
+    for line, _keys in _LINES:
+        cells: dict[str, float | None] = {col: extracted[col][line][1] for col in columns}
         # A line no filing reported is a line this source doesn't carry.
         if any(v is not None for v in cells.values()):
             out_rows.append({"line": line, **cells})
 
     return {"columns": columns, "rows": out_rows}
+
+
+def probe(ticker: str, quarterly: bool = True) -> dict:
+    """Diagnostic: NSE's raw filing next to what got parsed from it, plus
+    which NSE key (if any) supplied each canonical line and whether it came
+    from the exact spelling list or the fuzzy fallback.
+
+    This exists because `_LINES` was written from memory of NSE's field
+    names, never checked against a live response — this sandbox has no
+    outbound internet. Meant to be hit from somewhere that DOES have real
+    NSE access (the production backend) so a wrong mapping is visible and
+    fixable, instead of silently returning nothing forever.
+    """
+    sym = nse._clean_symbol(ticker)
+    if not sym:
+        return {"ticker": ticker, "ok": False, "reason": "not a recognised ticker"}
+    data = nse._get("/api/corporates-financial-results", {
+        "index": "equities",
+        "symbol": sym,
+        "period": "Quarterly" if quarterly else "Annual",
+    })
+    if data is None:
+        return {"ticker": ticker, "ok": False,
+                "reason": "NSE returned nothing — session warm-up or rate limiting"}
+    rows = data if isinstance(data, list) else (data or {}).get("data") or []
+    rows = [r for r in rows if isinstance(r, dict)]
+    if not rows:
+        return {"ticker": ticker, "ok": False,
+                "reason": "response had no filing rows", "raw_sample": data}
+
+    parsed = parse_results(rows)
+    latest_raw = rows[0]
+    extraction = _extract_row(latest_raw)
+    mapping = []
+    for line, keys in _LINES:
+        key_used, val = extraction[line]
+        mapping.append({
+            "line": line,
+            "matched_key": key_used,
+            "matched_via": "exact" if key_used in keys else
+                          ("fuzzy" if key_used else None),
+            "value": val,
+        })
+    return {
+        "ticker": ticker,
+        "ok": True,
+        "raw_keys": sorted(latest_raw.keys()),
+        "raw_sample_row": latest_raw,
+        "mapping": mapping,
+        "unmapped_lines": [m["line"] for m in mapping if m["matched_key"] is None],
+        "parsed": parsed,
+    }
 
 
 def financial_results(ticker: str, quarterly: bool = True) -> dict:

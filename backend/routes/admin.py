@@ -80,3 +80,21 @@ def reset_performance(user: dict = Depends(auth.require_master_admin)):
     from backend.reliability import reset_report
     reset_report()
     _audit_action(user, "performance_stats_reset", "")
+
+
+@router.get("/nse-probe/{ticker}")
+def nse_probe(ticker: str, quarterly: bool = True,
+             _user: dict = Depends(auth.require_master_admin)):
+    """NSE's raw financial-results row next to how it got parsed.
+
+    The field names `lib/nse_financials.py` matches against were written from
+    memory, not from a live NSE response — the dev sandbox that built them has
+    no outbound internet. This runs on the real backend, which does, so it is
+    the way to actually confirm the mapping: hit it for a known ticker (e.g.
+    RELIANCE) and check `unmapped_lines` is empty and `mapping[].value` looks
+    like the right order of magnitude. If a line is unmapped or wrong, its
+    `raw_keys`/`raw_sample_row` show the real key to add to `_LINES` or
+    `_FUZZY` in nse_financials.py.
+    """
+    from lib import nse_financials
+    return nse_financials.probe(ticker, quarterly=quarterly)
