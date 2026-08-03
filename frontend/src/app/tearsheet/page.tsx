@@ -4,6 +4,9 @@ import { useSearchParams } from "next/navigation";
 import { Suspense, useEffect, useState } from "react";
 
 import { api, type CompRow, type Note, type Quote, type Snapshot } from "@/lib/api";
+import {
+  compCell, compLabel, headerCoverage, isSubject, provenanceNote,
+} from "@/lib/tearsheetMeta";
 import { curForTicker, fmtNum, formatPercent, humanNumber } from "@/lib/utils";
 
 /** One-page printable tear sheet: snapshot + valuation + comps + your notes.
@@ -18,6 +21,9 @@ function TearSheetInner() {
   const [note, setNote] = useState<Note | null>(null);
   const [ready, setReady] = useState(false);
 
+  // Stamped ONCE, not read during render: a clock read inside a render drifts
+  // between the header and the footer of the same printed page.
+  const [printedAt] = useState(() => new Date());
   const [notFound, setNotFound] = useState(false);
   const [suggestions, setSuggestions] = useState<{ symbol: string; name: string }[]>([]);
 
@@ -89,7 +95,10 @@ function TearSheetInner() {
         </div>
         <div className="text-right">
           <div className="num text-2xl">{price != null ? `${cur}${fmtNum(price, 2)}` : "—"}</div>
-          <div className="text-mut text-[10px]">as of {new Date().toLocaleString()}</div>
+          {/* Deliberately NOT "as of <now>": that was the browser clock at
+              render, which on paper is indistinguishable from a live quote.
+              The footer says what the number actually is. */}
+          <div className="text-mut text-[10px]">last reported price</div>
         </div>
       </div>
 
@@ -118,17 +127,23 @@ function TearSheetInner() {
       {comps && comps.length > 0 && (
         <>
           <div className="heading mb-1">Comparables</div>
-          <table className="w-full text-xs mb-4 panel-2">
+          <table className="w-full text-xs mb-4 panel-2" data-testid="comps">
             <thead><tr className="border-b border-line text-mut">
-              {Object.keys(comps[0]).map((c) => <th key={c} className="text-left px-2 py-1">{c}</th>)}
+              {Object.keys(comps[0]).map((c) => (
+                <th key={c} className="text-left px-2 py-1">{compLabel(c)}</th>
+              ))}
             </tr></thead>
-            <tbody>{comps.map((r, i) => (
-              <tr key={i} className="border-b border-line/50">
-                {Object.keys(comps[0]).map((c) => (
-                  <td key={c} className="px-2 py-1 num">{r[c] == null ? "—" : String(r[c])}</td>
-                ))}
-              </tr>
-            ))}</tbody>
+            <tbody>{comps.map((r, i) => {
+              const subject = isSubject(r as Record<string, unknown>, ticker);
+              return (
+                <tr key={i}
+                    className={`border-b border-line/50 ${subject ? "text-amber font-semibold" : ""}`}>
+                  {Object.keys(comps[0]).map((c) => (
+                    <td key={c} className="px-2 py-1 num">{compCell(c, r[c], cur)}</td>
+                  ))}
+                </tr>
+              );
+            })}</tbody>
           </table>
         </>
       )}
@@ -140,9 +155,10 @@ function TearSheetInner() {
         </>
       )}
 
-      <div className="text-[10px] text-mut border-t border-line pt-2">
-        Motherboard Terminal tear sheet — educational research aid, not investment advice.
-        Data from free provider feeds (NSE / FMP / yfinance); verify before use.
+      <div className="text-[10px] text-mut border-t border-line pt-2 leading-relaxed">
+        Motherboard Terminal tear sheet — educational research aid, not
+        investment advice. Data from free provider feeds (NSE / FMP / yfinance).{" "}
+        {provenanceNote(headerCoverage(snap), printedAt)}
         {!ready && " (still loading…)"}
       </div>
     </div>

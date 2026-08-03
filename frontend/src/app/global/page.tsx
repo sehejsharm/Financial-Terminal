@@ -6,6 +6,7 @@ import { DataAge } from "@/components/DataAge";
 import { Shell } from "@/components/Shell";
 import { PageHeader } from "@/components/ui";
 import { StatusBadge } from "@/components/StatusBadge";
+import { BoardSummary } from "@/components/global/BoardSummary";
 import { CrossRates, Heatmap, SessionStrip } from "@/components/global/WorldBoard";
 import { api, type Indicator } from "@/lib/api";
 import { fmtNum } from "@/lib/utils";
@@ -145,6 +146,13 @@ export default function GlobalPage() {
                    currencies, tinted by the size of the day's move.`} />
 
       <SessionStrip />
+
+      {/* Breadth, coverage and the risk read — off the same tick store the
+          tiles use, so it costs no request. Equities only: oil rising is
+          risk-on in a demand story and risk-off in a supply shock. */}
+      <BoardSummary
+        groups={EQUITY.filter((g) => g.title !== "Volatility")}
+        volSyms={EQUITY.find((g) => g.title === "Volatility")?.syms ?? []} />
 
       <Heatmap groups={EQUITY} />
       <Heatmap groups={COMMODITIES} />

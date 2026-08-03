@@ -565,6 +565,42 @@ export const METHODOLOGY: Record<string, Methodology> = {
     ],
   },
 
+  globalBoard: {
+    kind: "computed",
+    what: "What the cross-asset board adds up to: how many instruments are "
+      + "advancing, how many never priced, and whether the tape reads risk-on "
+      + "or risk-off.",
+    formula: "breadth over the equity tiles · risk tone from average equity "
+      + "move against average volatility move",
+    inputs: [
+      "The same shared tick stream the tiles are drawing from — no extra "
+        + "request.",
+      "Equity indices and volatility only. Commodities are deliberately "
+        + "excluded from the tone.",
+    ],
+    assumptions: [
+      "A move under 0.1% is the spread, not a direction, so it counts as flat.",
+      "Equities up with volatility not up is risk-on, and the reverse is "
+        + "risk-off. Anything else is called mixed rather than forced into a "
+        + "side.",
+      "Below 60% coverage of the equity tiles the tone is withheld entirely.",
+    ],
+    limits: [
+      "A board with unpriced tiles looks very like a quiet market. Free "
+        + "providers rate-limit and are sometimes blocked from cloud hosts, so "
+        + "the unpriced count is a headline figure rather than a footnote.",
+      "The advance share is measured against tiles that PRICED, not against "
+        + "the total — a share diluted by tiles that never loaded is a "
+        + "statement about the feed.",
+      "Commodities are out of the risk read on purpose: oil rising is risk-on "
+        + "in a demand story and risk-off in a supply shock, and nothing here "
+        + "can tell those apart.",
+      "Every move is against that venue's own previous close, so markets in "
+        + "different sessions are not measuring the same period.",
+      "The tone describes today's tape. It is not a forecast and not a signal.",
+    ],
+  },
+
   dealFlow: {
     kind: "computed",
     what: "Bulk, block and insider disclosures, read for what they actually "
