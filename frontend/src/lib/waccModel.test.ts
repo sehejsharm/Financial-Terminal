@@ -1,8 +1,9 @@
 import { describe, expect, it } from "vitest";
 
 import {
-  AXES, axisTicks, axisValue, costOfEquity, impliedMultiple, regionFor,
-  sensitivity, valueSpread, waccFlags, waccModel, waccNote, withAxis,
+  AXES, axisTicks, axisValue, costOfEquity, filedTaxRate, impliedMultiple,
+  regionFor, resolveTaxRate, SANE_TAX, sensitivity, valueSpread, waccFlags,
+  waccModel, waccNote, withAxis,
   type WaccInputs,
 } from "./waccModel";
 
@@ -281,5 +282,65 @@ describe("waccNote", () => {
     expect(note).toMatch(/backward-looking regression/);
     expect(note).toMatch(/debt is at book/);
     expect(note).toMatch(/a model, not a measurement/);
+  });
+});
+
+describe("filedTaxRate", () => {
+  it("uses what the company ACTUALLY paid, not the statutory rate", () => {
+    // Tax expense over pre-tax profit: 250/1000 = 25%.
+    const t = filedTaxRate([250, 240, 260], [1000, 1000, 1000])!;
+    expect(t.pct).toBeCloseTo(25, 1);
+    expect(t.source).toBe("filed");
+    expect(t.periods).toBe(3);
+    expect(t.read).toMatch(/what this company actually paid/);
+  });
+
+  it("averages across periods rather than trusting one quarter", () => {
+    // A single quarter carries one-off provisions that swing the ratio.
+    const t = filedTaxRate([100, 300], [1000, 1000])!;
+    expect(t.pct).toBeCloseTo(20, 1);
+  });
+
+  it("SKIPS a loss-making period rather than inverting the ratio", () => {
+    // Tax over a negative profit produces a positive-looking number that
+    // means the opposite of what it appears to.
+    const t = filedTaxRate([250, -50], [1000, -400])!;
+    expect(t.periods).toBe(1);
+    expect(t.pct).toBeCloseTo(25, 1);
+  });
+
+  it("skips a period missing either input", () => {
+    const t = filedTaxRate([250, null, 250], [1000, 1000, null])!;
+    expect(t.periods).toBe(1);
+  });
+
+  it("rejects an implausible effective rate as an artefact", () => {
+    // 300% tax is a restatement or a one-off, not a policy.
+    expect(filedTaxRate([3000], [1000])).toBeNull();
+    expect(filedTaxRate([-500], [1000])).toBeNull();
+    expect(SANE_TAX.max).toBeLessThan(100);
+  });
+
+  it("returns null rather than a rate it cannot compute", () => {
+    expect(filedTaxRate([], [])).toBeNull();
+    expect(filedTaxRate([null], [null])).toBeNull();
+    expect(filedTaxRate([250], [0])).toBeNull();
+  });
+});
+
+describe("resolveTaxRate", () => {
+  it("prefers the filed rate over the statutory one", () => {
+    const filed = filedTaxRate([200], [1000])!;
+    const r = resolveTaxRate(filed, 25.2, "India");
+    expect(r.source).toBe("filed");
+    expect(r.pct).toBeCloseTo(20, 1);
+  });
+
+  it("falls back to statutory and says the shield is probably overstated", () => {
+    const r = resolveTaxRate(null, 25.2, "India");
+    expect(r.source).toBe("statutory");
+    expect(r.pct).toBeCloseTo(25.2, 6);
+    expect(r.read).toMatch(/India statutory rate/);
+    expect(r.read).toMatch(/probably overstates the interest shield/);
   });
 });

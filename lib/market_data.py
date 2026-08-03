@@ -63,6 +63,49 @@ NIFTY50 = [
     "TRENT.NS",
 ]
 
+# Movers universes per market. "Gainers and losers" is only meaningful
+# relative to a market, and a reader in New York opening the dashboard at 9am
+# their time was being shown an Indian session that closed hours earlier.
+#
+# Deliberately index constituents rather than "the whole exchange": a
+# whole-market gainers list is dominated by micro-caps moving 20% on no
+# volume, which is noise wearing the costume of a signal.
+DOW30 = [
+    "AAPL", "MSFT", "AMZN", "NVDA", "GOOGL", "META", "JPM", "V", "UNH", "HD",
+    "PG", "JNJ", "MRK", "AVGO", "CVX", "XOM", "WMT", "KO", "PEP", "COST",
+    "MCD", "CSCO", "CRM", "ACN", "ADBE", "AMD", "INTC", "IBM", "CAT", "BA",
+]
+
+FTSE_LARGE = [
+    "SHEL.L", "AZN.L", "HSBA.L", "ULVR.L", "BP.L", "RIO.L", "GSK.L", "DGE.L",
+    "BATS.L", "GLEN.L", "REL.L", "LSEG.L", "NG.L", "VOD.L", "BARC.L", "LLOY.L",
+]
+
+EURO_LARGE = [
+    "SAP.DE", "SIE.DE", "ALV.DE", "DTE.DE", "BAS.DE", "BMW.DE",
+    "MC.PA", "OR.PA", "AIR.PA", "SAN.PA", "BNP.PA", "TTE.PA",
+    "ASML.AS", "INGA.AS", "ISP.MI", "ENI.MI",
+]
+
+ASIA_LARGE = [
+    "7203.T", "6758.T", "9984.T", "8306.T", "6501.T", "9432.T",
+    "0700.HK", "0941.HK", "1299.HK", "0005.HK", "3690.HK", "9988.HK",
+]
+
+MARKET_UNIVERSES: dict[str, tuple[str, ...]] = {
+    "IN": tuple(NIFTY50),
+    "US": tuple(DOW30),
+    "GB": tuple(FTSE_LARGE),
+    "EU": tuple(EURO_LARGE),
+    "AS": tuple(ASIA_LARGE),
+}
+
+
+def movers_universe(market: str) -> tuple[str, ...]:
+    """The constituent list a market's movers are ranked within."""
+    return MARKET_UNIVERSES.get((market or "IN").upper(), MARKET_UNIVERSES["IN"])
+
+
 # Period label -> yfinance fetch parameters.
 # Either "period" (native yfinance period) or "days" (computed start date).
 PERIOD_MAP: dict[str, dict] = {

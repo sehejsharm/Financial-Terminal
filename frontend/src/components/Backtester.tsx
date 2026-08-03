@@ -6,9 +6,9 @@ import { FlaskConical } from "lucide-react";
 import { PanelError } from "@/components/PanelStates";
 import { ScrollX } from "@/components/ScrollX";
 import { TickerInput } from "@/components/TickerInput";
+import { tintBg } from "@/lib/heat";
 import {
-  gridAround, runBacktest, STRATEGIES, sweep,
-  type Bar, type BacktestResult, type StrategyId, type SweepCell,
+  gridAround, runBacktest, STRATEGIES, sweep, type Bar, type BacktestResult, type StrategyId, type SweepCell, splitSample, yearlyReturns, yearlyNote,
 } from "@/lib/backtest";
 import { api } from "@/lib/api";
 import { fmtNum } from "@/lib/utils";
@@ -238,6 +238,16 @@ export function Backtester({ seedTicker }: { seedTicker?: string }) {
     [bars, strategy, params, costBps],
   );
 
+  // The two questions a single equity curve cannot answer, both cheap enough
+  // to compute on every knob change.
+  const split = useMemo(
+    () => (bars ? splitSample(bars, { strategy, params, costBps })
+                : { inSample: null, outSample: null, splitDate: null,
+                    decayPct: null, read: "" }),
+    [bars, strategy, params, costBps],
+  );
+  const years = useMemo(() => (res ? yearlyReturns(res) : []), [res]);
+
   function runSweep() {
     if (!bars || def.params.length < 2) return;
     const [pa, pb] = def.params;
@@ -410,6 +420,98 @@ export function Backtester({ seedTicker }: { seedTicker?: string }) {
             </div>
           )}
 
+          {/* The two questions a single equity curve cannot answer: was this
+              fitted to the window, and was it one good year. */}
+          {split.inSample && split.outSample && (
+            <div className="mb-4">
+              <div className="heading mb-2">Out of sample</div>
+              <div className="grid gap-2.5 mb-2"
+                   style={{ gridTemplateColumns: "repeat(auto-fit, minmax(190px, 1fr))" }}>
+                <div className="hud p-3" title={`First 60% of the history, to ${split.splitDate}`}>
+                  <div className="label-xs">In sample (fitted)</div>
+                  <div className={`num text-lg mt-0.5 ${
+                    split.inSample.totalPct >= 0 ? "text-green" : "text-red"}`}>
+                    {split.inSample.totalPct >= 0 ? "+" : ""}
+                    {fmtNum(split.inSample.totalPct, 1)}%
+                  </div>
+                  <div className="text-[10px] text-mut mt-1 num">
+                    vs hold {fmtNum(split.inSample.buyHoldPct, 1)}%
+                  </div>
+                </div>
+                <div className="hud p-3" title={`Last 40%, from ${split.splitDate}`}>
+                  <div className="label-xs">Out of sample</div>
+                  <div className={`num text-lg mt-0.5 ${
+                    split.outSample.totalPct >= 0 ? "text-green" : "text-red"}`}>
+                    {split.outSample.totalPct >= 0 ? "+" : ""}
+                    {fmtNum(split.outSample.totalPct, 1)}%
+                  </div>
+                  <div className="text-[10px] text-mut mt-1 num">
+                    vs hold {fmtNum(split.outSample.buyHoldPct, 1)}%
+                  </div>
+                </div>
+                <div className="hud p-3">
+                  <div className="label-xs">Decay</div>
+                  <div className={`num text-lg mt-0.5 ${
+                    (split.decayPct ?? 0) < 0 ? "text-red" : "text-green"}`}>
+                    {split.decayPct == null ? "—"
+                      : `${split.decayPct >= 0 ? "+" : ""}${fmtNum(split.decayPct, 1)} pts`}
+                  </div>
+                </div>
+                <div className="hud p-3">
+                  <div className="label-xs">Split at</div>
+                  <div className="num text-base mt-0.5 text-txt">{split.splitDate}</div>
+                </div>
+              </div>
+              <div className="text-[10.5px] text-mut leading-relaxed max-w-4xl">
+                {split.read}{" "}
+                This runs ONE parameter set across both halves, so it asks
+                whether the rule keeps working — not whether a re-fitted
+                version would. That is the weaker question, and the honest one
+                to ask of a rule you would actually run.
+              </div>
+            </div>
+          )}
+
+          {years.length >= 2 && (
+            <div className="mb-4">
+              <div className="heading mb-2">Year by year</div>
+              <div className="overflow-x-auto">
+                <table className="w-full text-[11px]" data-testid="bt-years">
+                  <thead>
+                    <tr className="text-mut border-b border-line2">
+                      <th className="text-left font-normal py-1.5 pr-3">Year</th>
+                      <th className="text-right font-normal py-1.5 px-3">Strategy</th>
+                      <th className="text-right font-normal py-1.5 px-3">Buy &amp; hold</th>
+                      <th className="text-right font-normal py-1.5 pl-3">Excess</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {years.map((y) => (
+                      <tr key={y.year} className="border-b border-line2/50">
+                        <td className="py-1.5 pr-3 num text-txt">{y.year}</td>
+                        <td className={`py-1.5 px-3 text-right num ${
+                          y.strategyPct >= 0 ? "text-green" : "text-red"}`}>
+                          {y.strategyPct >= 0 ? "+" : ""}{fmtNum(y.strategyPct, 1)}%
+                        </td>
+                        <td className="py-1.5 px-3 text-right num text-mut">
+                          {y.buyHoldPct >= 0 ? "+" : ""}{fmtNum(y.buyHoldPct, 1)}%
+                        </td>
+                        <td className={`py-1.5 pl-3 text-right num ${
+                          y.excessPct >= 0 ? "text-green" : "text-red"}`}
+                            style={{ background: tintBg(y.excessPct, 15) }}>
+                          {y.excessPct >= 0 ? "+" : ""}{fmtNum(y.excessPct, 1)}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+              <div className="text-[10.5px] text-mut leading-relaxed mt-2 max-w-4xl">
+                {yearlyNote(years)}
+              </div>
+            </div>
+          )}
+
           <div className="text-[10.5px] text-mut leading-relaxed">
             Signals are computed on a bar&apos;s close and acted on at the NEXT bar&apos;s
             close, so nothing is bought on information it could not have had.
@@ -417,9 +519,10 @@ export function Backtester({ seedTicker }: { seedTicker?: string }) {
             no dividends. Costs of {costBps} bps are charged round-turn on every
             position change; real slippage on an illiquid name will be worse.
             {s.barsPerYear < 100 && " This window is served as WEEKLY bars, so the test resolves to weekly decisions and annualised figures use ~52 periods."}
-            {" "}Every number above is in-sample on this exact window and this exact
-            parameter set — it describes what the rule would have done, which is
-            not evidence of what it will do. Educational only, not advice.
+            {" "}Apart from the out-of-sample block, every number above is
+            fitted to this exact window and this exact parameter set — it
+            describes what the rule would have done, which is not evidence of
+            what it will do. Educational only, not advice.
           </div>
         </>
       )}

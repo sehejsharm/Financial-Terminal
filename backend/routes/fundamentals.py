@@ -23,7 +23,7 @@ from lib.fundamentals import (
     get_statement,
     select_rows,
 )
-from lib import nse
+from lib import nse, nse_financials
 from lib.institutional import (
     comps_matrix,
     get_earnings_history,
@@ -38,11 +38,19 @@ _KINDS = {"income": INCOME_ROWS, "balance": BALANCE_ROWS, "cashflow": CASHFLOW_R
 
 
 _UNAVAIL_NOTE = ("Financial statements are unavailable for this ticker from "
-                 "the configured providers (FMP first, then yfinance). "
-                 "FMP's free tier covers US listings; Indian (NSE) statements "
-                 "aren't exposed by any free statements API. If FMP_API_KEY "
-                 "isn't set on the backend, US coverage is limited to what "
-                 "yfinance allows from this host.")
+                 "the configured providers (FMP, then NSE's own results feed "
+                 "for Indian listings, then yfinance). FMP's free tier covers "
+                 "US listings; if FMP_API_KEY isn't set, US coverage is "
+                 "limited to what yfinance allows from this host.")
+
+# NSE publishes the filing summary a company submits, which is the income
+# statement only. Asking it for a balance sheet or a cash flow gets a truthful
+# "this source doesn't carry that" rather than an empty frame that reads as a
+# company with no assets.
+_NSE_KIND_NOTE = ("NSE's results feed carries the income statement a company "
+                  "files with the exchange — there is no balance sheet or cash "
+                  "flow in it, and no free API exposes those for Indian "
+                  "listings. The income statement above IS available.")
 
 
 def _df_colmajor(df: pd.DataFrame) -> dict:
@@ -71,6 +79,30 @@ def statement(ticker: str, kind: str, quarterly: bool = False,
             return {"ticker": ticker, "kind": kind, "quarterly": quarterly,
                     "columns": fmp["columns"], "rows": fmp["rows"],
                     "source": "FMP"}
+
+    # NSE's own results feed: the only free source of statements for Indian
+    # listings, and the reason FA was empty for the market this app is built
+    # around. Income statement only — the exchange filing carries nothing else.
+    if nse.is_indian(ticker):
+        try:
+            parsed = nse_financials.financial_results(ticker, quarterly=True)
+        except Exception:
+            parsed = {"columns": [], "rows": []}
+        if kind == "income" and parsed.get("rows"):
+            # Annual view: the feed is quarterly, so a yearly column would have
+            # to be summed, and summing a partial year silently understates it.
+            # Quarterly is what the source actually has, so that is what is
+            # returned, labelled honestly.
+            return {"ticker": ticker, "kind": kind, "quarterly": True,
+                    "columns": parsed["columns"], "rows": parsed["rows"],
+                    "source": "NSE filings",
+                    "note": None if quarterly else
+                            ("NSE publishes quarterly filings, so these are "
+                             "quarters even though the annual view was "
+                             "requested — summing them into years would hide a "
+                             "partial year as a full one.")}
+        if kind in ("balance", "cashflow") and parsed.get("rows"):
+            return {**empty, "note": _NSE_KIND_NOTE}
 
     try:
         df = select_rows(get_statement(ticker, kind, quarterly), _KINDS[kind])

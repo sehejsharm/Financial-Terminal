@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
-  gridAround, MIN_BARS, runBacktest, signalsFor, STRATEGIES, sweep, type Bar,
+  IN_SAMPLE_SHARE, MIN_BARS, STRATEGIES, gridAround, runBacktest, signalsFor, splitSample, sweep, type Bar, yearlyNote, yearlyReturns,
 } from "./backtest";
 
 /** Deterministic daily bars from a close generator. */
@@ -226,5 +226,117 @@ describe("sweep", () => {
   it("gridAround centres the grid and skips degenerate windows", () => {
     expect(gridAround(50, 10, 5)).toEqual([30, 40, 50, 60, 70]);
     expect(gridAround(3, 5, 5)).toEqual([3, 8, 13]);   // -7 and -2 dropped as <= 1
+  });
+});
+
+// ── out-of-sample and per-year, added because a single equity curve cannot
+//    show whether a result was fitted or was one good year ─────────────────
+
+describe("splitSample", () => {
+  /** Rises for the first half, falls for the second. */
+  const regimeChange = (n = 400) => {
+    const out: { date: string; close: number }[] = [];
+    let px = 100;
+    for (let i = 0; i < n; i++) {
+      px *= i < n / 2 ? 1.004 : 0.997;
+      out.push({
+        date: new Date(Date.UTC(2022, 0, 1) + i * 86_400_000).toISOString().slice(0, 10),
+        close: px,
+      });
+    }
+    return out;
+  };
+
+  it("runs the SAME parameters on both halves", () => {
+    const s = splitSample(regimeChange(), { strategy: "sma_cross", params: { fast: 10, slow: 30 } });
+    expect(s.inSample).not.toBeNull();
+    expect(s.outSample).not.toBeNull();
+    expect(s.splitDate).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+  });
+
+  it("exposes a rule that only worked in the first half", () => {
+    // The failure a single equity curve cannot show: fitted to one window.
+    const s = splitSample(regimeChange(), { strategy: "sma_cross", params: { fast: 10, slow: 30 } });
+    expect(s.outSample!.totalPct).toBeLessThan(s.inSample!.totalPct);
+    expect(s.decayPct!).toBeLessThan(0);
+  });
+
+  it("splits at the declared share of history", () => {
+    expect(IN_SAMPLE_SHARE).toBeGreaterThan(0.5);
+    expect(IN_SAMPLE_SHARE).toBeLessThan(0.9);
+  });
+
+  it("REFUSES to split history too short for two halves", () => {
+    const s = splitSample(regimeChange(80), { strategy: "sma_cross", params: {} });
+    expect(s.inSample).toBeNull();
+    expect(s.read).toMatch(/Not enough history to split/);
+  });
+
+  it("says plainly that this is not a walk-forward optimisation", () => {
+    // It answers "does this rule keep working", not "could a re-fitted
+    // version keep working" — the weaker question, honestly labelled.
+    const s = splitSample(regimeChange(), { strategy: "sma_cross", params: { fast: 10, slow: 30 } });
+    expect(s.read.length).toBeGreaterThan(20);
+  });
+});
+
+describe("yearlyReturns", () => {
+  const multiYear = () => {
+    const out: { date: string; close: number }[] = [];
+    let px = 100;
+    for (let i = 0; i < 900; i++) {
+      px *= 1.0015;
+      out.push({
+        date: new Date(Date.UTC(2021, 0, 1) + i * 86_400_000).toISOString().slice(0, 10),
+        close: px,
+      });
+    }
+    return out;
+  };
+
+  it("breaks the total into calendar years", () => {
+    const res = runBacktest(multiYear(), { strategy: "sma_cross", params: { fast: 10, slow: 30 } })!;
+    const rows = yearlyReturns(res);
+    expect(rows.length).toBeGreaterThanOrEqual(2);
+    expect(rows.map((r) => r.year)).toEqual([...rows.map((r) => r.year)].sort());
+  });
+
+  it("reports the strategy against holding, year by year", () => {
+    const res = runBacktest(multiYear(), { strategy: "sma_cross", params: { fast: 10, slow: 30 } })!;
+    for (const r of yearlyReturns(res)) {
+      expect(r.excessPct).toBeCloseTo(r.strategyPct - r.buyHoldPct, 6);
+    }
+  });
+
+  it("has nothing to say about a single year", () => {
+    expect(yearlyNote([{ year: "2024", strategyPct: 10, buyHoldPct: 5, excessPct: 5 }]))
+      .toMatch(/not enough to say/);
+  });
+
+  it("calls out a result that is really one good year", () => {
+    const rows = [
+      { year: "2021", strategyPct: 90, buyHoldPct: 10, excessPct: 80 },
+      { year: "2022", strategyPct: 2, buyHoldPct: 8, excessPct: -6 },
+      { year: "2023", strategyPct: 1, buyHoldPct: 9, excessPct: -8 },
+    ];
+    const note = yearlyNote(rows);
+    expect(note).toMatch(/2021 alone accounts for/);
+    expect(note).toMatch(/one good year with a strategy wrapped around it/);
+  });
+
+  it("counts the years it beat holding", () => {
+    const rows = [
+      { year: "2021", strategyPct: 10, buyHoldPct: 5, excessPct: 5 },
+      { year: "2022", strategyPct: 3, buyHoldPct: 9, excessPct: -6 },
+    ];
+    expect(yearlyNote(rows)).toMatch(/Beat buy-and-hold in 1 of 2 calendar years/);
+  });
+
+  it("admits a calendar year is an arbitrary cut", () => {
+    const rows = [
+      { year: "2021", strategyPct: 10, buyHoldPct: 5, excessPct: 5 },
+      { year: "2022", strategyPct: 3, buyHoldPct: 9, excessPct: -6 },
+    ];
+    expect(yearlyNote(rows)).toMatch(/arbitrary cut/);
   });
 });

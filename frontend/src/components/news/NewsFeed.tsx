@@ -1,9 +1,9 @@
 "use client";
 
 import { useMemo, useState, type ReactNode } from "react";
-import { ChevronDown, ChevronRight, Search } from "lucide-react";
+import { ChevronDown, ChevronRight, ExternalLink, Search } from "lucide-react";
 
-import { ChipToggle, EmptyState, Note } from "@/components/ui";
+import { ChipToggle, EmptyState } from "@/components/ui";
 import { timeAgoShort, useNow } from "@/lib/clock";
 import {
   AGE_BUCKETS, bucketOf, clusterStories, filterItems, freshness, outletOf,
@@ -13,12 +13,19 @@ import {
 /**
  * The reading surface for a list of headlines.
  *
- * Two things make this more than a list. First, the same story reaches four
- * outlets, and showing it four times buries three other stories — so copies
- * are folded into the lead item with the other outlets named underneath,
- * still individually clickable. Second, a page of headlines all six hours
- * old looks exactly like a page of live ones until you read every timestamp,
- * so age is a heading rather than a detail.
+ * This is a place to READ, so the headline is the object on the page and
+ * everything else recedes: outlet, age and coverage are one quiet line, the
+ * summary is grey and the chrome is nearly invisible until hovered.
+ *
+ * Two structural things it does. The same story reaches four outlets, and
+ * showing it four times buries three other stories — so copies fold into the
+ * lead with the others named underneath, still individually clickable. And a
+ * page of headlines all six hours old looks exactly like a page of live ones
+ * until you read every timestamp, so age is a heading rather than a detail.
+ *
+ * The one piece of emphasis is deliberate: the most-covered story in the
+ * newest bucket is set larger. That is not decoration — how many independent
+ * outlets ran a story is the only importance signal a wire actually carries.
  */
 
 const RECENCY = [
@@ -28,67 +35,114 @@ const RECENCY = [
   { id: "0", label: "All" },
 ] as const;
 
-function Row({ cluster, now, compact, badge }: {
+const DENSITY = [
+  { id: "comfortable", label: "Comfortable" },
+  { id: "compact", label: "Compact" },
+] as const;
+
+/**
+ * A stable colour per outlet, from the name.
+ *
+ * Not decoration: with six feeds interleaved, a colour makes the source
+ * legible at a glance where an all-grey uppercase label does not. Hashed
+ * rather than mapped so a new feed gets a colour without a code change, and
+ * confined to hues that stay readable on both themes.
+ */
+const HUES = [8, 32, 48, 96, 168, 200, 232, 280, 320];
+function outletHue(name: string): number {
+  let h = 0;
+  for (let i = 0; i < name.length; i++) h = (h * 31 + name.charCodeAt(i)) >>> 0;
+  return HUES[h % HUES.length];
+}
+
+function OutletMark({ name }: { name: string }) {
+  const hue = outletHue(name);
+  return (
+    <span className="inline-flex items-center gap-1.5 min-w-0">
+      <span aria-hidden className="w-1.5 h-1.5 rounded-full shrink-0"
+            style={{ background: `hsl(${hue} 70% 55%)` }} />
+      <span className="truncate">{name}</span>
+    </span>
+  );
+}
+
+function Story({ cluster, now, compact, badge, lead }: {
   cluster: Cluster; now: number; compact?: boolean;
   badge?: (it: FeedItem) => ReactNode;
+  /** The one story set large — the most-covered item in the newest bucket. */
+  lead?: boolean;
 }) {
   const [open, setOpen] = useState(false);
-  const { lead, others, outlets } = cluster;
+  const { lead: item, others, outlets } = cluster;
 
   return (
-    <div className="panel-2 mb-lift hover:border-amber/60 transition-colors">
-      <a href={lead.link} target="_blank" rel="noopener noreferrer"
-         className="block px-3.5 py-3">
-        <div className="flex items-start justify-between gap-3">
-          <div className="min-w-0">
-            <div className="text-[10px] uppercase tracking-wider text-amber/80 mb-1 truncate">
-              {outletOf(lead)}
-              {others.length > 0 && (
-                <span className="text-mut normal-case tracking-normal">
-                  {" "}· {outlets.length} outlets
-                </span>
-              )}
-            </div>
-            <div className="text-sm text-txt font-medium leading-snug">
-              {badge?.(lead)}{lead.title}
-            </div>
-            {!compact && lead.summary && (
-              <div className="text-xs text-mut mt-1 line-clamp-2 leading-relaxed">
-                {lead.summary}
-              </div>
-            )}
-          </div>
-          <span className="text-[10px] text-mut whitespace-nowrap mt-0.5 shrink-0">
-            {timeAgoShort(lead.published, now)}
+    <article className={`group border-b border-line2/70 last:border-b-0 ${
+      lead ? "pb-4 mb-1" : ""}`}>
+      <a href={item.link} target="_blank" rel="noopener noreferrer"
+         className="block py-3 -mx-2 px-2 rounded hover:bg-panel2/60 transition-colors">
+        {/* Byline: outlet, age, and how many outlets carried it. One quiet
+            line so the headline below is unambiguously the object. */}
+        <div className="flex items-center gap-2 text-[10.5px] text-mut mb-1.5">
+          <span className="min-w-0 max-w-[45%]">
+            <OutletMark name={outletOf(item)} />
           </span>
+          <span aria-hidden className="text-line2">·</span>
+          <span className="num whitespace-nowrap shrink-0">
+            {timeAgoShort(item.published, now)}
+          </span>
+          {others.length > 0 && (
+            <>
+              <span aria-hidden className="text-line2">·</span>
+              <span className="text-amber/90 whitespace-nowrap shrink-0">
+                {outlets.length} outlets
+              </span>
+            </>
+          )}
+          <span className="flex-1" />
+          <ExternalLink size={11}
+                        className="shrink-0 opacity-0 group-hover:opacity-60 transition-opacity" />
         </div>
+
+        <h3 className={`text-txt font-medium leading-snug group-hover:text-amber
+                        transition-colors ${
+          lead ? "text-[17px] md:text-[19px]" : "text-[14.5px]"}`}>
+          {badge?.(item)}{item.title}
+        </h3>
+
+        {!compact && item.summary && (
+          <p className={`text-mut mt-1.5 leading-relaxed ${
+            lead ? "text-[13px] line-clamp-3" : "text-xs line-clamp-2"}`}>
+            {item.summary}
+          </p>
+        )}
       </a>
 
       {others.length > 0 && (
-        <div className="px-3.5 pb-2.5">
+        <div className="pb-2.5 -mt-1">
           <button onClick={() => setOpen((o) => !o)} aria-expanded={open}
-                  className="flex items-center gap-1 text-[10.5px] text-mut hover:text-amber">
+                  className="flex items-center gap-1 text-[10.5px] text-mut hover:text-amber transition-colors">
             {open ? <ChevronDown size={11} /> : <ChevronRight size={11} />}
-            {others.length} more {others.length === 1 ? "outlet" : "outlets"} on this story
+            Also covered by {others.length}{" "}
+            {others.length === 1 ? "outlet" : "outlets"}
           </button>
           {open && (
-            <div className="mt-1.5 pl-4 border-l border-line2 grid gap-1.5">
+            <div className="mt-2 pl-4 border-l border-line2 grid gap-2">
               {others.map((o, i) => (
                 <a key={i} href={o.link} target="_blank" rel="noopener noreferrer"
-                   className="block group">
-                  <span className="text-[10px] uppercase tracking-wider text-mut group-hover:text-amber">
-                    {outletOf(o)}
-                  </span>
-                  <span className="text-xs text-mut group-hover:text-txt ml-2">
+                   className="block group/o">
+                  <div className="text-[10px] text-mut mb-0.5">
+                    <OutletMark name={outletOf(o)} />
+                  </div>
+                  <div className="text-xs text-mut group-hover/o:text-txt transition-colors leading-snug">
                     {o.title}
-                  </span>
+                  </div>
                 </a>
               ))}
             </div>
           )}
         </div>
       )}
-    </div>
+    </article>
   );
 }
 
@@ -103,9 +157,8 @@ export function NewsFeed({
   compact?: boolean;
   /** Optional prefix for a headline (the ticker view tags sentiment here). */
   badge?: (it: FeedItem) => ReactNode;
-  /** Controlled search text. Supply both to let a parent drive the filter —
-   *  the wire digest does this so clicking a theme filters to it. Omit both
-   *  and the box keeps its own state, as every other caller expects. */
+  /** Controlled search text, for a parent that drives the filter. Omit both
+   *  and the box keeps its own state, as every caller expects. */
   query?: string;
   onQueryChange?: (q: string) => void;
 }) {
@@ -116,6 +169,8 @@ export function NewsFeed({
   const setQ = controlled ? onQueryChange : setOwnQ;
   const [source, setSource] = useState("all");
   const [within, setWithin] = useState("0");
+  const [density, setDensity] = useState<string>("comfortable");
+  const dense = density === "compact" || compact;
 
   const sources = useMemo(() => sourceCounts(items), [items]);
   const filtered = useMemo(
@@ -137,6 +192,18 @@ export function NewsFeed({
   }, [clusters, now]);
   const fresh = useMemo(() => freshness(items, now), [items, now]);
 
+  // The one story set large: most-covered in the newest bucket that has one.
+  // Ties keep the newest, which is what a wire would do.
+  const leadKey = useMemo(() => {
+    const first = buckets[0]?.[1];
+    if (!first?.length) return null;
+    let best = 0;
+    for (let i = 1; i < first.length; i++) {
+      if (first[i].outlets.length > first[best].outlets.length) best = i;
+    }
+    return `${buckets[0][0]}-${best}`;
+  }, [buckets]);
+
   return (
     <>
       <div className="flex flex-wrap items-center gap-2 mb-3">
@@ -147,6 +214,9 @@ export function NewsFeed({
                  className="input-bare !py-1.5 !pl-7 text-xs w-full" />
         </label>
         <ChipToggle options={RECENCY} value={within} onChange={setWithin} />
+        {!compact && (
+          <ChipToggle options={DENSITY} value={density} onChange={setDensity} />
+        )}
         {sources.length > 1 && (
           <select value={source} onChange={(e) => setSource(e.target.value)}
                   className="input-bare !py-1.5 text-xs cursor-pointer max-w-[220px]">
@@ -158,13 +228,15 @@ export function NewsFeed({
         )}
       </div>
 
-      <div className="text-[10.5px] text-mut mb-3">
+      {/* One line of provenance, kept small: a page of six-hour-old headlines
+          reads exactly like a live one otherwise. */}
+      <div className="text-[10.5px] text-mut mb-4">
         {fresh.newestMins == null
           ? `${fresh.total} headlines, none carrying a timestamp.`
-          : `${fresh.total} headlines from ${fresh.outlets} `
-            + `${fresh.outlets === 1 ? "source" : "sources"}; newest `
-            + `${fresh.newestMins}m old, ${fresh.lastHour} in the last hour.`}
-        {filtered.length !== items.length && ` Showing ${filtered.length}.`}
+          : `${fresh.total} from ${fresh.outlets} `
+            + `${fresh.outlets === 1 ? "source" : "sources"} · newest `
+            + `${fresh.newestMins}m ago · ${fresh.lastHour} in the last hour`}
+        {filtered.length !== items.length && ` · showing ${filtered.length}`}
       </div>
 
       {filtered.length === 0 ? (
@@ -175,28 +247,27 @@ export function NewsFeed({
             : emptyDetail} />
       ) : (
         buckets.map(([bucket, list]) => (
-          <section key={bucket} className="mb-5">
-            <div className="flex items-center gap-2 mb-2">
-              <span className="label-xs">{bucket}</span>
+          <section key={bucket} className="mb-7">
+            {/* Sticky so the age of what you're reading stays on screen
+                through a long scroll — the whole point of bucketing. */}
+            <div className="sticky top-0 z-10 flex items-center gap-2.5 py-1.5 mb-1
+                            bg-bg/95 backdrop-blur-sm">
+              <span className="text-[11px] uppercase tracking-[0.14em] text-amber/90">
+                {bucket}
+              </span>
               <span className="text-[10px] text-mut num">{list.length}</span>
               <span className="flex-1 h-px bg-line2" />
             </div>
-            <div className="grid gap-2 mb-stagger">
+            <div className="mb-stagger">
               {list.map((c, i) => (
-                <Row key={`${bucket}-${i}`} cluster={c} now={now} compact={compact}
-                     badge={badge} />
+                <Story key={`${bucket}-${i}`} cluster={c} now={now}
+                       compact={dense} badge={badge}
+                       lead={!dense && `${bucket}-${i}` === leadKey} />
               ))}
             </div>
           </section>
         ))
       )}
-
-      <Note>
-        Stories carried by several outlets are folded together by shared
-        headline words — a crude match, tuned to under-merge rather than
-        over-merge, so two different stories about the same company stay
-        apart. Every copy stays clickable under &ldquo;more outlets&rdquo;.
-      </Note>
     </>
   );
 }

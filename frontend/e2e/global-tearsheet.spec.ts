@@ -129,7 +129,8 @@ test("TEAR SHEET REFUSES to let the print time read as the data time", async ({ 
 });
 
 test("TEAR SHEET says a blank is a coverage gap, not a zero", async ({ page }) => {
-  await openSheet(page, COMPS, { ...SNAP, roe: null, beta: null });
+  await openSheet(page, COMPS,
+    { ...SNAP, roe: null, beta: null } as unknown as typeof SNAP);
   await expect(page.getByText(/6 of 8 header metrics populated/))
     .toBeVisible({ timeout: 60_000 });
   await expect(page.getByText(/not a zero and not a company that lacks the figure/))

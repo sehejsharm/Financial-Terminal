@@ -253,25 +253,45 @@ def snapshot(ticker: str, _user: dict = Depends(auth.current_user)):
 
 
 @cached(ttl=300)
-def _movers(kind: str, count: int):
-    """NIFTY 50 movers — NSE direct (works on cloud IPs) → yfinance fallback.
+def _movers(kind: str, count: int, market: str = "IN"):
+    """Movers within one market's index constituents.
+
+    "Gainers and losers" is only meaningful relative to a market, and this
+    served NIFTY to everyone — so a reader in New York opening the dashboard
+    at 9am local was shown an Indian session that closed hours earlier.
+
+    India keeps its NSE fast path (works on cloud IPs where Yahoo blocks us);
+    every other market is computed from constituent quotes.
 
     nse.movers returns None both on error AND on an empty result, so an
-    after-hours/empty NSE response falls through to the yfinance computation
-    instead of caching a blank panel for 5 minutes."""
-    nse_rows = nse.movers(kind=kind, count=count)
-    if nse_rows:
-        return nse_rows
+    after-hours/empty NSE response falls through to the computation instead of
+    caching a blank panel for 5 minutes.
+    """
+    market = (market or "IN").upper()
+    if market == "IN":
+        nse_rows = nse.movers(kind=kind, count=count)
+        if nse_rows:
+            return nse_rows
     try:
-        return md.get_movers(kind=kind, count=count) or []
+        return md.get_movers(kind=kind, count=count,
+                             universe=md.movers_universe(market)) or []
     except Exception:
         return []
 
 
 @router.get("/movers")
-def movers(kind: str = "gainers", count: int = 8,
+def movers(kind: str = "gainers", count: int = 8, market: str = "IN",
            _user: dict = Depends(auth.current_user)):
-    return _movers(kind, count)
+    rows = _movers(kind, count, market)
+    return {
+        "market": (market or "IN").upper(),
+        "kind": kind,
+        "rows": rows,
+        # The reader needs to know which names this was ranked WITHIN: a
+        # "top gainer" out of thirty constituents is a different claim from
+        # one out of the whole exchange.
+        "universe": len(md.movers_universe(market)),
+    }
 
 
 _TAG_RE = None

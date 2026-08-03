@@ -9,9 +9,9 @@ import { Note, SectionHeader } from "@/components/ui";
 import { api, type Snapshot } from "@/lib/api";
 import { tintBg } from "@/lib/heat";
 import {
-  AXES, axisValue, impliedMultiple, REGIONS, regionFor, sensitivity,
-  valueSpread, waccFlags, waccModel, waccNote,
-  type Axis, type WaccInputs,
+  AXES, axisValue, filedTaxRate, impliedMultiple, REGIONS, regionFor,
+  resolveTaxRate, sensitivity, valueSpread, waccFlags, waccModel, waccNote,
+  type Axis, type TaxRate, type WaccInputs,
 } from "@/lib/waccModel";
 import { curSymbol, fmtNum, humanNumber } from "@/lib/utils";
 
@@ -75,6 +75,10 @@ export function Wacc({ ticker, snap }: { ticker: string; snap: Snapshot | null }
   const [tax, setTax] = useState(region.tax);
   const [premium, setPremium] = useState(0);
   const [growth, setGrowth] = useState(3);
+  // Where the tax rate came from. Once the user moves the slider it is
+  // theirs, and no later fetch may quietly overwrite it.
+  const [taxRate, setTaxRate] = useState<TaxRate | null>(null);
+  const [taxTouched, setTaxTouched] = useState(false);
 
   const [rowAxis, setRowAxis] = useState<Axis>("beta");
   const [colAxis, setColAxis] = useState<Axis>("erp");
@@ -84,15 +88,26 @@ export function Wacc({ ticker, snap }: { ticker: string; snap: Snapshot | null }
   // deliberately left alone.
   useEffect(() => {
     setRegionKey(region.key);
-    setRf(region.rf); setErp(region.erp);
-    setCostDebt(region.rd); setTax(region.tax);
+    setRf(region.rf); setErp(region.erp); setCostDebt(region.rd);
+    // The tax rate is the company's, not the region's — it is resolved from
+    // the filings below. Only seed it here so there is something sane before
+    // the statements land, and never over a rate the user has chosen.
+    setTaxTouched(false);
+    setTax(region.tax);
+    setTaxRate(null);
   }, [region]);
 
   function pickRegion(key: string) {
     const r = REGIONS.find((x) => x.key === key);
     if (!r) return;
     setRegionKey(key);
-    setRf(r.rf); setErp(r.erp); setCostDebt(r.rd); setTax(r.tax);
+    setRf(r.rf); setErp(r.erp); setCostDebt(r.rd);
+    // Picking a region changes the STATUTORY rate. A rate read from this
+    // company's own filings is a fact about the company, so it survives.
+    if (!taxRate || taxRate.source === "statutory") {
+      setTax(r.tax);
+      setTaxRate(null);
+    }
   }
 
   useEffect(() => {
@@ -102,6 +117,35 @@ export function Wacc({ ticker, snap }: { ticker: string; snap: Snapshot | null }
       .then((c) => setDebt(Number(c.total_debt ?? 0)))
       .catch(() => setDebt(0));
   }, [ticker, snap]);
+
+  // The tax rate the company ACTUALLY pays, from its own filings. The
+  // statutory rate is what the government charges; most companies pay less,
+  // and discounting with statutory overstates the interest shield.
+  useEffect(() => {
+    let alive = true;
+    api.statement(ticker, "income", false)
+      .then((meta) => {
+        if (!alive) return;
+        const st = meta?.data;
+        const rowFor = (names: string[]) => {
+          const r = (st?.rows ?? []).find((x) =>
+            names.some((n) => String(x.line).toLowerCase().includes(n)));
+          return r ? (st!.columns ?? []).map((c) =>
+            typeof r[c] === "number" ? (r[c] as number) : null) : [];
+        };
+        const filed = filedTaxRate(
+          rowFor(["tax provision", "tax expense", "income tax", "tax"]),
+          rowFor(["pre-tax", "pretax", "profit before tax", "ebt"]));
+        const resolved = resolveTaxRate(filed, region.tax, region.label);
+        setTaxRate(resolved);
+        // Never over a rate the user has set: the whole point is that it is
+        // a starting value they can override, not a value that fights back.
+        if (!taxTouched) setTax(resolved.pct);
+      })
+      .catch(() => { if (alive) setTaxRate(null); });
+    return () => { alive = false; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ticker, region]);
 
   const inputs: WaccInputs = useMemo(
     () => ({ equity, debt, beta, rf, erp, rd: costDebt, tax, premium }),
@@ -163,10 +207,35 @@ export function Wacc({ ticker, snap }: { ticker: string; snap: Snapshot | null }
         <NumField label="Extra risk premium %" value={premium} set={setPremium} step={0.25}
                   hint="Size, country or company-specific risk added to the cost of equity" />
         <label className="flex flex-col gap-1">
-          <span className="label-xs">Tax rate % — {tax}</span>
+          <span className="label-xs flex items-center gap-1.5 flex-wrap">
+            <span>Tax rate % — {fmtNum(tax, 1)}</span>
+            {/* Where this number came from. A rate the company actually paid
+                and a government's headline rate are different claims, and the
+                slider looked identical either way. */}
+            <span className={`text-[9px] px-1 py-px rounded border uppercase tracking-wider ${
+              taxTouched ? "border-amber/50 text-amber"
+                : taxRate?.source === "filed" ? "border-green/50 text-green"
+                : "border-line2 text-mut"}`}
+                  title={taxTouched
+                    ? "Your value — nothing will overwrite it"
+                    : taxRate?.read}>
+              {taxTouched ? "yours"
+                : taxRate?.source === "filed" ? "filed" : "statutory"}
+            </span>
+            {taxTouched && taxRate && (
+              <button type="button"
+                      onClick={() => { setTaxTouched(false); setTax(taxRate.pct); }}
+                      className="text-[9px] text-mut hover:text-amber underline">
+                reset to {fmtNum(taxRate.pct, 1)}%
+              </button>
+            )}
+          </span>
           <input type="range" min={0} max={50} value={tax} step={0.1}
-                 onChange={(e) => setTax(parseFloat(e.target.value))}
+                 onChange={(e) => { setTaxTouched(true); setTax(parseFloat(e.target.value)); }}
                  className="accent-amber mt-1.5" />
+          {taxRate && !taxTouched && (
+            <span className="text-[10px] text-mut leading-relaxed">{taxRate.read}</span>
+          )}
         </label>
       </div>
 

@@ -164,11 +164,6 @@ export function News({ ticker }: { ticker: string }) {
 
       {sentErr && <div className="text-red text-[11px] mb-2">{sentErr}</div>}
 
-      <div className="flex flex-col gap-1.5 mb-3">
-        <Note>{filterNote(outcome)}</Note>
-        {sent && <Note>{sentimentNote(summary)}</Note>}
-      </div>
-
       <NewsFeed
         items={items}
         badge={(it: FeedItem) => {
@@ -202,7 +197,21 @@ export function News({ ticker }: { ticker: string }) {
           : `Yahoo, its RSS mirror and a Google News search all came back
              empty for this symbol.`} />
 
-      {sent && <Methodology id="newsSentiment" className="mt-3" />}
+      {/* One line, folded away: the filter's own account of what it dropped
+          and what a sentiment score does not mean. It belongs on the page —
+          it just doesn't belong above the headlines. */}
+      <details className="mt-4 group">
+        <summary className="text-[10.5px] text-mut cursor-pointer hover:text-amber list-none
+                            inline-flex items-center gap-1">
+          <span className="group-open:rotate-90 transition-transform">›</span>
+          How these headlines were chosen
+        </summary>
+        <div className="mt-2 flex flex-col gap-1.5">
+          <Note>{filterNote(outcome)}</Note>
+          {sent && <Note>{sentimentNote(summary)}</Note>}
+        </div>
+        {sent && <Methodology id="newsSentiment" className="mt-3" />}
+      </details>
     </div>
   );
 }

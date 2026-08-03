@@ -75,6 +75,83 @@ export function regionFor(ticker: string, currency?: string | null): Region {
   return REGIONS.find((r) => r.key === key) ?? REGIONS[1];
 }
 
+// ── where the tax rate should come from ──────────────────────────────────
+
+export type TaxSource = "filed" | "statutory" | "user";
+
+export type TaxRate = {
+  /** The rate to use, in percent. */
+  pct: number;
+  source: TaxSource;
+  /** How many periods the filed rate was averaged over. */
+  periods: number;
+  read: string;
+};
+
+/** Effective rates outside this band are an artefact, not a tax policy. */
+export const SANE_TAX = { min: 0, max: 60 };
+
+/**
+ * The company's own effective tax rate, from tax paid over pre-tax profit.
+ *
+ * The statutory rate is what the government charges; the effective rate is
+ * what the company actually pays, and for most listed companies they differ
+ * by several points — accumulated losses, incentives, overseas mix, the
+ * concessional Indian regime. Discounting with the statutory rate overstates
+ * the interest shield for anyone paying less than it.
+ *
+ * Averaged over the periods available rather than taken from the latest one,
+ * because a single quarter carries one-off provisions that swing the ratio
+ * wildly. Periods where either input is missing, or where pre-tax profit is
+ * negative (a loss makes the ratio meaningless, not negative), are skipped.
+ */
+export function filedTaxRate(taxRows: (number | null)[],
+                             pretaxRows: (number | null)[]): TaxRate | null {
+  const rates: number[] = [];
+  const n = Math.min(taxRows.length, pretaxRows.length);
+  for (let i = 0; i < n; i++) {
+    const tax = taxRows[i], pre = pretaxRows[i];
+    if (tax == null || pre == null) continue;
+    if (!Number.isFinite(tax) || !Number.isFinite(pre)) continue;
+    // A loss-making period has no meaningful effective rate: a tax credit
+    // over a negative profit produces a positive-looking number that means
+    // the opposite of what it appears to.
+    if (pre <= 0) continue;
+    const r = (tax / pre) * 100;
+    if (r < SANE_TAX.min || r > SANE_TAX.max) continue;
+    rates.push(r);
+  }
+  if (!rates.length) return null;
+  const pct = rates.reduce((a, b) => a + b, 0) / rates.length;
+  return {
+    pct: Math.round(pct * 10) / 10,
+    source: "filed",
+    periods: rates.length,
+    read: `${pct.toFixed(1)}% is what this company actually paid — tax expense `
+      + `over pre-tax profit, averaged across ${rates.length} reported `
+      + `${rates.length === 1 ? "period" : "periods"}. The statutory rate is `
+      + "what the government charges; this is what the filings show, and the "
+      + "interest shield is worth the second one.",
+  };
+}
+
+/** The rate to start from: the company's own where the filings support it. */
+export function resolveTaxRate(filed: TaxRate | null,
+                               statutoryPct: number,
+                               regionLabel: string): TaxRate {
+  if (filed) return filed;
+  return {
+    pct: statutoryPct,
+    source: "statutory",
+    periods: 0,
+    read: `No usable tax line in the filings, so this starts from the `
+      + `${regionLabel} statutory rate of ${statutoryPct.toFixed(1)}%. Most `
+      + "companies pay less than statutory — incentives, accumulated losses, "
+      + "overseas mix — so this probably overstates the interest shield. "
+      + "Override it if you know the company's real rate.",
+  };
+}
+
 export type WaccInputs = {
   /** Market value of equity, in the reporting currency. */
   equity: number;

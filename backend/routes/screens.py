@@ -58,9 +58,21 @@ def _scan_cached() -> dict:
     # Low default parallelism: the deploy target is a 1-vCPU/1-GB VM, and 12
     # workers x (NSE + yfinance-with-pandas) per name caused CPU/memory thrash.
     workers = int(os.getenv("SCAN_WORKERS", "4") or 4)
+    def _fundamentals(t: str) -> dict:
+        f = providers.snapshot(t, quota_safe=True) or {}
+        # Growth, PEG and promoter holding are absent from every free
+        # non-Indian provider, and three presets gate on them. NSE publishes
+        # all of it — results filings and the shareholding pattern.
+        from lib import nse
+        if nse.is_indian(t):
+            try:
+                f = screens.enrich_indian(t, f)
+            except Exception:
+                pass
+        return f
+
     rows = screens.scan_universe(
-        max_workers=workers,
-        fundamentals_fn=lambda t: providers.snapshot(t, quota_safe=True))
+        max_workers=workers, fundamentals_fn=_fundamentals)
     return {"rows": rows,
             "as_of": datetime.now(timezone.utc).isoformat(timespec="seconds")}
 
@@ -75,10 +87,28 @@ def preset(name: str, _user: dict = Depends(auth.current_user)):
     matched = screens.run_preset(name, rows)
     note = None
     if not matched:
-        note = (f"0 of {len(rows)} scanned names matched. Growth / ROCE / PEG "
-                f"metrics have limited coverage on this data plan, so screens "
-                f"using them can come up empty — try the 'Large Cap' presets "
-                f"(price + market-cap only), or loosen the filter values.")
+        # Naming the unrunnable field is the whole difference between "no
+        # company passed this test" and "this test could not be applied to a
+        # single company", which look identical in an empty table.
+        dead = screens.unrunnable_fields(rows, name)
+        labels = {f["key"]: f["label"] for f in screens.FIELDS}
+        if dead:
+            named = ", ".join(labels.get(k, k) for k in dead)
+            note = (f"This screen cannot run: {named} "
+                    f"{'is' if len(dead) == 1 else 'are'} empty for all "
+                    f"{len(rows)} scanned names, so the filter excludes every "
+                    f"company before any of them is judged. That is a data-"
+                    f"coverage gap, not a market with nothing in it.")
+        else:
+            cov = screens.field_coverage(rows, screens.PRESET_REQUIRES.get(name, ()))
+            thin = sorted((n, k) for k, n in cov.items() if n < len(rows) * 0.5)
+            note = (f"0 of {len(rows)} scanned names matched.")
+            if thin:
+                named = ", ".join(
+                    f"{labels.get(k, k)} ({n}/{len(rows)})" for n, k in thin)
+                note += (f" Every criterion is evaluable for at least one name, "
+                         f"but coverage is thin on {named} — the names missing "
+                         f"those fields are excluded rather than judged.")
     return _envelope(matched, scanned=_UNIVERSE_SIZE, evaluable=len(rows),
                      note=note, as_of=scan["as_of"])
 

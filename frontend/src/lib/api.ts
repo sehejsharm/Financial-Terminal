@@ -368,6 +368,13 @@ export type SentimentResp = {
   ticker: string; items: SentimentItem[]; score: number | null;
   history: { ts: string; ticker: string; score: number; n: number }[];
 };
+export type MoversResult = {
+  market: string;
+  kind: string;
+  rows: Mover[];
+  /** How many constituents the ranking was drawn from. */
+  universe: number;
+};
 export type FlowRow = {
   symbol: string; deals: number; participants: number | null;
   buy_qty: number; sell_qty: number; net_qty: number;
@@ -542,8 +549,14 @@ export const api = {
     apiFetch<Snapshot>(`/api/v1/market/snapshot/${encodeURIComponent(ticker)}`, {}, opts),
   snapshotMeta: (ticker: string, opts?: FetchOpts) =>
     apiFetchMeta<Snapshot>(`/api/v1/market/snapshot/${encodeURIComponent(ticker)}`, {}, opts),
-  movers: (kind: "gainers" | "losers" = "gainers", count = 8) =>
-    apiFetch<Mover[]>(`/api/v1/market/movers?kind=${kind}&count=${count}`),
+  /** Movers within one market's index constituents.
+   *
+   *  `market` matters: "gainers and losers" is only meaningful relative to a
+   *  market, and this served NIFTY to every reader regardless of where they
+   *  were sitting. The response says which universe the ranking was within. */
+  movers: (kind: "gainers" | "losers" = "gainers", count = 8, market = "IN") =>
+    apiFetch<MoversResult>(
+      `/api/v1/market/movers?kind=${kind}&count=${count}&market=${market}`),
   /** Entity-filtered headlines for one listing, plus the filter outcome.
    *
    *  `strict=false` returns the raw feed including similar-named companies —

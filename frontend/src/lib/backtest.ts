@@ -377,3 +377,140 @@ export function gridAround(centre: number, step: number, count = 5): number[] {
   }
   return out;
 }
+
+// ── does it survive out of sample ─────────────────────────────────────────
+
+export type Split = {
+  /** In-sample: where parameters would have been chosen. */
+  inSample: Stats | null;
+  /** Out-of-sample: the only part that was not fitted. */
+  outSample: Stats | null;
+  splitDate: string | null;
+  /** Out-of-sample total minus in-sample total, in percentage points. */
+  decayPct: number | null;
+  read: string;
+};
+
+/** Fraction of history used to fit. The rest is the honest test. */
+export const IN_SAMPLE_SHARE = 0.6;
+
+/**
+ * The same rule, run separately on the first 60% and the last 40%.
+ *
+ * A backtest whose parameters were chosen by looking at the whole series has
+ * been fitted to it, and the equity curve cannot show that — it looks
+ * identical either way. Splitting does show it: a rule that works in the
+ * first half and falls apart in the second was describing that window, not
+ * the market.
+ *
+ * This is NOT a walk-forward optimisation. It runs ONE parameter set across
+ * both halves, which answers "does this rule keep working" rather than "could
+ * a re-fitted version keep working". The weaker question, honestly labelled.
+ */
+export function splitSample(bars: Bar[], opts: BacktestOptions): Split {
+  const clean = (bars || []).filter((b) => b && Number.isFinite(b.close) && b.close > 0);
+  const cut = Math.floor(clean.length * IN_SAMPLE_SHARE);
+  const empty: Split = {
+    inSample: null, outSample: null, splitDate: null, decayPct: null,
+    read: `Not enough history to split — each half needs at least ${MIN_BARS} `
+      + "bars, so this needs about twice that. Load a longer period.",
+  };
+  if (cut < MIN_BARS || clean.length - cut < MIN_BARS) return empty;
+
+  const a = runBacktest(clean.slice(0, cut), opts);
+  const b = runBacktest(clean.slice(cut), opts);
+  if (!a || !b) return empty;
+
+  const decay = b.stats.totalPct - a.stats.totalPct;
+  const splitDate = clean[cut].date;
+
+  let read: string;
+  if (b.stats.totalPct <= 0 && a.stats.totalPct > 0) {
+    read = `Made ${a.stats.totalPct.toFixed(1)}% before ${splitDate} and `
+      + `${b.stats.totalPct.toFixed(1)}% after. A rule that works in the first `
+      + "half and not the second was describing that window, not the market — "
+      + "which is what a single equity curve cannot show you.";
+  } else if (b.stats.totalPct > b.stats.buyHoldPct) {
+    read = `Beat buy-and-hold in the untouched second half `
+      + `(${b.stats.totalPct.toFixed(1)}% against `
+      + `${b.stats.buyHoldPct.toFixed(1)}%). That is the only part of this `
+      + "backtest that wasn't available when the parameters were picked.";
+  } else {
+    read = `Second half returned ${b.stats.totalPct.toFixed(1)}% against `
+      + `buy-and-hold's ${b.stats.buyHoldPct.toFixed(1)}%. The rule survives `
+      + "out of sample but does not beat simply holding, which is the "
+      + "comparison that matters.";
+  }
+  return { inSample: a.stats, outSample: b.stats, splitDate, decayPct: decay, read };
+}
+
+// ── was it one good year ──────────────────────────────────────────────────
+
+export type YearRow = {
+  year: string;
+  strategyPct: number;
+  buyHoldPct: number;
+  /** Strategy minus buy-and-hold, in percentage points. */
+  excessPct: number;
+};
+
+/**
+ * Calendar-year returns for the strategy and for holding.
+ *
+ * A total return is one number and hides its own shape. Most rules that look
+ * good over a decade made everything in one or two years and lagged in the
+ * rest, and a reader deciding whether to run one needs to see which it is.
+ */
+export function yearlyReturns(res: BacktestResult): YearRow[] {
+  const byYear = new Map<string, { sStart: number; sEnd: number; bStart: number; bEnd: number }>();
+  for (let i = 0; i < res.dates.length; i++) {
+    const y = res.dates[i].slice(0, 4);
+    const cur = byYear.get(y);
+    if (!cur) {
+      // The base is the PREVIOUS bar's equity, so January's move belongs to
+      // this year rather than being silently dropped.
+      const base = i > 0 ? i - 1 : 0;
+      byYear.set(y, {
+        sStart: res.equity[base], sEnd: res.equity[i],
+        bStart: res.buyHold[base], bEnd: res.buyHold[i],
+      });
+    } else {
+      cur.sEnd = res.equity[i];
+      cur.bEnd = res.buyHold[i];
+    }
+  }
+  const out: YearRow[] = [];
+  for (const [year, v] of [...byYear.entries()].sort()) {
+    if (!(v.sStart > 0) || !(v.bStart > 0)) continue;
+    const s = (v.sEnd / v.sStart - 1) * 100;
+    const b = (v.bEnd / v.bStart - 1) * 100;
+    out.push({ year, strategyPct: s, buyHoldPct: b, excessPct: s - b });
+  }
+  return out;
+}
+
+/** How concentrated the result is in its best year. */
+export function yearlyNote(rows: YearRow[]): string {
+  if (rows.length < 2) {
+    return "Less than two calendar years — not enough to say whether the "
+      + "result is broad or one good stretch.";
+  }
+  const beat = rows.filter((r) => r.excessPct > 0).length;
+  const best = rows.reduce((a, r) => (r.strategyPct > a.strategyPct ? r : a));
+  const total = rows.reduce((a, r) => a + r.strategyPct, 0);
+  const share = total !== 0 ? (best.strategyPct / total) * 100 : null;
+
+  const parts = [
+    `Beat buy-and-hold in ${beat} of ${rows.length} calendar years.`,
+  ];
+  if (share != null && share > 60 && best.strategyPct > 0) {
+    parts.push(`${best.year} alone accounts for roughly `
+      + `${Math.min(share, 100).toFixed(0)}% of the total — this is one good `
+      + "year with a strategy wrapped around it, not a rule that works "
+      + "steadily.");
+  }
+  parts.push("Calendar years are an arbitrary cut and a strategy can look very "
+    + "different on a July-to-July split; they are shown because a single "
+    + "total return hides its own shape entirely.");
+  return parts.join(" ");
+}

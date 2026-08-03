@@ -57,6 +57,56 @@ FILTER_METRICS = [
 ]
 
 
+def enrich_indian(ticker: str, f: dict) -> dict:
+    """Fill the fields the free feed leaves blank for Indian listings.
+
+    PEG, Hidden Gems and Growth all filter on growth, ROCE and promoter
+    holding. No free non-Indian provider carries any of the three for NSE
+    names, so `_ge(None, x)` was False on every row and those three presets
+    could never match a single company — they were not "empty screens", they
+    were screens that could not run.
+
+    NSE publishes all three itself: results filings give growth, the filing's
+    own EBIT and the balance-sheet lines give nothing (the feed has no balance
+    sheet), and the shareholding pattern gives the promoter stake. Only what is
+    genuinely derivable is filled; the rest stays None so the coverage report
+    can say the screen is unrunnable rather than returning a silent zero.
+    """
+    from lib import nse_financials as nf
+
+    out = dict(f)
+    try:
+        parsed = nf.financial_results(ticker, quarterly=True)
+    except Exception:
+        parsed = {"columns": [], "rows": []}
+
+    if parsed.get("rows"):
+        if out.get("revenue_growth") is None:
+            g = nf.yoy_growth(parsed, "Revenue")
+            # The rest of the pipeline expects provider FRACTIONS (0.184),
+            # and yoy_growth returns percent.
+            if g is not None:
+                out["revenue_growth"] = g / 100
+        if out.get("earnings_growth") is None:
+            g = nf.yoy_growth(parsed, "Net Income")
+            if g is not None:
+                out["earnings_growth"] = g / 100
+        if out.get("revenue") is None:
+            ttm = nf.trailing_twelve(parsed, "Revenue")
+            if ttm is not None:
+                out["revenue"] = ttm
+
+    if out.get("held_insiders") is None:
+        try:
+            promoter = nf.promoter_holding(ticker)
+        except Exception:
+            promoter = None
+        if promoter is not None:
+            out["held_insiders"] = promoter / 100      # fraction, as above
+
+    return out
+
+
 def _fetch_fundamentals_default(ticker: str) -> dict:
     """Default fundamentals fetch: yfinance with an NSE overlay for .NS names.
 
@@ -71,6 +121,7 @@ def _fetch_fundamentals_default(ticker: str) -> dict:
         for k, v in n.items():
             if v is not None and f.get(k) in (None, "", 0):
                 f[k] = v
+        f = enrich_indian(ticker, f)
     return f
 
 
@@ -92,6 +143,15 @@ def _build_metrics(ticker: str, f: dict | None) -> dict | None:
     de = f.get("debt_to_equity")
     de = de / 100 if de is not None else None  # percentage -> ratio
     promoter = (f.get("held_insiders") or 0) * 100 if f.get("held_insiders") is not None else None
+
+    # PEG = P/E over earnings growth. Providers rarely populate it for NSE
+    # names even when both inputs are present, and it gates two presets.
+    # Negative growth has no PEG — a negative ratio would sort as "cheap".
+    peg = f.get("peg")
+    if peg is None:
+        pe_raw = f.get("trailing_pe")
+        if isinstance(pe_raw, (int, float)) and eps_g is not None and eps_g > 0:
+            peg = round(pe_raw / eps_g, 2)
 
     def pct(key):
         """Provider fractions (0.184) -> percent (18.4)."""
@@ -131,7 +191,7 @@ def _build_metrics(ticker: str, f: dict | None) -> dict | None:
         # ── valuation ──
         "pe": f.get("trailing_pe"),
         "forward_pe": num("forward_pe"),
-        "peg": f.get("peg"),
+        "peg": peg,
         "pb": num("price_to_book"),
         "ps": num("price_to_sales"),
         # ── growth ──
@@ -172,6 +232,35 @@ def _le(v, t):
 
 # Preset screens. Each returns True if the row passes. Multi-year growth uses
 # trailing growth as a proxy; industry-P/E condition is omitted (no free data).
+# The metric each preset depends on. A screen whose gating field is empty for
+# the whole universe cannot run — which is a different statement from "nothing
+# matched", and the one the reader needs.
+PRESET_REQUIRES: dict[str, tuple[str, ...]] = {
+    "PEG Screen": ("eps_growth", "sales_growth", "peg", "de", "roce", "mcap_cr"),
+    "Hidden Gems": ("mcap_cr", "sales_growth", "eps_growth", "roce", "de", "promoter"),
+    "Growth": ("mcap_cr", "eps_growth", "sales_growth", "peg", "roce", "de", "promoter"),
+    "Large Cap": ("mcap_cr",),
+    "Large Cap Value": ("mcap_cr", "pe"),
+}
+
+
+def field_coverage(rows: list[dict], keys) -> dict[str, int]:
+    """How many rows carry a usable value for each key."""
+    return {k: sum(1 for r in rows if r.get(k) is not None) for k in keys}
+
+
+def unrunnable_fields(rows: list[dict], name: str) -> list[str]:
+    """Fields this preset filters on that NO scanned row can supply.
+
+    Every one of these makes the preset's test False for every company, so a
+    screen with any of them returns nothing regardless of the market.
+    """
+    if not rows:
+        return []
+    cov = field_coverage(rows, PRESET_REQUIRES.get(name, ()))
+    return [k for k, n in cov.items() if n == 0]
+
+
 PRESETS = {
     "PEG Screen": {
         "desc": "EPS growth > 20, Sales growth > 15, PEG < 1, D/E < 1, "

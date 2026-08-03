@@ -79,12 +79,20 @@ async function open(page: Page, fn: string, opts: { strictFeed?: unknown } = {})
 
 // ── CN ────────────────────────────────────────────────────────────────────
 
+/** The filter's own account now lives behind a disclosure — it belongs on the
+ *  page, just not stacked above the headlines. */
+async function openHow(page: Page) {
+  await page.getByText("How these headlines were chosen").click();
+}
+
 test("CN says how many namesake stories the filter removed", async ({ page }) => {
   // Without this, a short list looks the same whether the company is quiet or
   // the matching is broken — which makes the filter's failures unfalsifiable.
   await open(page, "CN");
+  // The count itself stays visible at a glance; the explanation folds away.
   await expect(page.getByText(/9 namesakes filtered out/))
     .toBeVisible({ timeout: 45_000 });
+  await openHow(page);
   await expect(page.getByText(/9 stories were dropped as being about a different company/))
     .toBeVisible();
 });
@@ -93,6 +101,7 @@ test("CN names the entity it filtered against and how a story qualifies", async 
   await open(page, "CN");
   await expect(page.getByText(/News — Reliance Industries Ltd/))
     .toBeVisible({ timeout: 45_000 });
+  await openHow(page);
   await expect(page.getByText(/exchange-qualified symbol, an ISIN, or every distinctive word/))
     .toBeVisible();
   // And admits the filter can exclude a genuine story.
@@ -104,6 +113,7 @@ test("CN can show the raw feed, which is the only way to check the filter", asyn
   await expect(page.getByRole("button", { name: "This company only" }))
     .toBeVisible({ timeout: 45_000 });
   await page.getByRole("button", { name: "This company only" }).click();
+  await openHow(page);
   await expect(page.getByText(/Entity filtering is OFF/)).toBeVisible();
   // The namesake that strict mode excluded is now on screen, marked loose.
   await expect(page.getByText(/Reliance Steel reports lower shipments/)).toBeVisible();
@@ -125,8 +135,9 @@ test("CN matches sentiment tags despite cosmetic title differences", async ({ pa
 test("CN says a sentiment score reads tone, not importance", async ({ page }) => {
   await open(page, "CN");
   await page.getByRole("button", { name: /Analyze sentiment/ }).click();
-  await expect(page.getByText(/reads TONE, not importance/))
-    .toBeVisible({ timeout: 45_000 });
+  await expect(page.getByText(/Sentiment \+/)).toBeVisible({ timeout: 45_000 });
+  await openHow(page);
+  await expect(page.getByText(/reads TONE, not importance/)).toBeVisible();
   await expect(page.getByText(/the fall being reported rather than a signal/))
     .toBeVisible();
 });
