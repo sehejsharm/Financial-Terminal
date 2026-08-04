@@ -16,11 +16,17 @@
     - DeferredTaxExpense next to TaxExpense, and a discontinued-operations
       profit line, both of which a loose match would grab by mistake
 
-  Figures are internally consistent so the identity checks can be asserted:
-    revenue + other income = total income
-    total income - expenses  = pre-tax income
-    pre-tax income - tax     = net income
-    net income / basic EPS   = ~1.35e10 shares
+  It is a CONSOLIDATED filing, so the profit chain has the two extra steps a
+  group has, and the figures are internally consistent so each can be
+  asserted as an identity rather than an approximation:
+    revenue + other income                    = total income
+    total income - expenses + associates      = pre-tax income
+    pre-tax income - tax                      = profit for the period
+    profit for the period - minority          = owners' profit
+    owners' profit / basic EPS                = ~1.35e10 shares
+
+  Note that owners' profit, not group profit, is what divides into EPS —
+  using the group figure overstates the share count by the minority slice.
 -->
 <xbrli:xbrl
     xmlns:xbrli="http://www.xbrl.org/2003/instance"
@@ -112,11 +118,14 @@
   <in-capmkt:Expenses contextRef="Q3FY25" unitRef="INR" decimals="-7">2226570000000</in-capmkt:Expenses>
   <in-capmkt:FinanceCosts contextRef="Q3FY25" unitRef="INR" decimals="-7">62800000000</in-capmkt:FinanceCosts>
   <in-capmkt:DepreciationDepletionAndAmortisationExpense contextRef="Q3FY25" unitRef="INR" decimals="-7">134020000000</in-capmkt:DepreciationDepletionAndAmortisationExpense>
-  <in-capmkt:ProfitBeforeTax contextRef="Q3FY25" unitRef="INR" decimals="-7">261510000000</in-capmkt:ProfitBeforeTax>
+  <in-capmkt:ShareOfProfitLossOfAssociatesAndJointVenturesAccountedForUsingEquityMethod contextRef="Q3FY25" unitRef="INR" decimals="-7">3200000000</in-capmkt:ShareOfProfitLossOfAssociatesAndJointVenturesAccountedForUsingEquityMethod>
+  <in-capmkt:ProfitBeforeTax contextRef="Q3FY25" unitRef="INR" decimals="-7">264710000000</in-capmkt:ProfitBeforeTax>
   <in-capmkt:TaxExpense contextRef="Q3FY25" unitRef="INR" decimals="-7">66220000000</in-capmkt:TaxExpense>
   <in-capmkt:CurrentTax contextRef="Q3FY25" unitRef="INR" decimals="-7">54100000000</in-capmkt:CurrentTax>
   <in-capmkt:DeferredTaxExpense contextRef="Q3FY25" unitRef="INR" decimals="-7">12120000000</in-capmkt:DeferredTaxExpense>
-  <in-capmkt:ProfitLossForPeriod contextRef="Q3FY25" unitRef="INR" decimals="-7">195290000000</in-capmkt:ProfitLossForPeriod>
+  <in-capmkt:ProfitLossForPeriod contextRef="Q3FY25" unitRef="INR" decimals="-7">198490000000</in-capmkt:ProfitLossForPeriod>
+  <in-capmkt:ProfitLossAttributableToNonControllingInterests contextRef="Q3FY25" unitRef="INR" decimals="-7">3200000000</in-capmkt:ProfitLossAttributableToNonControllingInterests>
+  <in-capmkt:ProfitLossAttributableToOwnersOfParent contextRef="Q3FY25" unitRef="INR" decimals="-7">195290000000</in-capmkt:ProfitLossAttributableToOwnersOfParent>
   <in-capmkt:ProfitLossForPeriodFromDiscontinuedOperations contextRef="Q3FY25" unitRef="INR" decimals="-7">0</in-capmkt:ProfitLossForPeriodFromDiscontinuedOperations>
   <in-capmkt:BasicEarningsLossPerShare contextRef="Q3FY25" unitRef="INRPerShare" decimals="2">14.43</in-capmkt:BasicEarningsLossPerShare>
   <in-capmkt:DilutedEarningsLossPerShare contextRef="Q3FY25" unitRef="INRPerShare" decimals="2">14.41</in-capmkt:DilutedEarningsLossPerShare>

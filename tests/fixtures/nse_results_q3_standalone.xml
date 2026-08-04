@@ -1,0 +1,55 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  The SAME quarter as nse_results_q3.xml, filed on the standalone basis.
+
+  A company files each quarter twice. The two differ by roughly the
+  subsidiaries — here standalone revenue is about a third of the group's —
+  so a series that takes one basis for one quarter and the other for the next
+  reports a collapse in revenue that never happened. That is what the primary
+  selection exists to prevent.
+
+  There are no consolidation lines at all: no associates, no minority, no
+  attributable-to-owners split. Profit for the period IS the owners' profit,
+  which is why the minority identity is skipped rather than failed here.
+
+    revenue + other income   = total income
+    total income - expenses  = pre-tax income
+    pre-tax income - tax     = profit for the period
+    profit for the period / basic EPS = ~1.35e10 shares
+-->
+<xbrli:xbrl
+    xmlns:xbrli="http://www.xbrl.org/2003/instance"
+    xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+    xmlns:in-capmkt="http://www.nseindia.com/xbrl/capmkt">
+
+  <xbrli:context id="Q3FY25">
+    <xbrli:entity>
+      <xbrli:identifier scheme="http://www.nseindia.com">INE002A01018</xbrli:identifier>
+    </xbrli:entity>
+    <xbrli:period>
+      <xbrli:startDate>2024-10-01</xbrli:startDate>
+      <xbrli:endDate>2024-12-31</xbrli:endDate>
+    </xbrli:period>
+  </xbrli:context>
+
+  <xbrli:unit id="INR"><xbrli:measure>iso4217:INR</xbrli:measure></xbrli:unit>
+  <xbrli:unit id="INRPerShare">
+    <xbrli:divide>
+      <xbrli:unitNumerator><xbrli:measure>iso4217:INR</xbrli:measure></xbrli:unitNumerator>
+      <xbrli:unitDenominator><xbrli:measure>xbrli:shares</xbrli:measure></xbrli:unitDenominator>
+    </xbrli:divide>
+  </xbrli:unit>
+
+  <in-capmkt:RevenueFromOperations contextRef="Q3FY25" unitRef="INR" decimals="-7">1355400000000</in-capmkt:RevenueFromOperations>
+  <in-capmkt:OtherIncome contextRef="Q3FY25" unitRef="INR" decimals="-7">36100000000</in-capmkt:OtherIncome>
+  <in-capmkt:Income contextRef="Q3FY25" unitRef="INR" decimals="-7">1391500000000</in-capmkt:Income>
+  <in-capmkt:Expenses contextRef="Q3FY25" unitRef="INR" decimals="-7">1250700000000</in-capmkt:Expenses>
+  <in-capmkt:FinanceCosts contextRef="Q3FY25" unitRef="INR" decimals="-7">38400000000</in-capmkt:FinanceCosts>
+  <in-capmkt:DepreciationDepletionAndAmortisationExpense contextRef="Q3FY25" unitRef="INR" decimals="-7">61200000000</in-capmkt:DepreciationDepletionAndAmortisationExpense>
+  <in-capmkt:ProfitBeforeTax contextRef="Q3FY25" unitRef="INR" decimals="-7">140800000000</in-capmkt:ProfitBeforeTax>
+  <in-capmkt:TaxExpense contextRef="Q3FY25" unitRef="INR" decimals="-7">35200000000</in-capmkt:TaxExpense>
+  <in-capmkt:ProfitLossForPeriod contextRef="Q3FY25" unitRef="INR" decimals="-7">105600000000</in-capmkt:ProfitLossForPeriod>
+  <in-capmkt:BasicEarningsLossPerShare contextRef="Q3FY25" unitRef="INRPerShare" decimals="2">7.80</in-capmkt:BasicEarningsLossPerShare>
+  <in-capmkt:DilutedEarningsLossPerShare contextRef="Q3FY25" unitRef="INRPerShare" decimals="2">7.79</in-capmkt:DilutedEarningsLossPerShare>
+
+</xbrli:xbrl>

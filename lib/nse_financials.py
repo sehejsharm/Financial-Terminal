@@ -82,10 +82,40 @@ _LINES: list[tuple[str, tuple[str, ...]]] = [
         "TaxExpense", "TotalTaxExpense", "IncomeTaxExpense",
         "TaxExpenseTotal",
     )),
+    # Consolidation lines. A group's profit does not go straight from pre-tax
+    # to net: equity-accounted associates come in, and the slice belonging to
+    # outside shareholders of part-owned subsidiaries comes out. Leaving them
+    # out is what made the reconciliation an approximation.
+    ("Share of associates", (
+        "ShareOfProfitLossOfAssociatesAndJointVenturesAccountedForUsingEquityMethod",
+        "ShareOfProfitLossOfAssociatesAndJointVentures",
+        "ShareOfProfitLossOfAssociates", "ShareOfProfitOfAssociates",
+    )),
+    ("Exceptional items", (
+        "ExceptionalItems", "ExceptionalItemsBeforeTax",
+        "ExceptionalItemsIncomeLoss",
+    )),
     ("Net Income", (
         "ProfitLossForPeriod", "ProfitLossForThePeriod",
         "NetProfitLossForThePeriod", "ProfitAfterTax",
         "ProfitLossForPeriodFromContinuingOperations",
+    )),
+    # The slice of that profit belonging to outside shareholders of part-owned
+    # subsidiaries. Reliance consolidates Jio and Retail without owning all of
+    # either, so this is a real deduction, not a rounding artefact.
+    ("Non-controlling interests", (
+        "ProfitLossAttributableToNonControllingInterests",
+        "ProfitLossAttributableToNoncontrollingInterests",
+        "ShareOfProfitLossAttributableToNonControllingInterests",
+        "MinorityInterest",
+    )),
+    # What the parent's own shareholders earned, and the only profit figure
+    # EPS is computed on. Dividing GROUP profit by EPS overstates the implied
+    # share count by exactly the minority slice.
+    ("Net Income (owners)", (
+        "ProfitLossAttributableToOwnersOfParent",
+        "ProfitLossAttributableToOwnersOfTheParent",
+        "ProfitLossAttributableToEquityHoldersOfParent",
     )),
     ("EPS (basic)", (
         "BasicEarningsLossPerShare", "BasicEarningsPerShare",
@@ -116,9 +146,19 @@ _FUZZY: dict[str, tuple[frozenset[str], ...]] = {
     "Pre-Tax Income": (frozenset({"profit", "before", "tax"}),
                        frozenset({"pbt"})),
     "Tax Provision": (frozenset({"tax", "expense"}),),
+    "Share of associates": (frozenset({"share", "associates"}),
+                            frozenset({"equity", "method", "profit"})),
+    "Exceptional items": (frozenset({"exceptional"}),),
     "Net Income": (frozenset({"profit", "loss", "period"}),
                    frozenset({"profit", "after", "tax"}),
                    frozenset({"net", "profit"})),
+    # `Noncontrolling` has no internal capital, so it survives the CamelCase
+    # split as one token; both spellings have to be listed.
+    "Non-controlling interests": (frozenset({"non", "controlling"}),
+                                  frozenset({"noncontrolling"}),
+                                  frozenset({"minority", "interest"})),
+    "Net Income (owners)": (frozenset({"attributable", "owners"}),
+                            frozenset({"attributable", "equity", "holders"})),
     "EPS (basic)": (frozenset({"basic", "earnings", "share"}),
                     frozenset({"basic", "eps"})),
     "EPS (diluted)": (frozenset({"diluted", "earnings", "share"}),
@@ -132,9 +172,32 @@ _FUZZY_EXCLUDE = frozenset({
     "segment", "percentage", "ratio", "note", "disclosure", "corresponding",
 })
 
+# Words that disqualify a tag for ONE line but are required by another, so
+# they cannot live in the global exclusion set. Every profit subtotal in a
+# consolidated filing is some `ProfitLossAttributableTo...`; without this the
+# group's total profit line would claim the parent-owners figure and the
+# minority deduction would vanish into a rounding-looking gap.
+_LINE_EXCLUDE: dict[str, frozenset[str]] = {
+    "Revenue": frozenset({"attributable"}),
+    "Total income": frozenset({"attributable"}),
+    "Pre-Tax Income": frozenset({"attributable"}),
+    "Net Income": frozenset({"attributable", "owners", "minority",
+                             "controlling", "noncontrolling", "holders"}),
+}
+
 # Lines that are per-share rather than currency. They are never derived and
 # never summed across quarters.
 _PER_SHARE = frozenset({"EPS (basic)", "EPS (diluted)"})
+
+# Lines only some filings have. A standalone filer has no minority interest
+# and no associates by construction, and a quarter with no exceptional items
+# does not report the line at all. Keeping these out of `unmapped_lines`
+# is what stops that field from filling with expected absences and losing its
+# meaning as "a tag name we failed to find".
+_OPTIONAL_LINES = frozenset({
+    "Share of associates", "Exceptional items",
+    "Non-controlling interests", "Net Income (owners)",
+})
 
 
 def _tokens(name: str) -> set[str]:
@@ -156,12 +219,13 @@ def _fuzzy_match(available: dict[str, dict], line: str,
     wordsets = _FUZZY.get(line)
     if not wordsets:
         return None
+    banned = _FUZZY_EXCLUDE | _LINE_EXCLUDE.get(line, frozenset())
     best: tuple[int, str] | None = None
     for tag in available:
         if tag in claimed:
             continue
         toks = _tokens(tag)
-        if toks & _FUZZY_EXCLUDE:
+        if toks & banned:
             continue
         if not any(ws <= toks for ws in wordsets):
             continue
@@ -260,6 +324,87 @@ def filings(ticker: str, quarterly: bool = True) -> list[dict]:
     return [r for r in rows if isinstance(r, dict)] if isinstance(rows, list) else []
 
 
+# ── which filing is the primary one ──────────────────────────────────────
+
+# A company files the same quarter twice — once for the parent alone, once
+# for the group. Picking arbitrarily between them is worse than it sounds: a
+# series that takes consolidated for one quarter and standalone for the next
+# shows a growth rate that is really just a change of reporting basis.
+CONSOLIDATED, STANDALONE = "consolidated", "standalone"
+
+# Consolidated is the default because it is the whole economic entity a share
+# is a claim on, which is what almost every valuation wants.
+#
+# Banks are the deliberate exception. A bank's consolidated accounts fold in
+# insurance, asset-management and broking subsidiaries whose economics have
+# almost nothing in common with lending, so the consolidated margin, cost
+# ratio and asset quality are blends of unlike businesses; the standard
+# treatment is to read the bank standalone and value the subsidiaries
+# separately. HOLDING companies are NOT on this list and must not be added —
+# for Bajaj Finserv or an ABC-type holdco the standalone entity is close to
+# an empty shell, and preferring it would report almost nothing as the whole
+# company.
+PREFER_STANDALONE: frozenset[str] = frozenset({
+    "SBIN", "ICICIBANK", "HDFCBANK", "KOTAKBANK", "AXISBANK", "INDUSINDBK",
+    "BANKBARODA", "PNB", "CANBK", "UNIONBANK", "IDFCFIRSTB", "FEDERALBNK",
+    "BANDHANBNK", "AUBANK", "RBLBANK", "YESBANK", "IDBI", "INDIANB",
+    "BANKINDIA", "CENTRALBK", "UCOBANK", "IOB", "MAHABANK", "PSB",
+})
+
+
+def preferred_basis(ticker: str) -> str:
+    """Which reporting basis this ticker's statements should be read on."""
+    sym = (nse._clean_symbol(ticker) or "").upper()
+    return STANDALONE if sym in PREFER_STANDALONE else CONSOLIDATED
+
+
+def filing_basis(row: dict) -> str | None:
+    """Read the basis off an index row.
+
+    NSE has used "Consolidated", "Non-Consolidated" and "Standalone" in this
+    field across API revisions, so the test is on the leading token rather
+    than an exact string — "Non-Consolidated" starting with "non" is what
+    separates it from "Consolidated", and matching on a substring would call
+    it consolidated.
+    """
+    raw = str(row.get("consolidated") or row.get("re_consolidated") or "").strip().lower()
+    if not raw:
+        return None
+    if raw.startswith("non") or raw.startswith("stand") or raw.startswith("un-cons"):
+        return STANDALONE
+    if raw.startswith("cons"):
+        return CONSOLIDATED
+    return None
+
+
+def _period_key(row: dict) -> str:
+    return f"{_iso(row.get('fromDate')) or row.get('fromDate')}" \
+           f"..{_iso(row.get('toDate')) or row.get('toDate')}"
+
+
+def mark_primary(rows: list[dict], prefer: str) -> list[bool]:
+    """One primary filing per period, by reporting basis.
+
+    Returns a flag per row, aligned to `rows`. Within a period the preferred
+    basis wins; if only the other basis was filed, that one is primary rather
+    than leaving the period with none — a standalone-only quarter is still
+    the quarter.
+    """
+    best: dict[str, int] = {}
+    for i, row in enumerate(rows):
+        key = _period_key(row)
+        incumbent = best.get(key)
+        if incumbent is None:
+            best[key] = i
+            continue
+        if filing_basis(rows[incumbent]) == prefer:
+            continue
+        if filing_basis(row) == prefer:
+            best[key] = i
+    chosen = set(best.values())
+    return [i in chosen for i in range(len(rows))]
+
+
 def _document_url(row: dict) -> str | None:
     """Where this filing's numbers live.
 
@@ -340,20 +485,35 @@ def _mapped_count(lines: dict[str, dict]) -> int:
 
 
 def collect_periods(ticker: str, quarterly: bool = True,
-                    max_docs: int = _MAX_DOCS) -> dict[str, dict]:
+                    max_docs: int = _MAX_DOCS,
+                    prefer: str | None = None) -> dict[str, dict]:
     """Merge every quarter found across the most recent filings.
 
-    Where two filings both carry a period — the original and a later filing's
-    comparative — the more complete extraction wins. A comparative column is
-    often abbreviated, and taking it over the original would drop lines for
-    no reason other than fetch order.
+    Only PRIMARY filings are read. A company files each quarter twice, parent
+    and group, and mixing the two produces a series whose growth rate is
+    partly just a change of reporting basis — the standalone quarter next to
+    the consolidated one looks like a collapse in revenue that never happened.
+
+    Where two filings still carry the same period — a filing and a later
+    filing's year-ago comparative — the more complete extraction wins, since
+    a comparative column is often abbreviated and taking it would drop lines
+    for no reason other than fetch order.
     """
     shape = "quarter" if quarterly else "year"
+    prefer = prefer or preferred_basis(ticker)
+    rows = filings(ticker, quarterly=quarterly)
+    primary = mark_primary(rows, prefer)
     merged: dict[str, dict] = {}
-    for row in filings(ticker, quarterly=quarterly)[:max_docs]:
+    used = 0
+    for row, is_primary in zip(rows, primary):
+        if used >= max_docs:
+            break
+        if not is_primary:
+            continue
         url = _document_url(row)
         if not url:
             continue
+        used += 1
         try:
             doc = fetch_document(url)
         except Exception:
@@ -365,7 +525,8 @@ def collect_periods(ticker: str, quarterly: bool = True,
 
 
 def financial_results(ticker: str, quarterly: bool = True,
-                      max_docs: int = _MAX_DOCS) -> dict:
+                      max_docs: int = _MAX_DOCS,
+                      prefer: str | None = None) -> dict:
     """Income-statement history for an Indian listing.
 
     `max_docs` is a fetch budget, one HTTP request per document. A statement
@@ -379,7 +540,8 @@ def financial_results(ticker: str, quarterly: bool = True,
     "no data" is better than one that 500s.
     """
     try:
-        periods = collect_periods(ticker, quarterly=quarterly, max_docs=max_docs)
+        periods = collect_periods(ticker, quarterly=quarterly,
+                                  max_docs=max_docs, prefer=prefer)
     except Exception:
         periods = {}
     return build_statement(periods)
@@ -548,78 +710,176 @@ def yoy_growth(parsed: dict, line: str) -> float | None:
 
 # ── diagnostics ───────────────────────────────────────────────────────────
 
-def consistency(lines: dict[str, dict]) -> list[dict]:
+# XBRL values are rounded — `decimals="-7"` means the filer rounded to the
+# nearest crore — so summing three of them can miss by a few crore on a
+# multi-trillion figure. This is a ROUNDING allowance, not slack for a term
+# the identity forgot: at 0.05% a genuine missing line item never hides here.
+_ROUND_TOL = 0.0005
+_ROUND_FLOOR = 1e6
+
+
+def _balances(got: float, want: float) -> tuple[bool, float]:
+    residual = got - want
+    allowed = max(abs(want) * _ROUND_TOL, _ROUND_FLOOR)
+    return abs(residual) <= allowed, residual
+
+
+def _reconcile(name: str, base: float | None, target: float | None,
+               adjustments: list[tuple[str, float | None]],
+               base_formula: str, detail: str = "") -> dict:
+    """Check `base ± adjustments = target`, solving for the signs.
+
+    Ind-AS lets a filer present the same term on either side of a subtotal,
+    and sometimes on neither. Exceptional items are filed as a positive charge
+    by some companies and a negative one by others. Share of associates
+    appears before the tax line for most filers and after it for some — and
+    when it is before, it is ALREADY inside the pre-tax subtotal, so applying
+    it again double-counts it.
+
+    So each adjustment has three states, not two: absent, added, subtracted.
+    Every combination is tried and the one that balances is reported with the
+    formula it used, which keeps this an identity rather than a tolerance wide
+    enough to swallow a real error.
+    """
+    if base is None or target is None:
+        return {"check": name, "status": "skipped",
+                "reason": "an input line is missing", "detail": detail}
+
+    terms = [(label, val) for label, val in adjustments if val is not None]
+    best: dict | None = None
+    for combo in range(3 ** len(terms)):
+        total = base
+        parts = [base_formula]
+        for i, (label, val) in enumerate(terms):
+            state = combo // (3 ** i) % 3
+            if state == 1:
+                total += val
+                parts.append(f"+ {label}")
+            elif state == 2:
+                total -= val
+                parts.append(f"- {label}")
+        ok, residual = _balances(total, target)
+        cand = {
+            "check": name,
+            "status": "ok" if ok else "MISMATCH",
+            "formula": " ".join(parts),
+            "got": total, "expected": target,
+            "residual": round(residual, 2),
+            "off_by_pct": round(abs(residual) / max(abs(target), 1.0) * 100, 4),
+            "detail": detail,
+        }
+        # Closest to balancing wins. Ties go to the earliest combination,
+        # which applies no adjustments at all, so a filing whose subtotal
+        # already includes a term reports the plain identity rather than a
+        # contrived pair of cancelling ones.
+        if best is None or (not ok, abs(residual)) < \
+                (best["status"] != "ok", abs(best["residual"])):
+            best = cand
+    return best
+
+
+def consistency(lines: dict[str, dict], basis: str | None = None) -> list[dict]:
     """The identities a real income statement has to satisfy.
 
-    This is the part that makes a mapping checkable without knowing the
-    company's true figures. Revenue plus other income IS total income in any
-    filing, whatever the tags are called; if the parse says otherwise, a line
-    is on the wrong row. Net income over EPS gives a share count, which is the
-    scale check — it is a pure ratio, so it lands in the right range only when
-    the currency lines and the per-share lines agree about their units.
+    This is what makes a mapping checkable without knowing the company's true
+    figures. Revenue plus other income IS total income in any filing, whatever
+    the tags are called; if the parse says otherwise, a line is on the wrong
+    row.
+
+    For a CONSOLIDATED filing the profit chain has two more steps, and leaving
+    them out is what made this an approximation with a tolerance rather than
+    an identity:
+
+        total income - expenses ± exceptional + share of associates = pre-tax
+        pre-tax - tax                                               = group profit
+        group profit - non-controlling interests                    = owners' profit
+        owners' profit / EPS                                        = share count
+
+    The last one matters more than it looks. EPS is computed on the PARENT
+    owners' profit, so dividing group profit by EPS overstates the implied
+    share count by exactly the minority slice — which for a group like
+    Reliance, consolidating Jio and Retail without owning all of either, is
+    the sub-percent discrepancy that showed up as "close enough".
     """
     def v(line):
         return lines.get(line, {}).get("value")
 
     checks: list[dict] = []
 
-    def rel(name, got, want, tol=0.02, detail=""):
-        if got is None or want is None:
-            checks.append({"check": name, "status": "skipped",
-                           "reason": "an input line is missing", "detail": detail})
-            return
-        denom = max(abs(want), 1.0)
-        off = abs(got - want) / denom
-        checks.append({
-            "check": name,
-            "status": "ok" if off <= tol else "MISMATCH",
-            "got": got, "expected": want,
-            "off_by_pct": round(off * 100, 2), "detail": detail,
-        })
-
     rev, oth, tot = v("Revenue"), v("Other income"), v("Total income")
-    rel("revenue + other income = total income",
-        None if rev is None or oth is None else rev + oth, tot,
-        detail="a mismatch means one of the three is mapped to the wrong tag")
+    checks.append(_reconcile(
+        "revenue + other income = total income",
+        rev, tot, [("other income", oth)], "revenue",
+        detail="a mismatch means one of the three is mapped to the wrong tag"))
 
     inc, exp, pbt = v("Total income"), v("Total expenditure"), v("Pre-Tax Income")
-    rel("total income - total expenditure = pre-tax income",
+    checks.append(_reconcile(
+        "total income - expenditure (± exceptional, associates) = pre-tax income",
         None if inc is None or exp is None else inc - exp, pbt,
-        # Exceptional items and share of associates sit between these two
-        # lines, so a few percent of drift is normal rather than a fault.
-        tol=0.05,
-        detail="drift up to a few percent is normal (exceptional items)")
+        [("exceptional items", v("Exceptional items")),
+         ("share of associates", v("Share of associates"))],
+        "total income - expenditure",
+        detail="associates and exceptional items sit between these two lines; "
+               "both are pulled in rather than tolerated as drift"))
 
-    pat = v("Net Income")
-    rel("pre-tax income - tax = net income",
-        None if pbt is None or v("Tax Provision") is None else pbt - v("Tax Provision"),
-        pat, tol=0.05,
-        detail="minority interest sits between these two for a group filing")
+    tax, group = v("Tax Provision"), v("Net Income")
+    checks.append(_reconcile(
+        "pre-tax income - tax = profit for the period",
+        None if pbt is None or tax is None else pbt - tax, group,
+        # A filer that presents associates AFTER the tax line needs it here
+        # instead; whichever placement balances is the one reported.
+        [("share of associates", v("Share of associates"))],
+        "pre-tax income - tax",
+        detail="profit for the period is the GROUP total, before the minority "
+               "slice is taken out"))
 
+    nci, owners = v("Non-controlling interests"), v("Net Income (owners)")
+    if nci is None and owners is None:
+        checks.append({
+            "check": "profit for the period - minority = owners' profit",
+            "status": "skipped",
+            "reason": ("no consolidation lines in this filing"
+                       + (" (expected for a standalone filing)"
+                          if basis == "standalone" else "")),
+        })
+    else:
+        checks.append(_reconcile(
+            "profit for the period - minority = owners' profit",
+            group, owners, [("non-controlling interests", nci)],
+            "profit for the period",
+            detail="the slice belonging to outside shareholders of part-owned "
+                   "subsidiaries"))
+
+    # EPS is struck on the parent owners' earnings, so that is the numerator.
+    # Group profit here is what made the share count read ~0.6% high.
     eps = v("EPS (basic)")
-    if pat is not None and eps not in (None, 0):
-        shares = pat / eps
+    earnings = owners if owners is not None else group
+    which = "owners' profit" if owners is not None else "profit for the period"
+    if earnings is not None and eps not in (None, 0):
+        shares = earnings / eps
         # Any real listed company sits between a few million and a trillion
         # shares. A currency line mis-scaled against a per-share line lands
         # this ratio orders of magnitude outside that, which is the signature
         # of a scale error rather than a mapping one.
         plausible = 1e6 <= abs(shares) <= 1e12
         checks.append({
-            "check": "net income / EPS = a plausible share count",
+            "check": f"{which} / EPS = a plausible share count",
             "status": "ok" if plausible else "MISMATCH",
             "got": round(shares, 1),
+            "numerator": which,
             "detail": ("implied shares outstanding; outside 1e6–1e12 means the "
                        "currency lines and the per-share lines disagree about "
                        "scale"),
         })
     else:
-        checks.append({"check": "net income / EPS = a plausible share count",
+        checks.append({"check": "owners' profit / EPS = a plausible share count",
                        "status": "skipped",
-                       "reason": "net income or EPS is missing"})
+                       "reason": "the profit line or EPS is missing"})
     return checks
 
 
-def probe(ticker: str, quarterly: bool = True, max_docs: int = 2) -> dict:
+def probe(ticker: str, quarterly: bool = True, max_docs: int = 2,
+          prefer: str | None = None) -> dict:
     """The filing's raw XBRL next to what got parsed out of it.
 
     Reports every numeric tag in the chosen period, not just the ones that
@@ -636,13 +896,24 @@ def probe(ticker: str, quarterly: bool = True, max_docs: int = 2) -> dict:
                 "reason": "NSE returned no filings (session warm-up, rate limit, "
                           "or an unknown symbol)"}
 
+    prefer = prefer or preferred_basis(ticker)
+    primary_flags = mark_primary(rows, prefer)
+
     docs: list[dict] = []
-    for row in rows[:max_docs]:
+    for row, is_primary in list(zip(rows, primary_flags))[:max_docs]:
         url = _document_url(row)
+        basis = filing_basis(row)
         entry = {
             "period": f"{row.get('fromDate')} .. {row.get('toDate')}",
             "relating_to": row.get("relatingTo"),
             "consolidated": row.get("consolidated"),
+            "basis": basis,
+            "primary": is_primary,
+            "primary_reason": (
+                f"preferred basis for this ticker is {prefer}"
+                if is_primary and basis == prefer else
+                "only filing for this period" if is_primary else
+                f"a {prefer} filing exists for the same period"),
             "source_field": ("resultDetailedDataLink"
                              if row.get("resultDetailedDataLink") else "xbrl"),
             "url": url,
@@ -682,7 +953,15 @@ def probe(ticker: str, quarterly: bool = True, max_docs: int = 2) -> dict:
             for line, _t in _LINES
         ]
         entry["unmapped_lines"] = [line for line, _t in _LINES
-                                   if lines[line]["value"] is None]
+                                   if lines[line]["value"] is None
+                                   and line not in _OPTIONAL_LINES]
+        # Absent by construction rather than by a failed match: a standalone
+        # filer has no minority interest, and a clean quarter files no
+        # exceptional item. Listed separately so the field above keeps
+        # meaning "a tag we could not find".
+        entry["optional_absent"] = [line for line, _t in _LINES
+                                    if lines[line]["value"] is None
+                                    and line in _OPTIONAL_LINES]
         # Everything present in this period, biggest first — the definitive
         # answer to "what is the tag actually called".
         entry["all_numeric_facts"] = [
@@ -691,17 +970,24 @@ def probe(ticker: str, quarterly: bool = True, max_docs: int = 2) -> dict:
             for t, f in sorted(tag_facts.items(),
                                key=lambda kv: -abs(kv[1]["value"]))
         ]
-        entry["consistency"] = consistency(lines)
+        entry["consistency"] = consistency(lines, basis=basis)
         docs.append(entry)
 
     ok = any(d.get("mapping") for d in docs)
+    selected = next((i for i, d in enumerate(docs) if d.get("primary")), None)
     return {
         "ticker": ticker,
         "ok": ok,
         "filings_seen": len(rows),
+        "preferred_basis": prefer,
+        # Which entry of `documents` downstream code should treat as the
+        # company's figures for its period. None means every filing in this
+        # window was superseded by a preferred-basis one outside it.
+        "selected_index": selected,
         "index_row_keys": sorted(rows[0].keys()),
         "documents": docs,
-        "parsed": build_statement(collect_periods(ticker, quarterly=quarterly,
-                                                  max_docs=max_docs)) if ok else
+        "parsed": build_statement(
+            collect_periods(ticker, quarterly=quarterly, max_docs=max_docs,
+                            prefer=prefer)) if ok else
                   {"columns": [], "rows": []},
     }

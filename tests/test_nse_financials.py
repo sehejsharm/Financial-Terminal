@@ -21,6 +21,8 @@ from lib.nse_xbrl import facts_by_context, parse_document
 
 FIXTURE = Path(__file__).parent / "fixtures" / "nse_results_q3.xml"
 XML = FIXTURE.read_text()
+STANDALONE_XML = (Path(__file__).parent / "fixtures"
+                  / "nse_results_q3_standalone.xml").read_text()
 
 # What the announcement index actually returns — the keys from the real probe
 # run, with no financial figures anywhere in it.
@@ -63,7 +65,9 @@ def q3_lines():
 class TestLineMapping:
     def test_maps_every_line_the_filing_reports(self, q3_lines):
         unmapped = [k for k, v in q3_lines.items() if v["value"] is None]
-        assert unmapped == []
+        # Exceptional items is filed nil in this quarter, which means "not
+        # reported" — the one legitimate absence.
+        assert unmapped == ["Exceptional items"]
 
     def test_revenue_is_the_group_figure_in_absolute_rupees(self, q3_lines):
         # ₹2.43 trillion for the quarter. A lakh- or crore-scaled parse lands
@@ -89,7 +93,7 @@ class TestLineMapping:
         # added back, and it is labelled derived so it is never shown as filed.
         assert q3_lines["Operating Income"]["via"] == "derived"
         assert q3_lines["Operating Income"]["value"] == (
-            261510000000 + 62800000000 + 134020000000)
+            264710000000 + 62800000000 + 134020000000)
 
     def test_a_tag_can_only_feed_ONE_line(self, q3_lines):
         used = [v["tag"] for v in q3_lines.values()
@@ -184,6 +188,35 @@ class TestStatement:
         assert len(calls) == 1
 
 
+class TestConsolidation:
+    """A group's profit does not go straight from pre-tax to net. Equity-
+    accounted associates come in and the minority slice goes out, and leaving
+    both out is what made the reconciliation an approximation."""
+
+    def test_pulls_the_share_of_associates(self, q3_lines):
+        assert q3_lines["Share of associates"]["value"] == 3200000000
+
+    def test_pulls_the_minority_slice(self, q3_lines):
+        assert q3_lines["Non-controlling interests"]["value"] == 3200000000
+
+    def test_keeps_group_profit_and_owners_profit_APART(self, q3_lines):
+        # The filing tags both. Letting one line claim the other is what makes
+        # the minority deduction vanish into a rounding-looking gap.
+        assert q3_lines["Net Income"]["tag"] == "ProfitLossForPeriod"
+        assert q3_lines["Net Income"]["value"] == 198490000000
+        assert q3_lines["Net Income (owners)"]["tag"] == \
+            "ProfitLossAttributableToOwnersOfParent"
+        assert q3_lines["Net Income (owners)"]["value"] == 195290000000
+
+    def test_group_profit_never_claims_an_attributable_tag(self):
+        # Only the parent-owners figure is tagged. Net Income must stay empty
+        # rather than quietly reporting it as the group total.
+        lines = extract_lines({
+            "ProfitLossAttributableToOwnersOfParent": {"value": 100.0}})
+        assert lines["Net Income"]["value"] is None
+        assert lines["Net Income (owners)"]["value"] == 100.0
+
+
 class TestConsistency:
     """The identities a real income statement satisfies. This is what makes a
     mapping checkable without knowing the company's true figures."""
@@ -192,11 +225,46 @@ class TestConsistency:
         got = consistency(q3_lines)
         assert [c for c in got if c["status"] == "MISMATCH"] == []
 
+    def test_every_identity_is_EXACT_not_approximate(self, q3_lines):
+        # The point of the fix: these reconcile to the rounding the filer
+        # applied, not to a tolerance wide enough to hide a missing line.
+        for c in consistency(q3_lines):
+            if c["status"] == "ok" and "residual" in c:
+                assert c["off_by_pct"] < 0.01, c["check"]
+
+    def test_the_profit_chain_accounts_for_associates_and_minority(self, q3_lines):
+        got = {c["check"]: c for c in consistency(q3_lines)}
+        pre_tax = next(c for k, c in got.items() if k.startswith("total income"))
+        assert "share of associates" in pre_tax["formula"]
+        assert pre_tax["residual"] == 0
+        minority = next(c for k, c in got.items() if "minority" in k)
+        assert minority["status"] == "ok"
+        assert minority["residual"] == 0
+
+    def test_EPS_is_struck_on_owners_profit_not_group_profit(self, q3_lines):
+        # Dividing GROUP profit by EPS overstates the share count by exactly
+        # the minority slice — the ~0.6% that read as "close enough".
+        shares = next(c for c in consistency(q3_lines) if "share count" in c["check"])
+        assert shares["numerator"] == "owners' profit"
+        assert abs(shares["got"] - 195290000000 / 14.43) < 1
+        # Using the group figure instead would have been visibly different.
+        assert abs(shares["got"] - 198490000000 / 14.43) > 1e8
+
     def test_catches_a_line_mapped_to_the_wrong_tag(self, q3_lines):
         broken = {**q3_lines, "Other income": {"value": 999999999999,
                                                "tag": "X", "via": "fuzzy"}}
         got = consistency(broken)
         assert any(c["status"] == "MISMATCH" for c in got)
+
+    def test_a_missing_line_item_does_NOT_hide_inside_the_tolerance(self, q3_lines):
+        # A 1% error is far larger than filer rounding and must be caught;
+        # the old 5% tolerance would have passed it.
+        broken = {**q3_lines,
+                  "Total expenditure": {"value": 2226570000000 * 1.01,
+                                        "tag": "X", "via": "exact"}}
+        pre_tax = next(c for c in consistency(broken)
+                       if c["check"].startswith("total income"))
+        assert pre_tax["status"] == "MISMATCH"
 
     def test_the_share_count_check_catches_a_scale_error(self, q3_lines):
         # Currency lines a hundred thousand times too small against an
@@ -207,6 +275,32 @@ class TestConsistency:
                   for k, v in q3_lines.items()}
         shares = next(c for c in consistency(scaled) if "share count" in c["check"])
         assert shares["status"] == "MISMATCH"
+
+    def test_solves_for_the_sign_a_filer_used(self, q3_lines):
+        # Exceptional items are filed as a positive charge by some companies
+        # and a negative one by others. Fixing the sign would fail perfectly
+        # good filings, so whichever balances is reported.
+        for sign in (1, -1):
+            lines = {**q3_lines,
+                     "Total expenditure": {"value": 2226570000000 - sign * 5e9,
+                                           "tag": "E", "via": "exact"},
+                     "Exceptional items": {"value": sign * 5e9,
+                                           "tag": "X", "via": "exact"}}
+            got = next(c for c in consistency(lines)
+                       if c["check"].startswith("total income"))
+            assert got["status"] == "ok", sign
+
+    def test_a_standalone_filing_SKIPS_the_minority_identity(self):
+        doc = parse_document(STANDALONE_XML)
+        facts = facts_by_context(doc["facts"])["Q3FY25"]
+        lines = extract_lines(facts)
+        nf._derive(lines, facts)
+        got = {c["check"]: c for c in consistency(lines, basis="standalone")}
+        minority = next(c for k, c in got.items() if "minority" in k)
+        assert minority["status"] == "skipped"
+        assert "standalone" in minority["reason"]
+        # Everything else still has to hold.
+        assert [c for c in got.values() if c["status"] == "MISMATCH"] == []
 
     def test_skips_a_check_whose_inputs_are_missing(self):
         got = consistency(extract_lines({}))
@@ -271,12 +365,96 @@ class TestDerived:
         assert series(financial_results("RELIANCE.NS"), "Nonexistent") == []
 
 
+CONS_ROW = {**INDEX_ROW, "consolidated": "Consolidated",
+            "xbrl": "https://nsearchives.nseindia.com/corporate/xbrl/C.xml"}
+STAND_ROW = {**INDEX_ROW, "consolidated": "Non-Consolidated",
+             "xbrl": "https://nsearchives.nseindia.com/corporate/xbrl/S.xml"}
+
+
+@pytest.fixture
+def both_bases(monkeypatch):
+    """The same quarter filed twice, group and parent."""
+    monkeypatch.setattr("lib.nse._get", lambda *a, **k: [CONS_ROW, STAND_ROW])
+    monkeypatch.setattr(
+        "lib.nse.get_text",
+        lambda url, **k: STANDALONE_XML if url.endswith("S.xml") else XML)
+
+
+class TestPrimarySelection:
+    """A company files each quarter twice. Reading one basis for one quarter
+    and the other for the next reports a collapse in revenue that never
+    happened."""
+
+    def test_reads_the_basis_off_the_index_row(self):
+        assert nf.filing_basis({"consolidated": "Consolidated"}) == "consolidated"
+        # "Non-Consolidated" contains "Consolidated"; a substring test calls
+        # it the wrong thing, which is why the leading token decides.
+        assert nf.filing_basis({"consolidated": "Non-Consolidated"}) == "standalone"
+        assert nf.filing_basis({"consolidated": "Standalone"}) == "standalone"
+        assert nf.filing_basis({}) is None
+
+    def test_prefers_consolidated_by_default(self):
+        assert nf.preferred_basis("RELIANCE.NS") == "consolidated"
+        assert nf.mark_primary([CONS_ROW, STAND_ROW], "consolidated") == [True, False]
+        # Order in the feed must not decide it.
+        assert nf.mark_primary([STAND_ROW, CONS_ROW], "consolidated") == [False, True]
+
+    def test_prefers_standalone_for_a_bank(self):
+        # A bank's consolidated accounts fold in insurance and asset
+        # management, whose economics have little to do with lending.
+        assert nf.preferred_basis("HDFCBANK.NS") == "standalone"
+        assert nf.mark_primary([CONS_ROW, STAND_ROW], "standalone") == [False, True]
+
+    def test_does_NOT_prefer_standalone_for_a_holding_company(self):
+        # Bajaj Finserv standalone is close to an empty shell; preferring it
+        # would report almost nothing as the whole company.
+        assert nf.preferred_basis("BAJAJFINSV.NS") == "consolidated"
+
+    def test_a_period_filed_on_ONE_basis_only_is_still_primary(self):
+        assert nf.mark_primary([STAND_ROW], "consolidated") == [True]
+
+    def test_marks_one_primary_per_period(self):
+        older = {**CONS_ROW, "fromDate": "01-Jul-2024", "toDate": "30-Sep-2024"}
+        flags = nf.mark_primary([CONS_ROW, STAND_ROW, older], "consolidated")
+        assert flags == [True, False, True]
+
+    def test_the_statement_uses_ONLY_the_primary_basis(self, both_bases):
+        p = financial_results("RELIANCE.NS")
+        # The group figure, not the parent's third of it.
+        assert series(p, "Revenue")[-1] == 2432730000000
+
+    def test_an_override_switches_the_statement_basis(self, both_bases):
+        p = financial_results("RELIANCE.NS", prefer="standalone")
+        assert series(p, "Revenue")[-1] == 1355400000000
+
+    def test_the_fetch_budget_counts_only_primary_filings(self, both_bases):
+        calls = []
+        import lib.nse as _nse
+        real = _nse.get_text
+        nf._DOC_CACHE.clear()
+
+        def spy(url, **k):
+            calls.append(url)
+            return real(url, **k)
+        _nse.get_text = spy
+        try:
+            financial_results("RELIANCE.NS", max_docs=1)
+        finally:
+            _nse.get_text = real
+        # One budgeted fetch, spent on the consolidated filing, not wasted on
+        # the standalone duplicate of the same quarter.
+        assert calls == [CONS_ROW["xbrl"]]
+
+
 class TestProbe:
     def test_reports_the_mapping_and_the_identities(self, wired):
         r = probe("RELIANCE.NS")
         assert r["ok"] is True
         d = r["documents"][0]
         assert d["unmapped_lines"] == []
+        # Filed nil this quarter — an expected absence, kept out of the field
+        # that means "a tag we could not find".
+        assert d["optional_absent"] == ["Exceptional items"]
         assert d["source_field"] == "xbrl"
         assert d["context_used"]["end"] == "2024-12-31"
         rev = next(m for m in d["mapping"] if m["line"] == "Revenue")
@@ -315,3 +493,23 @@ class TestProbe:
 
     def test_refuses_a_ticker_it_cannot_clean(self):
         assert probe("^NSEI")["ok"] is False
+
+    def test_flags_which_document_is_primary(self, both_bases):
+        r = probe("RELIANCE.NS")
+        assert r["preferred_basis"] == "consolidated"
+        assert r["selected_index"] == 0
+        assert [d["primary"] for d in r["documents"]] == [True, False]
+        assert [d["basis"] for d in r["documents"]] == ["consolidated", "standalone"]
+        assert "consolidated" in r["documents"][0]["primary_reason"]
+        assert "same period" in r["documents"][1]["primary_reason"]
+
+    def test_the_override_moves_the_primary_flag(self, both_bases):
+        r = probe("RELIANCE.NS", prefer="standalone")
+        assert [d["primary"] for d in r["documents"]] == [False, True]
+        assert r["selected_index"] == 1
+
+    def test_both_bases_reconcile_on_their_own_terms(self, both_bases):
+        r = probe("RELIANCE.NS")
+        for d in r["documents"]:
+            assert [c for c in d["consistency"] if c["status"] == "MISMATCH"] == [], \
+                d["basis"]

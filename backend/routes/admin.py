@@ -84,6 +84,7 @@ def reset_performance(user: dict = Depends(auth.require_master_admin)):
 
 @router.get("/nse-probe/{ticker}")
 def nse_probe(ticker: str, quarterly: bool = True, max_docs: int = 2,
+             prefer: str | None = None,
              _user: dict = Depends(auth.require_master_admin)):
     """A results filing's raw XBRL next to how it got parsed.
 
@@ -105,6 +106,15 @@ def nse_probe(ticker: str, quarterly: bool = True, max_docs: int = 2,
       documents[].all_numeric_facts — every tag present in that period,
         largest first. This is the definitive answer for anything unmapped:
         the real element name is in this list.
+
+    A company files each quarter twice, parent and group. `selected_index`
+    and `documents[].primary` say which one downstream code should treat as
+    the company's figures; consolidated wins by default, standalone for the
+    banks in `nse_financials.PREFER_STANDALONE`. `prefer=standalone` or
+    `prefer=consolidated` overrides that for one call.
     """
     from lib import nse_financials
-    return nse_financials.probe(ticker, quarterly=quarterly, max_docs=max_docs)
+    if prefer not in (None, nse_financials.CONSOLIDATED, nse_financials.STANDALONE):
+        raise HTTPException(400, "prefer must be consolidated or standalone")
+    return nse_financials.probe(ticker, quarterly=quarterly, max_docs=max_docs,
+                                prefer=prefer)
