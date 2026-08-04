@@ -8,9 +8,15 @@
     "start": "next start",
     "lint": "next lint",
     "test:e2e": "playwright test",
-    "test": "vitest run"
+    "test": "vitest run",
+    "cap:sync": "cap sync",
+    "cap:ios": "cap open ios",
+    "cap:android": "cap open android"
   },
   "dependencies": {
+    "@capacitor/android": "^8.5.0",
+    "@capacitor/core": "^8.5.0",
+    "@capacitor/ios": "^8.5.0",
     "clsx": "^2.1.1",
     "cmdk": "^1.0.0",
     "lightweight-charts": "^4.2.0",
@@ -22,6 +28,7 @@
     "tailwind-merge": "^2.5.4"
   },
   "devDependencies": {
+    "@capacitor/cli": "^8.5.0",
     "@playwright/test": "^1.61.1",
     "@types/node": "^20",
     "@types/react": "^18",
