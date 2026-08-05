@@ -283,7 +283,10 @@ export function Shell({ children }: { children: React.ReactNode }) {
         <nav className="p-2 flex-1 flex flex-col gap-1 overflow-y-auto">{navLinks}</nav>
         <div className="p-3 border-t border-line text-[11px] text-mut">
           <div className="flex items-center justify-between">
-            <span>{me?.username ?? "—"}</span>
+            <Link href="/account" className="hover:text-amber truncate"
+                  title="Account & sign-in">
+              {me?.username ?? "—"}
+            </Link>
             <button onClick={logout} className="hover:text-amber" title="Sign out">
               <LogOut size={13} />
             </button>

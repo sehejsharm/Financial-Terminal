@@ -200,6 +200,10 @@ export type Snapshot = Record<string, unknown> & {
 };
 export type Watchlist = { id: string; name: string; tickers: string[] };
 
+export type PasskeyRecord = {
+  id: string; label: string; created: string | null; last_used: string | null;
+};
+
 export type Statement = {
   ticker: string; kind: string; quarterly?: boolean;
   columns: string[];
@@ -524,6 +528,31 @@ export const api = {
       { method: "POST", body: JSON.stringify({ username, password }) },
     ),
   me: () => apiFetch<{ username: string; role: string }>("/api/v1/auth/me"),
+
+  // passkeys. Registration is authenticated; login is not — the signature is
+  // what proves identity, so there is no username to send.
+  passkeySupport: () =>
+    apiFetch<{ rp_id: string; rp_name: string }>("/api/v1/auth/passkey/support"),
+  passkeyRegisterBegin: () =>
+    apiFetch<Record<string, unknown>>("/api/v1/auth/passkey/register/begin",
+      { method: "POST" }),
+  passkeyRegisterFinish: (body: Record<string, unknown>) =>
+    apiFetch<{ ok: boolean; message: string; credentials: PasskeyRecord[] }>(
+      "/api/v1/auth/passkey/register/finish",
+      { method: "POST", body: JSON.stringify(body) }),
+  passkeyList: () =>
+    apiFetch<{ credentials: PasskeyRecord[] }>("/api/v1/auth/passkey/credentials"),
+  passkeyDelete: (id: string) =>
+    apiFetch<void>(`/api/v1/auth/passkey/credentials/${encodeURIComponent(id)}`,
+      { method: "DELETE" }),
+  passkeyLoginBegin: () =>
+    apiFetch<{ challenge: string; rpId: string; handle: string; timeout?: number }>(
+      "/api/v1/auth/passkey/login/begin", { method: "POST" }),
+  passkeyLoginFinish: (body: Record<string, unknown>) =>
+    apiFetch<{ access_token: string; expires_at: string; role: string;
+               username: string }>(
+      "/api/v1/auth/passkey/login/finish",
+      { method: "POST", body: JSON.stringify(body) }),
 
   // market
   search: (q: string) =>

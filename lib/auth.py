@@ -195,6 +195,20 @@ def verify_credentials(username: str, password: str) -> dict | None:
     return {"username": rec["display"], "role": rec["role"]}
 
 
+def get_user(username: str) -> dict | None:
+    """The sanitized user dict, without checking a password.
+
+    Passkey login proves who someone is with a signature rather than a
+    secret, so it needs the record but must never go through
+    `verify_credentials`. Still honours `active`, so deactivating an account
+    closes the passkey door at the same moment it closes the password one.
+    """
+    rec = _load()["users"].get((username or "").strip().lower())
+    if not rec or not rec.get("active", True):
+        return None
+    return {"username": rec["display"], "role": rec["role"]}
+
+
 def create_user(username: str, password: str, role: str = ROLE_USER) -> tuple[bool, str]:
     username = (username or "").strip()
     if not username or not password:

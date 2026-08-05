@@ -18,6 +18,12 @@ from starlette.types import ASGIApp
 # (prefix, methods or None for all) -> (max requests, window seconds)
 _RULES: list[tuple[str, frozenset[str] | None, int, int]] = [
     ("/api/v1/auth/login", None, 10, 60),          # brute-force guard
+    # Passkey ceremonies are two POSTs each and a failed biometric is a normal
+    # thing to retry, so this is looser than the password rule. It is a
+    # separate bucket: exhausting it must never block the password fallback.
+    # An assertion cannot be brute-forced (it needs a valid signature), so the
+    # ceiling here is really about capping challenge minting.
+    ("/api/v1/auth/passkey", None, 40, 60),
     ("/api/v1/alerts", frozenset({"POST", "PUT", "DELETE"}), 30, 60),
     ("/api/v1/admin", None, 60, 60),
     ("/api/v1/ai", frozenset({"POST"}), 20, 60),   # LLM calls cost quota
@@ -34,10 +40,15 @@ _hits: dict[str, list[float]] = {}
 _MAX_KEYS = 10_000
 
 
-def _match(path: str, method: str) -> tuple[int, int] | None:
+def _match(path: str, method: str) -> tuple[str, int, int] | None:
+    """The first rule covering this request, and the prefix that matched.
+
+    The prefix comes back because it, not the path, identifies the bucket —
+    see `allow`.
+    """
     for prefix, methods, limit, window in _RULES:
         if path.startswith(prefix) and (methods is None or method in methods):
-            return limit, window
+            return prefix, limit, window
     return None
 
 
@@ -45,9 +56,14 @@ def allow(ip: str, path: str, method: str) -> bool:
     rule = _match(path, method)
     if rule is None:
         return True
-    limit, window = rule
+    prefix, limit, window = rule
     now = time.time()
-    key = f"{ip}:{path.split('/')[3] if path.count('/') >= 3 else path}:{method}"
+    # Bucket by the RULE that matched, not by a fixed path segment. Keying on
+    # segment 3 made every path under /api/v1/auth share one counter, so the
+    # two-request passkey ceremony would have spent the password-login budget
+    # — locking a user out of the fallback that exists precisely for when the
+    # passkey does not work. Rules are independent by construction now.
+    key = f"{ip}:{prefix}:{method}"
     with _lock:
         if len(_hits) > _MAX_KEYS:  # runaway-key backstop
             _hits.clear()

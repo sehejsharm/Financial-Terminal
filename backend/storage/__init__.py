@@ -83,7 +83,7 @@ class JSONStore(Storage):
     # Powers portfolios / alerts / notes / workspaces without a new schema
     # per feature. `kind` is allow-listed to keep file paths safe.
     _DOC_KINDS = {"portfolios", "alerts", "notes", "workspaces", "api_tokens",
-                  "screens"}
+                  "screens", "passkeys"}
 
     def _doc_path(self, kind: str) -> Path:
         if kind not in self._DOC_KINDS:
