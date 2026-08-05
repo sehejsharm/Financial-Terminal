@@ -172,3 +172,28 @@ export function moversNote(market: Market, universe: number,
     + "the costume of a signal. Session hours ignore public holidays, so a "
     + "market can read “open” on a holiday.";
 }
+
+/**
+ * Why a movers list came back shorter than the slots available.
+ *
+ * A list of decliners on a day nothing declined is empty, and an empty list
+ * is the honest answer. Saying so is what stops it reading as a failed fetch
+ * — and it is the visible half of the fix for losers that used to be padded
+ * out with names that had actually risen.
+ */
+export function shortListNote(kind: "gainers" | "losers", shown: number,
+                              asked: number, universe: number): string | null {
+  if (shown >= asked) return null;
+  const side = kind === "gainers" ? "rose" : "fell";
+  if (shown === 0) {
+    return `No ${market_word(kind)} — not one of the ${universe} constituents `
+      + `${side} in this session.`;
+  }
+  return `Only ${shown} of the ${universe} constituents ${side} in this `
+    + `session, so this list is shorter than the ${asked} slots. It is not `
+    + "padded with names that moved the other way.";
+}
+
+function market_word(kind: "gainers" | "losers"): string {
+  return kind === "gainers" ? "gainers" : "decliners";
+}

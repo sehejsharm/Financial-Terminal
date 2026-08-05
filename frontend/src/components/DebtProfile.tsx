@@ -7,6 +7,7 @@ import { Methodology } from "@/components/Methodology";
 import { PanelError, PanelLoading } from "@/components/PanelStates";
 import { ScrollX } from "@/components/ScrollX";
 import { Note } from "@/components/ui";
+import { missingTrendNote, splitPopulated } from "@/lib/debtTrend";
 import { api, type CapStructure, type Snapshot, type Statement } from "@/lib/api";
 import { ratioSeries, seriesFor, type Statements } from "@/lib/statementAnalysis";
 import { useAsync } from "@/lib/useAsync";
@@ -28,7 +29,7 @@ import { curSymbol, fmtNum, humanNumber } from "@/lib/utils";
  */
 export function DebtProfile({ ticker, snap }: { ticker: string; snap: Snapshot | null }) {
   const { data, error, busy, retry, serverFault } = useAsync<{
-    cap: CapStructure | null; statements: Statements;
+    cap: CapStructure | null; statements: Statements; balanceNote: string | null;
   }>(
     async () => {
       const [cap, inc, bal, cf] = await Promise.all([
@@ -36,13 +37,17 @@ export function DebtProfile({ ticker, snap }: { ticker: string; snap: Snapshot |
         ...(["income", "balance", "cashflow"] as const).map((k) =>
           api.statement(ticker, k, false).catch(() => ({ data: null }))),
       ]);
+      const balance = (bal as { data: Statement | null }).data;
       return {
         cap: cap as CapStructure | null,
         statements: {
           income: (inc as { data: Statement | null }).data,
-          balance: (bal as { data: Statement | null }).data,
+          balance,
           cashflow: (cf as { data: Statement | null }).data,
         },
+        // The server says WHY a statement came back empty. Discarding it left
+        // the panel unable to explain its own blank rows.
+        balanceNote: balance?.note ?? null,
       };
     },
     [ticker],
@@ -57,6 +62,30 @@ export function DebtProfile({ ticker, snap }: { ticker: string; snap: Snapshot |
   const fcfSeries = useMemo(() => seriesFor(st.cashflow, "freeCF", cols), [st.cashflow, cols]);
   const ocfSeries = useMemo(() => seriesFor(st.cashflow, "operatingCF", cols), [st.cashflow, cols]);
   const capexSeries = useMemo(() => seriesFor(st.cashflow, "capex", cols), [st.cashflow, cols]);
+
+  // Rows with nothing in them are dropped and accounted for, rather than
+  // rendered as a line of dashes that reads as a broken panel. Total debt /
+  // Cash / Net debt come from the BALANCE SHEET, which does not exist for an
+  // Indian listing — while the cards above come from a point-in-time
+  // capital-structure lookup, which does. That is the whole discrepancy.
+  const trend = useMemo(() => splitPopulated([
+    { label: "Total debt", values: debtSeries, kind: "money" },
+    { label: "Cash", values: cashSeries, kind: "money" },
+    { label: "Net debt", values: cols.map((_, i) => {
+      const d = debtSeries[i], c = cashSeries[i];
+      return d == null || c == null ? null : d - c;
+    }), kind: "money" },
+    { label: "Free cash flow", values: cols.map((_, i) => {
+      const f = fcfSeries[i];
+      if (f != null) return f;
+      const o = ocfSeries[i], c = capexSeries[i];
+      return o != null && c != null ? o + c : null;
+    }), kind: "money" },
+    { label: "Net debt / EBITDA", values: ratios.values.netDebtToEbitda, kind: "x" },
+    { label: "Interest cover", values: ratios.values.interestCover, kind: "x" },
+    { label: "Debt / equity", values: ratios.values.debtToEquity, kind: "x" },
+  ]), [debtSeries, cashSeries, fcfSeries, ocfSeries, capexSeries, cols, ratios]);
+
 
   if (busy) return <PanelLoading label="Loading debt profile…" rows={5} />;
   if (error) return <PanelError error={error} retry={retry} serverFault={serverFault} />;
@@ -83,7 +112,8 @@ export function DebtProfile({ ticker, snap }: { ticker: string; snap: Snapshot |
   const ic = lastOf("interestCover");
   const de = lastOf("debtToEquity");
 
-  const hasTrend = cols.length >= 2;
+  const trendGap = missingTrendNote(trend.missing, data?.balanceNote ?? null);
+  const hasTrend = cols.length >= 2 && !trend.empty;
 
   return (
     <div>
@@ -129,23 +159,7 @@ export function DebtProfile({ ticker, snap }: { ticker: string; snap: Snapshot |
                 </tr>
               </thead>
               <tbody>
-                {([
-                  ["Total debt", debtSeries, "money"],
-                  ["Cash", cashSeries, "money"],
-                  ["Net debt", cols.map((_, i) => {
-                    const d = debtSeries[i], c = cashSeries[i];
-                    return d == null || c == null ? null : d - c;
-                  }), "money"],
-                  ["Free cash flow", cols.map((_, i) => {
-                    const f = fcfSeries[i];
-                    if (f != null) return f;
-                    const o = ocfSeries[i], c = capexSeries[i];
-                    return o != null && c != null ? o + c : null;
-                  }), "money"],
-                  ["Net debt / EBITDA", ratios.values.netDebtToEbitda, "x"],
-                  ["Interest cover", ratios.values.interestCover, "x"],
-                  ["Debt / equity", ratios.values.debtToEquity, "x"],
-                ] as [string, (number | null)[], "money" | "x"][]).map(([label, series, kind]) => (
+                {trend.shown.map(({ label, values: series, kind }) => (
                   <tr key={label} className="border-b border-line/60 hover:bg-panel">
                     <td className="px-3 py-1.5 text-txt whitespace-nowrap">{label}</td>
                     {cols.map((_, i) => {
@@ -164,6 +178,10 @@ export function DebtProfile({ ticker, snap }: { ticker: string; snap: Snapshot |
             </table>
           </ScrollX>
         </>
+      )}
+
+      {trendGap && (
+        <Note>{trendGap}</Note>
       )}
 
       <Note>

@@ -13,6 +13,7 @@ import {
   cagr, chronological, coverageNote, qualityFlags, RATIOS, ratioSeries,
   seriesFor, yoy, type Flag, type Statementish, type Statements,
 } from "@/lib/statementAnalysis";
+import { cadenceLabel, readCadence } from "@/lib/statementCadence";
 import { useAsync } from "@/lib/useAsync";
 import { fmtNum, humanNumber } from "@/lib/utils";
 
@@ -176,7 +177,15 @@ export function Financials({ ticker, currency }: { ticker: string; currency: str
 
   const cols = useMemo(() => (active ? chronological(active.columns) : []), [active]);
   const revenue = useMemo(() => seriesFor(st.income, "revenue", cols), [st.income, cols]);
-  const perYear = quarterly ? 4 : 1;
+  // What the columns ACTUALLY are, which is not always what the toggle
+  // asked for: Indian listings have no annual source, so the backend serves
+  // quarters under an annual request. Annualising those at one period a year
+  // reported four quarters of growth as four years of it.
+  const cadence = useMemo(
+    () => readCadence([st.income, st.balance, st.cashflow],
+                      quarterly ? "quarterly" : "annual"),
+    [st.income, st.balance, st.cashflow, quarterly]);
+  const perYear = cadence.periodsPerYear;
 
   function exportCsv() {
     const rows: string[][] = [];
@@ -200,7 +209,7 @@ export function Financials({ ticker, currency }: { ticker: string; currency: str
     const url = URL.createObjectURL(new Blob([csv], { type: "text/csv" }));
     const a = document.createElement("a");
     a.href = url;
-    a.download = `${ticker}-${tab}-${quarterly ? "quarterly" : "annual"}.csv`;
+    a.download = `${ticker}-${tab}-${cadence.actual}.csv`;
     a.click();
     URL.revokeObjectURL(url);
   }
@@ -251,8 +260,11 @@ export function Financials({ ticker, currency }: { ticker: string; currency: str
         <DataAge at={meta?.fetchedAt ?? null}
                  onRefresh={() => { freshRef.current = true; retry(); }} busy={busy} />
         <button onClick={() => setQuarterly((v) => !v)}
+                title={cadence.mismatch
+                  ? "This ticker has no annual source — the columns shown are quarters."
+                  : undefined}
                 className={`btn ${quarterly ? "btn-primary" : "btn-ghost"} !py-1 text-[11px]`}>
-          {quarterly ? "Quarterly" : "Annual"}
+          {cadenceLabel(cadence)}{cadence.mismatch ? " *" : ""}
         </button>
         {anyData && (
           <button onClick={exportCsv}
@@ -261,6 +273,16 @@ export function Financials({ ticker, currency }: { ticker: string; currency: str
           </button>
         )}
       </div>
+
+      {/* Quarter-end columns under an "Annual" heading is the whole bug —
+          say it above the table, not in a collapsed panel. */}
+      {!busy && !error && cadence.note && (
+        <div className="mb-3 flex items-start gap-2 rounded border border-amber/40
+                        bg-amber/5 px-3 py-2 text-[11.5px] text-amber">
+          <AlertTriangle size={13} className="mt-0.5 shrink-0" />
+          <span>{cadence.note}</span>
+        </div>
+      )}
 
       {busy && <PanelLoading label="Loading statements…" rows={6} />}
       {error && !busy && (

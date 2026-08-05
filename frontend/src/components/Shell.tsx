@@ -11,7 +11,7 @@ import {
 import { InfoTip } from "@/components/ui";
 import { ApiError, api, token, type AlertEvent, type Quote } from "@/lib/api";
 import { useLiveStatus } from "@/lib/useLive";
-import { useStreamStatus } from "@/lib/useQuote";
+import { useSmoothStreamStatus } from "@/lib/useQuote";
 import { cn, fmtPct } from "@/lib/utils";
 
 import { CommandPalette } from "./CommandPalette";
@@ -20,7 +20,10 @@ import { CommandPalette } from "./CommandPalette";
  *  (LIVE / RECONNECTING / STALE / CLOSED via heartbeat), and falls back to
  *  the legacy polling indicator on pages not yet on the stream. */
 function StreamBadge({ polling }: { polling: boolean }) {
-  const { status } = useStreamStatus();
+  // Smoothed, not raw: the socket legitimately churns on every route
+  // change, and painting each intermediate state made a healthy
+  // connection read as an unstable one.
+  const { status } = useSmoothStreamStatus();
   const streaming = status === "live" || status === "reconnecting"
     || status === "stale" || status === "closed";
 

@@ -271,7 +271,11 @@ def _movers(kind: str, count: int, market: str = "IN"):
     if market == "IN":
         nse_rows = nse.movers(kind=kind, count=count)
         if nse_rows:
-            return nse_rows
+            # Re-rank rather than trusting the bucket. NSE's variation feed has
+            # returned flat and mildly positive names inside its "loosers"
+            # bucket, and a green row under a losers heading is the kind of
+            # error that makes a reader distrust every other number on screen.
+            return md.rank_movers(nse_rows, kind=kind, count=count)
     try:
         return md.get_movers(kind=kind, count=count,
                              universe=md.movers_universe(market)) or []

@@ -28,6 +28,14 @@ export type Series = { ticker: string; dates: string[]; closes: number[] };
 /** Sessions below which a correlation is not worth computing at all. */
 export const MIN_OBSERVATIONS = 30;
 
+/** A ticker that could not be placed in the matrix, and why. */
+export type Excluded = {
+  ticker: string;
+  reason: string;
+  /** Sessions it shared with the rest, where that is what disqualified it. */
+  sessions: number;
+};
+
 export type Aligned = {
   tickers: string[];
   /** Daily simple returns per ticker, all the same length. */
@@ -38,7 +46,21 @@ export type Aligned = {
   longest: number;
   /** The ticker whose history is shortest — the one doing the truncating. */
   limitedBy: string | null;
+  /** Tickers left out, each with a reason. Never silent: a name the user
+   *  typed that does not appear in the grid has to be accounted for. */
+  excluded: Excluded[];
 };
+
+function intersectDates(series: Series[]): string[] {
+  let common: Set<string> | null = null;
+  for (const s of series) {
+    const set = new Set<string>(s.dates);
+    common = common
+      ? new Set<string>([...common].filter((d: string) => set.has(d)))
+      : set;
+  }
+  return [...(common ?? new Set<string>())].sort();
+}
 
 /**
  * Align every series on the dates they all share, then difference to returns.
@@ -49,19 +71,51 @@ export type Aligned = {
  * old screen said so.
  */
 export function alignReturns(series: Series[]): Aligned {
-  const usable = series.filter((s) => s.dates.length && s.closes.length);
+  const excluded: Excluded[] = [];
+  const withHistory: Series[] = [];
+  for (const s of series) {
+    if (s.dates.length && s.closes.length) withHistory.push(s);
+    // A ticker that returned nothing was being removed by a bare .filter and
+    // then never mentioned, so a user who typed six names and saw five had no
+    // way to learn which one vanished or why.
+    else excluded.push({ ticker: s.ticker, sessions: 0,
+      reason: "no price history came back for it" });
+  }
+
+  // Alignment is an intersection, so ONE name on a different trading calendar
+  // — a US listing against an Indian benchmark, say — can collapse the shared
+  // window for every pair at once. Dropping that name and saying so beats
+  // returning a grid of nulls that looks like the tool is broken.
+  let usable = withHistory;
+  let dates = intersectDates(usable);
+  while (dates.length - 1 < MIN_OBSERVATIONS && usable.length > 2) {
+    let bestIdx = -1;
+    let bestShared = dates.length;
+    for (let i = 0; i < usable.length; i++) {
+      const without = intersectDates(usable.filter((_, j) => j !== i));
+      if (without.length > bestShared) { bestShared = without.length; bestIdx = i; }
+    }
+    // Nothing to gain by removing any single name: the shortfall is the whole
+    // set, not one outlier, and the note below reports that instead.
+    if (bestIdx < 0) break;
+    const dropped = usable[bestIdx];
+    const shared = Math.max(0, dates.length - 1);
+    excluded.push({
+      ticker: dropped.ticker,
+      sessions: shared,
+      reason: `its trading calendar overlaps the others by only ${shared} `
+        + `session${shared === 1 ? "" : "s"}, under the ${MIN_OBSERVATIONS} `
+        + "needed — including it would have truncated every pair in the grid",
+    });
+    usable = usable.filter((_, j) => j !== bestIdx);
+    dates = intersectDates(usable);
+  }
+
   if (usable.length < 2) {
     return { tickers: usable.map((s) => s.ticker), returns: [], shared: 0,
-      longest: Math.max(0, ...usable.map((s) => s.dates.length)), limitedBy: null };
+      longest: Math.max(0, ...usable.map((s) => s.dates.length)),
+      limitedBy: null, excluded };
   }
-  let common: Set<string> | null = null;
-  for (const s of usable) {
-    const set = new Set<string>(s.dates);
-    common = common
-      ? new Set<string>([...common].filter((d: string) => set.has(d)))
-      : set;
-  }
-  const dates: string[] = [...(common ?? new Set<string>())].sort();
 
   const returns = usable.map((s) => {
     const byDate = new Map(s.dates.map((d, i) => [d, s.closes[i]]));
@@ -85,7 +139,33 @@ export function alignReturns(series: Series[]): Aligned {
     // Only name a limiter when it actually cost something.
     limitedBy: shortest.dates.length < Math.max(...usable.map((s) => s.dates.length))
       ? shortest.ticker : null,
+    excluded,
   };
+}
+
+/**
+ * The banner text naming every ticker that is not in the grid.
+ *
+ * A matrix that quietly contains five of the six names asked for is worse
+ * than one that refuses: the reader compares what they typed against what
+ * they see and concludes the tool lost one, or — much worse — does not notice.
+ */
+export function exclusionNote(a: Aligned, benchmark?: string | null): string | null {
+  if (!a.excluded.length) return null;
+  const lines = a.excluded.map((e) => `${e.ticker} — ${e.reason}`);
+  const calendar = a.excluded.filter((e) => e.sessions > 0 || /calendar/.test(e.reason));
+  const parts = [
+    `${a.excluded.length} ticker${a.excluded.length === 1 ? " is" : "s are"} `
+      + `not in this matrix: ${lines.join("; ")}.`,
+  ];
+  if (calendar.length) {
+    parts.push("Correlations are computed on sessions every series shares, so a "
+      + "listing that trades on a different exchange calendar"
+      + (benchmark ? ` from ${benchmark}` : "")
+      + " has few days in common and would shrink the window for every other "
+      + "pair too. The remaining names are unaffected.");
+  }
+  return parts.join(" ");
 }
 
 /** Pearson correlation. Null rather than NaN when there isn't enough to say. */

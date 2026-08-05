@@ -545,20 +545,37 @@ def _universe_quotes(universe: tuple[str, ...]) -> list[dict]:
     return rows
 
 
+def rank_movers(rows: list[dict], kind: str = "gainers",
+                count: int = 8) -> list[dict]:
+    """Rank quote rows into gainers / losers / actives.
+
+    A loser has to have FALLEN. Ranking without filtering was the bug behind
+    "Top Losers" listing green rows: on a day the whole index rises, the
+    bottom eight by change are still up, and taking `rows[:count]` after a
+    plain ascending sort presented them under the losers heading.
+
+    Returning fewer than `count` is correct on a broad up day — there were
+    only that many decliners — and the caller says so rather than padding the
+    list back to eight with names that rose.
+    """
+    rows = [r for r in rows if r.get("change_pct") is not None]
+    if not rows:
+        return []
+    if kind == "gainers":
+        rows = [r for r in rows if r["change_pct"] > 0]
+        rows.sort(key=lambda r: r["change_pct"], reverse=True)
+    elif kind == "losers":
+        rows = [r for r in rows if r["change_pct"] < 0]
+        rows.sort(key=lambda r: r["change_pct"])
+    else:  # actives — turnover, where sign is not part of the question
+        rows.sort(key=lambda r: r.get("turnover") or 0, reverse=True)
+    return rows[:count]
+
+
 def get_movers(kind: str = "gainers", count: int = 8,
                universe: tuple[str, ...] | None = None) -> list[dict]:
     """Return market movers computed from a ticker universe (default NIFTY 50).
 
     kind: 'gainers' | 'losers' | 'actives' (actives ranked by traded turnover).
     """
-    rows = _universe_quotes(universe or tuple(NIFTY50))
-    rows = [r for r in rows if r.get("change_pct") is not None]
-    if not rows:
-        return []
-    if kind == "gainers":
-        rows.sort(key=lambda r: r["change_pct"], reverse=True)
-    elif kind == "losers":
-        rows.sort(key=lambda r: r["change_pct"])
-    else:  # actives
-        rows.sort(key=lambda r: r.get("turnover") or 0, reverse=True)
-    return rows[:count]
+    return rank_movers(_universe_quotes(universe or tuple(NIFTY50)), kind, count)

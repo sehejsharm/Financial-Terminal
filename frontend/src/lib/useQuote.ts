@@ -1,9 +1,12 @@
 "use client";
 
-import { useCallback, useEffect, useReducer } from "react";
+import { useCallback, useEffect, useReducer, useState } from "react";
 import { useSyncExternalStore } from "react";
 
 import { quoteStore, type StreamStatus, type Tick } from "@/lib/quoteStore";
+import {
+  initBadge, msUntilChange, stepBadge, type BadgeState,
+} from "@/lib/streamBadge";
 
 /** Subscribe ONE cell to ONE symbol. Ref-counts the socket subscription over
  *  the component's lifetime and re-renders only when THIS symbol's tick
@@ -67,6 +70,37 @@ export function useLiveTicks(symbols: string[]): Map<string, Tick> {
     if (t) map.set(s, t);
   }
   return map;
+}
+
+/**
+ * The badge state, smoothed.
+ *
+ * The raw socket status churns during ordinary navigation — a route change
+ * tears down subscriptions and opens new ones — and painting every
+ * intermediate value made a healthy connection look unstable. This delays
+ * claims of trouble, shows recovery promptly, and never repaints faster than
+ * the dwell floor. The timer is what stops a status that goes quiet from
+ * leaving the badge stuck on a stale value.
+ */
+export function useSmoothStreamStatus(): { status: StreamStatus; marketOpen: boolean } {
+  const { status: raw, marketOpen } = useStreamStatus();
+  const [state, setState] = useState<BadgeState>(() => initBadge(raw, Date.now()));
+
+  useEffect(() => {
+    setState((prev) => stepBadge(prev, raw, Date.now()));
+  }, [raw]);
+
+  useEffect(() => {
+    const wait = msUntilChange(state, Date.now());
+    if (wait == null) return;
+    const id = setTimeout(
+      () => setState((prev) => stepBadge(prev, prev.candidate, Date.now())),
+      wait + 16,
+    );
+    return () => clearTimeout(id);
+  }, [state]);
+
+  return { status: state.shown, marketOpen };
 }
 
 /** Real socket state for the LIVE/RECONNECTING/STALE/CLOSED badge. */

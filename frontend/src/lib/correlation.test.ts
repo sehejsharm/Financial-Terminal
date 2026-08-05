@@ -1,9 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
-  alignReturns, betaFit, betaNote, isSignificant, matrix, matrixNote,
-  MIN_OBSERVATIONS, pairs, pearson, readMatrix, REDUNDANT_R,
-  significanceThreshold, WEAK_FIT, type Series,
+  MIN_OBSERVATIONS, REDUNDANT_R, WEAK_FIT, alignReturns, betaFit, betaNote, exclusionNote, isSignificant, matrix, matrixNote, pairs, pearson, readMatrix, significanceThreshold, type Series,
 } from "./correlation";
 
 /** N consecutive weekdays as ISO dates, oldest first. */
@@ -313,5 +311,77 @@ describe("betaNote", () => {
   it("says so when nothing can be regressed", () => {
     expect(betaNote([betaFit("A", [], [])], "^NSEI"))
       .toMatch(/No series has enough overlap/);
+  });
+});
+
+// ── exclusions ────────────────────────────────────────────────────────────
+
+describe("exclusions", () => {
+  const cal = (dates: string[]): Series =>
+    ({ ticker: "X", dates, closes: dates.map((_, i) => 100 + i) });
+  const days = (start: number, n: number, step = 1) =>
+    Array.from({ length: n }, (_, i) =>
+      new Date(Date.UTC(2024, 0, start + i * step)).toISOString().slice(0, 10));
+
+  it("names a ticker that returned no history at all", () => {
+    // It used to be removed by a bare .filter and never mentioned, so a user
+    // who typed three names and saw two could not tell which vanished.
+    const a = alignReturns([
+      { ...cal(days(1, 60)), ticker: "A" },
+      { ...cal(days(1, 60)), ticker: "B" },
+      { ticker: "GONE", dates: [], closes: [] },
+    ]);
+    expect(a.tickers).not.toContain("GONE");
+    expect(a.excluded.map((e) => e.ticker)).toEqual(["GONE"]);
+    expect(a.excluded[0].reason).toMatch(/no price history/);
+  });
+
+  it("drops a ticker on a disjoint trading calendar and says so", () => {
+    // The reported case: a listing whose sessions barely overlap the rest
+    // collapses the shared window for EVERY pair, not just its own.
+    const a = alignReturns([
+      { ...cal(days(1, 90)), ticker: "IN1" },
+      { ...cal(days(1, 90)), ticker: "IN2" },
+      { ...cal(days(200, 90)), ticker: "US1" },
+    ]);
+    expect(a.excluded.map((e) => e.ticker)).toEqual(["US1"]);
+    expect(a.excluded[0].reason).toMatch(/trading calendar overlaps/);
+    // And the survivors keep their full window rather than being truncated.
+    expect(a.tickers).toEqual(["IN1", "IN2"]);
+    expect(a.shared).toBeGreaterThanOrEqual(MIN_OBSERVATIONS);
+  });
+
+  it("excludes nothing when every series lines up", () => {
+    const a = alignReturns([
+      { ...cal(days(1, 90)), ticker: "A" },
+      { ...cal(days(1, 90)), ticker: "B" },
+    ]);
+    expect(a.excluded).toEqual([]);
+    expect(exclusionNote(a)).toBeNull();
+  });
+
+  it("does NOT drop names when the whole set is simply too short", () => {
+    // Removing any one of them would not help, so the shortfall belongs to
+    // the set and the note says that instead of blaming a ticker.
+    const a = alignReturns([
+      { ...cal(days(1, 10)), ticker: "A" },
+      { ...cal(days(1, 10)), ticker: "B" },
+      { ...cal(days(1, 10)), ticker: "C" },
+    ]);
+    expect(a.excluded).toEqual([]);
+  });
+
+  it("writes a banner naming every excluded ticker and why", () => {
+    const a = alignReturns([
+      { ...cal(days(1, 90)), ticker: "IN1" },
+      { ...cal(days(1, 90)), ticker: "IN2" },
+      { ...cal(days(200, 90)), ticker: "US1" },
+      { ticker: "BAD", dates: [], closes: [] },
+    ]);
+    const note = exclusionNote(a, "^NSEI") ?? "";
+    expect(note).toMatch(/US1/);
+    expect(note).toMatch(/BAD/);
+    expect(note).toMatch(/different exchange calendar from \^NSEI/);
+    expect(note).toMatch(/remaining names are unaffected/);
   });
 });

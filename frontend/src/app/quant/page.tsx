@@ -1,5 +1,7 @@
 "use client";
 
+import { AlertTriangle } from "lucide-react";
+
 import { useEffect, useState } from "react";
 
 import { Backtester } from "@/components/Backtester";
@@ -13,6 +15,7 @@ import { VolCone } from "@/components/VolCone";
 import { api, type Watchlist } from "@/lib/api";
 import {
   alignReturns, betaFit, betaNote, isSignificant, matrix as buildMatrix,
+  exclusionNote,
   matrixNote, readMatrix, WEAK_FIT,
   type Aligned, type BetaFit, type Matrix, type MatrixRead,
 } from "@/lib/correlation";
@@ -104,8 +107,13 @@ export default function QuantPage() {
     if (tickers.length < 2) { setErr("Need at least 2 tickers."); return; }
     if (tickers.length > 12) { setErr("Max 12 tickers (12 history fetches)."); return; }
     setBusy(true); setErr(null); setResult(null);
-    const series = (await Promise.all(tickers.map(fetchSeries))).filter(Boolean) as Series[];
-    if (series.length < 2) {
+    // A failed fetch used to be dropped here, before alignReturns could see
+    // it, so the name never appeared in the grid and nothing said why. Pass
+    // it through empty instead and let the exclusion report account for it.
+    const fetched = await Promise.all(tickers.map(fetchSeries));
+    const series: Series[] = fetched.map((s, i) =>
+      s ?? { ticker: tickers[i], dates: [], closes: [] });
+    if (series.filter((s) => s.dates.length).length < 2) {
       setErr("Could not load enough price history for these tickers.");
       setBusy(false); return;
     }
@@ -267,6 +275,17 @@ export default function QuantPage() {
           <div>
             <SectionHeader title="Correlation matrix"
                            count={`${res.matrix.n} shared sessions`} />
+            {exclusionNote(res.aligned, bench) && (
+              <div className="mb-2 flex items-start gap-2 rounded border border-amber/40 bg-amber/5 px-3 py-2 text-[11.5px] text-amber"
+                   data-testid="excluded-banner">
+                <AlertTriangle size={13} className="mt-0.5 shrink-0" />
+                <span>
+                  {exclusionNote(res.aligned, bench)}
+                  {res.aligned.excluded.some((e) => e.ticker === bench)
+                    && " The benchmark itself was excluded, so no betas could be computed against it."}
+                </span>
+              </div>
+            )}
             <div className="panel overflow-x-auto">
               <table className="text-xs w-full" data-testid="corr-matrix">
                 <thead>
