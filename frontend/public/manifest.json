@@ -2,12 +2,27 @@
   "name": "Motherboard Terminal",
   "short_name": "Motherboard",
   "description": "Bloomberg-style markets terminal for Indian + global equities: live quotes, screeners, value-chain maps, portfolio, alerts, and quant analytics.",
+  "id": "/",
+  "scope": "/",
   "start_url": "/",
   "display": "standalone",
+  "orientation": "any",
   "background_color": "#070809",
   "theme_color": "#0c0e12",
+  "categories": ["finance", "business", "productivity"],
   "icons": [
-    { "src": "/icon-192.png", "sizes": "192x192", "type": "image/png" },
-    { "src": "/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any maskable" }
+    { "src": "/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ],
+  "shortcuts": [
+    { "name": "Terminal", "short_name": "Terminal", "url": "/terminal",
+      "icons": [{ "src": "/icon-192.png", "sizes": "192x192" }] },
+    { "name": "Portfolio", "short_name": "Portfolio", "url": "/portfolio",
+      "icons": [{ "src": "/icon-192.png", "sizes": "192x192" }] },
+    { "name": "Screeners", "short_name": "Screeners", "url": "/screeners",
+      "icons": [{ "src": "/icon-192.png", "sizes": "192x192" }] },
+    { "name": "Alerts", "short_name": "Alerts", "url": "/alerts",
+      "icons": [{ "src": "/icon-192.png", "sizes": "192x192" }] }
   ]
 }

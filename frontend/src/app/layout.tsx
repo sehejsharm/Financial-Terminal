@@ -14,7 +14,13 @@ export const metadata: Metadata = {
     template: "%s · Motherboard Terminal",
   },
   description: DESCRIPTION,
+  applicationName: "Motherboard Terminal",
   manifest: "/manifest.json",
+  // Standalone-mode hints. `mobile-web-app-capable` is the current standard
+  // name; `apple-web-app` emits the iOS-specific pair Next knows about. Both
+  // are what let an installed PWA/TWA drop the browser chrome.
+  appleWebApp: { capable: true, statusBarStyle: "black-translucent", title: "Motherboard" },
+  other: { "mobile-web-app-capable": "yes" },
   openGraph: {
     type: "website",
     url: SITE_URL,
@@ -35,6 +41,9 @@ export const metadata: Metadata = {
 
 export const viewport: Viewport = {
   themeColor: "#0c0e12",
+  // Draw under notches and rounded corners in standalone mode; pages opt into
+  // the safe area with env(safe-area-inset-*) padding where it matters.
+  viewportFit: "cover",
 };
 
 // Applied before first paint so the persisted theme wins immediately —
