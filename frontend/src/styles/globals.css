@@ -14,7 +14,11 @@
   --c-line:    28 33 41;
   --c-line2:   38 44 54;
   --c-txt:     223 227 234;
-  --c-mut:     118 124 136;
+  /* Lifted from 118/124/136: that failed WCAG AA (4.5:1) on panel surfaces
+     (4.47 on panel, 4.32 on panel2), where most muted text actually sits.
+     140/146/158 clears AA on every surface — 5.8 on panel2, 6.4 on bg —
+     while still reading as a muted grey. */
+  --c-mut:     140 146 158;
   --c-amber:   255 176 0;
   --c-green:   31 210 134;
   --c-red:     255 77 79;
@@ -74,7 +78,7 @@ html.light.cb {
     @apply inline-flex items-center gap-1.5 px-2 py-1 text-xs uppercase tracking-wider
            text-mut border border-line rounded;
   }
-  .label-xs { @apply text-[10.5px] uppercase tracking-[0.08em] text-mut; }
+  .label-xs { @apply text-[11px] uppercase tracking-[0.08em] text-mut; }
   .num { @apply font-mono tabular-nums; }
   .heading { @apply text-amber uppercase tracking-[0.04em] text-sm font-bold
                     border-l-2 border-amber pl-2.5; }
