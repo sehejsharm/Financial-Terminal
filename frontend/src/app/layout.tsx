@@ -1,5 +1,6 @@
 import type { Metadata, Viewport } from "next";
 import "@/styles/globals.css";
+import { ServiceWorker } from "@/components/ServiceWorker";
 
 const SITE_URL = "https://financial-terminal-peach.vercel.app";
 const DESCRIPTION =
@@ -62,7 +63,10 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
       <head>
         <script dangerouslySetInnerHTML={{ __html: THEME_BOOT }} />
       </head>
-      <body>{children}</body>
+      <body>
+        <ServiceWorker />
+        {children}
+      </body>
     </html>
   );
 }

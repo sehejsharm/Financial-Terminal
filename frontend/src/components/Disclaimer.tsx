@@ -22,6 +22,11 @@ export function Disclaimer() {
         providers, and figures can be wrong — verify against a primary source
         before acting.
       </p>
+      <p className="mt-2">
+        <a href="/privacy" className="hover:text-amber underline">Privacy</a>
+        <span className="mx-2">·</span>
+        <a href="/terms" className="hover:text-amber underline">Terms</a>
+      </p>
     </footer>
   );
 }

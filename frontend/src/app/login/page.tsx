@@ -171,6 +171,11 @@ export default function LoginPage() {
         <div className="text-[10px] text-mut text-center mt-3 uppercase tracking-wider">
           Educational research — not investment advice
         </div>
+        <div className="text-[10px] text-mut text-center mt-1">
+          <a href="/privacy" className="hover:text-amber underline">Privacy</a>
+          <span className="mx-2">·</span>
+          <a href="/terms" className="hover:text-amber underline">Terms</a>
+        </div>
       </div>
     </div>
   );

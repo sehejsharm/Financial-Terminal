@@ -1,0 +1,13 @@
+[
+  {
+    "_README": "Digital Asset Links for the Android TWA. Replace the two placeholder values, then this file must be served at https://YOUR-DOMAIN/.well-known/assetlinks.json for Play Store TWA verification to pass (otherwise the app shows a browser URL bar). package_name = your Android applicationId; the SHA-256 fingerprint comes from Play Console → Setup → App integrity → App signing key certificate.",
+    "relation": ["delegate_permission/common.handle_all_urls"],
+    "target": {
+      "namespace": "android_app",
+      "package_name": "com.yourdomain.motherboard",
+      "sha256_cert_fingerprints": [
+        "REPLACE_WITH_SHA256_FINGERPRINT_FROM_PLAY_CONSOLE"
+      ]
+    }
+  }
+]
