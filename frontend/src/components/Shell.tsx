@@ -15,6 +15,7 @@ import { useSmoothStreamStatus } from "@/lib/useQuote";
 import { cn, fmtPct } from "@/lib/utils";
 
 import { CommandPalette } from "./CommandPalette";
+import { Disclaimer } from "./Disclaimer";
 
 /** Header data-status pill. Reflects the real socket when this page streams
  *  (LIVE / RECONNECTING / STALE / CLOSED via heartbeat), and falls back to
@@ -289,6 +290,15 @@ export function Shell({ children }: { children: React.ReactNode }) {
 
   return (
     <div className="min-h-screen grid grid-cols-1 md:grid-cols-[220px_1fr]">
+      {/* Keyboard/screen-reader users land on the nav first on every route;
+          this lets them jump straight to the page body (WCAG 2.4.1). Hidden
+          until focused, then it appears as a normal button. */}
+      <a href="#main-content"
+         className="sr-only focus:not-sr-only focus:fixed focus:top-2 focus:left-2 focus:z-50
+                    focus:px-3 focus:py-2 focus:rounded focus:bg-amber focus:text-black
+                    focus:text-sm focus:font-bold">
+        Skip to content
+      </a>
       {/* Side nav (desktop) */}
       <aside className="border-r border-line bg-bg2/60 sticky top-0 h-screen hidden md:flex flex-col">
         <div className="px-4 py-4 border-b border-line">
@@ -302,7 +312,8 @@ export function Shell({ children }: { children: React.ReactNode }) {
                   title="Account & sign-in">
               {me?.username ?? "—"}
             </Link>
-            <button onClick={logout} className="hover:text-amber" title="Sign out">
+            <button onClick={logout} className="icon-btn hover:text-amber"
+                    aria-label="Sign out" title="Sign out">
               <LogOut size={13} />
             </button>
           </div>
@@ -321,7 +332,8 @@ export function Shell({ children }: { children: React.ReactNode }) {
                className="absolute left-0 top-0 bottom-0 w-[82vw] max-w-72 bg-bg2 border-r border-line p-3 flex flex-col gap-1 overflow-y-auto overflow-x-hidden">
             <div className="flex items-center justify-between gap-2 px-1 pb-3 border-b border-line mb-2 min-w-0">
               <span className="text-amber font-bold tracking-[0.14em] text-sm truncate">MOTHERBOARD</span>
-              <button onClick={() => setMenuOpen(false)} className="text-mut shrink-0"><X size={16} /></button>
+              <button onClick={() => setMenuOpen(false)} aria-label="Close navigation"
+                      className="icon-btn text-mut shrink-0"><X size={16} /></button>
             </div>
             {navLinks}
             <button onClick={logout}
@@ -341,7 +353,8 @@ export function Shell({ children }: { children: React.ReactNode }) {
         <header className="border-b border-line bg-bg/80 backdrop-blur sticky top-0 z-30">
           <div className="flex items-center gap-2 md:gap-3 px-2.5 md:px-5 py-2.5 min-w-0">
             <button onClick={() => setMenuOpen(true)} aria-label="Open navigation"
-                    className="md:hidden text-mut hover:text-txt shrink-0">
+                    aria-expanded={menuOpen}
+                    className="icon-btn md:hidden text-mut hover:text-txt shrink-0">
               <Menu size={18} />
             </button>
             {/* On a phone this takes the space that's left rather than
@@ -362,17 +375,25 @@ export function Shell({ children }: { children: React.ReactNode }) {
               <kbd className="hidden md:inline text-[10px] px-1.5 py-0.5 rounded border border-line2 text-mut shrink-0">⌘K</kbd>
             </button>
             <div className="hidden md:block flex-1" />
-            <button onClick={toggleTheme} className="text-mut hover:text-amber shrink-0"
+            <button onClick={toggleTheme}
+                    className="icon-btn text-mut hover:text-amber shrink-0"
+                    aria-label={lightTheme ? "Switch to dark theme" : "Switch to light theme"}
                     title={lightTheme ? "Switch to dark theme" : "Switch to light theme"}>
               {lightTheme ? <Moon size={15} /> : <Sun size={15} />}
             </button>
             <button onClick={toggleCb}
-                    className={`shrink-0 ${cbPalette ? "text-amber" : "text-mut hover:text-amber"}`}
+                    aria-label="Colorblind-safe gain/loss colours"
+                    aria-pressed={cbPalette}
+                    className={`icon-btn shrink-0 ${cbPalette ? "text-amber" : "text-mut hover:text-amber"}`}
                     title={cbPalette ? "Colorblind-safe palette ON (blue=up, orange=down)" : "Enable colorblind-safe gain/loss colors"}>
               <Eye size={15} />
             </button>
             <div className="relative shrink-0">
-              <button onClick={toggleBell} className="relative text-mut hover:text-amber" title="Notifications">
+              <button onClick={toggleBell}
+                      className="icon-btn relative text-mut hover:text-amber"
+                      aria-label={unseenAlerts > 0 ? `Notifications, ${unseenAlerts} unseen` : "Notifications"}
+                      aria-expanded={bellOpen}
+                      title="Notifications">
                 <Bell size={15} />
                 {unseenAlerts > 0 && (
                   <span className="absolute -top-1.5 -right-1.5 min-w-[15px] h-[15px] px-0.5 rounded-full bg-red text-white text-[9px] flex items-center justify-center">
@@ -417,9 +438,10 @@ export function Shell({ children }: { children: React.ReactNode }) {
         {/* Extra bottom padding on mobile so the fixed tab bar never covers the
             last row of content; the safe-area inset keeps it clear of the
             home indicator on notched phones. */}
-        <main key={pathname}
+        <main id="main-content" key={pathname}
               className="p-3 md:p-5 pb-[calc(4.5rem+env(safe-area-inset-bottom))] md:pb-5 mb-rise min-w-0 max-w-full overflow-x-hidden">
           {rejected ? null : children}
+          {!rejected && <Disclaimer />}
         </main>
       </div>
 

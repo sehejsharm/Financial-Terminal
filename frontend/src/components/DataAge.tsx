@@ -31,8 +31,12 @@ export function DataAge({
         <button
           onClick={onRefresh}
           disabled={busy}
+          aria-label="Refresh now, bypassing the cache"
           title="Refresh now (bypasses cache)"
-          className="hover:text-amber disabled:opacity-40 transition-colors"
+          // p-1.5 widens the tap area past the 24px AA floor without pushing
+          // this inline stamp around; -m-1 pulls the extra padding back out of
+          // the layout so nothing shifts.
+          className="p-1.5 -m-1 hover:text-amber disabled:opacity-40 transition-colors"
         >
           <RefreshCw size={11} className={busy ? "animate-spin" : ""} />
         </button>

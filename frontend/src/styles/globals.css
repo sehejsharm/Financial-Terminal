@@ -89,6 +89,11 @@ html.light.cb {
   }
   .btn-primary { @apply btn bg-amber text-black hover:bg-amber/90; }
   .btn-ghost   { @apply btn bg-panel2 text-txt border border-line2 hover:border-amber; }
+  /* A 44px hit area around an icon that may itself be only ~15px. Google Play
+     and WCAG 2.5.5 both want ~44-48px touch targets; the icon stays visually
+     small while the tappable region is finger-sized. */
+  .icon-btn { @apply inline-flex items-center justify-center min-w-[44px] min-h-[44px]
+                     rounded transition-colors; }
 }
 
 /* ── HUD / "flight deck" surface treatment ────────────────────────────────
