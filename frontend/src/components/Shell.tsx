@@ -94,6 +94,18 @@ const NAV = [
 
 const ALERTS_SEEN_KEY = "mb_alerts_seen";
 
+// The five destinations the phone bottom bar exposes. Chosen as the app's
+// actual centre of gravity — the daily-open (Dashboard), the deep-dive
+// (Terminal), what you own (Portfolio), and the markets board — with "More"
+// opening the full drawer for the remaining seven. A bottom bar with eleven
+// items is a scroll, not navigation; five is the Material ceiling.
+const BOTTOM_TABS = [
+  { href: "/",          label: "Home",      icon: Home },
+  { href: "/terminal",  label: "Terminal",  icon: Terminal },
+  { href: "/portfolio", label: "Portfolio", icon: Briefcase },
+  { href: "/global",    label: "Markets",   icon: Globe2 },
+];
+
 /**
  * App shell — sticky top bar + collapsible left nav + global Cmd/Ctrl+K
  * command palette. On <md viewports the sidebar becomes a hamburger drawer
@@ -250,6 +262,9 @@ export function Shell({ children }: { children: React.ReactNode }) {
         <Link
           key={href}
           href={href}
+          // Screen readers get the active page from aria-current, not just the
+          // colour change — the visual highlight alone fails WCAG 1.3.1.
+          aria-current={active ? "page" : undefined}
           // Intent-based prefetch: the always-visible sidebar meant Next
           // eagerly RSC-prefetched every route on first paint. Prefetch
           // on hover/focus instead.
@@ -399,11 +414,45 @@ export function Shell({ children }: { children: React.ReactNode }) {
 
         {/* Keyed on the route so each navigation replays the entrance — the page
             should feel like it arrived, not like text was swapped underneath you. */}
+        {/* Extra bottom padding on mobile so the fixed tab bar never covers the
+            last row of content; the safe-area inset keeps it clear of the
+            home indicator on notched phones. */}
         <main key={pathname}
-              className="p-3 md:p-5 mb-rise min-w-0 max-w-full overflow-x-hidden">
+              className="p-3 md:p-5 pb-[calc(4.5rem+env(safe-area-inset-bottom))] md:pb-5 mb-rise min-w-0 max-w-full overflow-x-hidden">
           {rejected ? null : children}
         </main>
       </div>
+
+      {/* Bottom tab bar — the standard Android/iOS pattern, mobile only. The
+          hamburger drawer stays as "More" for the routes that don't fit. */}
+      <nav aria-label="Primary"
+           className="md:hidden fixed bottom-0 inset-x-0 z-30 flex items-stretch
+                      border-t border-line bg-bg2/95 backdrop-blur
+                      pb-[env(safe-area-inset-bottom)]">
+        {BOTTOM_TABS.map(({ href, label, icon: Icon }) => {
+          const active = href === "/" ? pathname === "/"
+            : pathname === href || pathname.startsWith(href);
+          return (
+            <Link key={href} href={href} prefetch={false}
+                  aria-current={active ? "page" : undefined}
+                  className={cn(
+                    "flex-1 min-h-[3.25rem] flex flex-col items-center justify-center gap-0.5",
+                    active ? "text-amber" : "text-mut hover:text-txt")}>
+              <Icon size={19} strokeWidth={2} />
+              <span className="text-[10px] tracking-wide">{label}</span>
+            </Link>
+          );
+        })}
+        <button onClick={() => setMenuOpen(true)}
+                aria-label="More — open full navigation"
+                aria-expanded={menuOpen}
+                className={cn(
+                  "flex-1 min-h-[3.25rem] flex flex-col items-center justify-center gap-0.5",
+                  menuOpen ? "text-amber" : "text-mut hover:text-txt")}>
+          <Menu size={19} strokeWidth={2} />
+          <span className="text-[10px] tracking-wide">More</span>
+        </button>
+      </nav>
 
       <CommandPalette open={paletteOpen} onOpenChange={setPaletteOpen} />
     </div>
