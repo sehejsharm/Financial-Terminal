@@ -27,5 +27,17 @@ jobs:
       - name: Lint (ruff — bug rules only)
         run: ruff check .
 
+      # Run the invariant suite as its own step, BEFORE the general suite.
+      # It is the required check: these are the rules that must hold for every
+      # ticker, and a failure here means a number on a screen is wrong, not
+      # that a unit test drifted. Separating it means the CI log says which
+      # kind of failure happened without anyone reading the output.
+      #
+      # -rxX surfaces xfail/xpass in the summary: an xfail that starts passing
+      # (XPASS) is a strict failure, which is how a fixed defect forces its
+      # marker to be removed instead of silently rotting.
+      - name: Invariants (required — tests/invariants)
+        run: pytest tests/invariants -q -rxX
+
       - name: Run tests
-        run: pytest
+        run: pytest --ignore=tests/invariants -m "not live"

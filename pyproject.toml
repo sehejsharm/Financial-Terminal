@@ -2,6 +2,12 @@
 pythonpath = ["."]
 testpaths = ["tests"]
 addopts = "-q"
+markers = [
+    # Hits real provider APIs. NEVER runs in CI — a test that calls Yahoo is a
+    # test that goes red on a bad afternoon and teaches the team to ignore red
+    # builds. Run deliberately: pytest -m live
+    "live: requires network access to real data providers",
+]
 
 [tool.ruff]
 target-version = "py311"
