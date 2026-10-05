@@ -14,9 +14,10 @@
  *  - Seeds from the REST quoteBulk immediately so first paint isn't blank, and
  *    persists last-good ticks to sessionStorage so a reload never shows "—".
  *  - WebSocket primary; falls back to SSE after repeated WS failures.
- *  - Auth: JWT from the mb_token cookie as ?token= (WS can't set headers).
+ *  - Auth: a short-lived access token as ?token= (WS cannot set headers).
+ *    Fetched via ensureToken, so a reconnect picks up a refreshed one.
  */
-import { api, token, type Quote } from "@/lib/api";
+import { api, ensureToken, type Quote } from "@/lib/api";
 
 export type Tick = {
   s: string;
@@ -72,6 +73,7 @@ class QuoteStore {
   private refcount = new Map<string, number>();
   private statusListeners = new Set<Listener>();
 
+private connecting = false;
   private ws: WebSocket | null = null;
   private es: EventSource | null = null;
   private useSse = false;
@@ -153,13 +155,26 @@ class QuoteStore {
   // ── connection ─────────────────────────────────────────────────────────
   private ensureConnected() {
     if (typeof window === "undefined") return;
-    if (this.ws || this.es) return;
+    if (this.ws || this.es || this.connecting) return;
     if (!this.evalTimer) this.evalTimer = setInterval(() => this.evalStatus(), 1000);
-    this.useSse ? this.connectSse() : this.connectWs();
+    // Getting a token may now require a round trip (the access token is
+    // short-lived and held in memory), so this is async — and that opens a
+    // window where a second connect() could start before the first finishes.
+    // `connecting` closes it; without the flag a reconnect racing a
+    // subscription would open two sockets and double every tick.
+    this.connecting = true;
+    void (async () => {
+      try {
+        const tk = await ensureToken();
+        if (this.ws || this.es) return;
+        this.useSse ? this.connectSse(tk) : this.connectWs(tk);
+      } finally {
+        this.connecting = false;
+      }
+    })();
   }
 
-  private connectWs() {
-    const tk = token.get();
+  private connectWs(tk: string | null) {
     try {
       const ws = new WebSocket(`${WS_URL}?token=${encodeURIComponent(tk || "")}`);
       this.ws = ws;
@@ -179,8 +194,7 @@ class QuoteStore {
     }
   }
 
-  private connectSse() {
-    const tk = token.get();
+  private connectSse(tk: string | null) {
     const syms = [...this.refcount.keys()];
     const es = new EventSource(
       `${SSE_URL}?token=${encodeURIComponent(tk || "")}&symbols=${encodeURIComponent(syms.join(","))}`);

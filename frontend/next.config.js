@@ -101,6 +101,39 @@ const nextConfig = {
   async headers() {
     return [{ source: "/:path*", headers: securityHeaders }];
   },
+  // Proxy ONLY the auth endpoints through this origin, so the refresh cookie
+  // is first-party.
+  //
+  // This is not a tidiness choice, it is the thing that makes the HttpOnly
+  // session cookie work at all. The app is served from *.vercel.app and the
+  // API from *.duckdns.org — different registrable domains, so a cookie set
+  // by the API is a THIRD-PARTY cookie to this page. SameSite=Strict would
+  // never send it, SameSite=None is blocked outright by Safari's ITP and is
+  // on borrowed time in Chrome, and the symptom in both cases is being signed
+  // out on every page load with nothing in the console to explain why.
+  //
+  // Routing these few paths through Vercel makes the browser see the Set-Cookie
+  // as coming from this origin, which it is — so Strict works and Safari is
+  // fine.
+  //
+  // Deliberately NOT a catch-all /api/:path* rewrite: that would put every
+  // quote and every panel through Vercel, adding a hop to the hot path and
+  // undoing the request work in docs/BASELINE.md. Auth is a handful of calls
+  // per session (one refresh per access-token lifetime); market data is
+  // thousands, and keeps going straight to the API with a bearer header,
+  // which needs no cookie and so has no same-site requirement.
+  // NOTE: rewrites are resolved at BUILD time and baked into
+  // .next/routes-manifest.json, so NEXT_PUBLIC_API_URL must be present in the
+  // BUILD environment — changing it at runtime does nothing and the symptom is
+  // a 500 from this proxy with ECONNREFUSED to localhost:8000 in the server
+  // log. On Vercel that is automatic (NEXT_PUBLIC_* vars are build-time by
+  // definition and already inlined into the bundle), but it does mean pointing
+  // the app at a different API requires a redeploy, not just an env change.
+  async rewrites() {
+    return [
+      { source: "/api/v1/auth/:path*", destination: `${API}/api/v1/auth/:path*` },
+    ];
+  },
 };
 
 module.exports = nextConfig;

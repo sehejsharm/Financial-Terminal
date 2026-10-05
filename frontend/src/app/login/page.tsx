@@ -19,7 +19,7 @@ import { useRouter } from "next/navigation";
 import { FormEvent, useCallback, useEffect, useState } from "react";
 import { Fingerprint, KeyRound } from "lucide-react";
 
-import { api, token } from "@/lib/api";
+import { api, csrf, token } from "@/lib/api";
 import {
   available, clearPrimaryAccount, getAssertion, isCancellation,
   primaryAccount, setPrimaryAccount,
@@ -55,7 +55,8 @@ export default function LoginPage() {
       const res = await api.passkeyLoginFinish({
         handle: opts.handle, ...assertion,
       });
-      token.set(res.access_token);
+      token.set(res.access_token, res.expires_at);
+      csrf.set(res.csrf_token);
       setPrimaryAccount(res.username);
       router.replace("/");
     } catch (err: unknown) {
@@ -80,8 +81,11 @@ export default function LoginPage() {
     e.preventDefault();
     setBusy(true); setError(null);
     try {
-      const { access_token } = await api.login(username, password);
-      token.set(access_token);
+      const res = await api.login(username, password);
+      token.set(res.access_token, res.expires_at);
+      // Needed by /auth/refresh and /auth/logout, the two endpoints that
+      // authenticate with the cookie rather than a bearer header.
+      csrf.set(res.csrf_token);
       router.replace("/");
     } catch (err: unknown) {
       setError((err as { detail?: string } | null)?.detail

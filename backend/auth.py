@@ -39,6 +39,18 @@ def authenticate(username: str, password: str) -> dict | None:
     return user_store.verify_credentials(username, password)
 
 
+def user_for_session(username: str) -> dict | None:
+    """The user a refresh is being performed for, or None if they may no
+    longer sign in.
+
+    Separate from `authenticate` because a refresh proves possession of a
+    session, not knowledge of the password — but it must still honour
+    `active`, so that deactivating an account takes effect at the next refresh
+    instead of thirty days later.
+    """
+    return user_store.get_user(username)
+
+
 def current_user(credentials: HTTPAuthorizationCredentials | None
                  = Depends(_bearer)) -> dict:
     """FastAPI dependency: decode the bearer token, return claims."""

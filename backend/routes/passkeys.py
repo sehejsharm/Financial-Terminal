@@ -17,13 +17,15 @@ enrolled, which is why attestation is not verified (see lib/webauthn.py).
 """
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import (APIRouter, Depends, HTTPException, Request, Response,
+                     status)
 from pydantic import BaseModel, Field
 
-from backend import auth
+from backend import auth, sessions
 from backend.config import (
     WEBAUTHN_ORIGINS, WEBAUTHN_RP_ID, WEBAUTHN_RP_NAME,
 )
+from backend.session_cookies import client_meta, set_session
 from lib import auth as user_store
 from lib import passkey_store as store
 from lib import webauthn
@@ -183,7 +185,7 @@ def login_begin():
 
 
 @router.post("/login/finish")
-def login_finish(body: LoginFinish):
+def login_finish(body: LoginFinish, request: Request, response: Response):
     taken = store.take_challenge(body.handle)
     if taken is None:
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, _GENERIC)
@@ -219,7 +221,14 @@ def login_finish(body: LoginFinish):
     # never advances and is effectively switched off after the first login.
     store.record_use(username, body.credential_id, result.new_sign_count)
 
+    # A passkey assertion is a login, so it opens a real session exactly like
+    # the password path does. Without this the passkey route would hand out an
+    # access token with no refresh cookie behind it — the user would be signed
+    # out the moment that short token expired, and the session would never
+    # appear in their device list or be reachable by "sign out everywhere".
+    refresh = sessions.create(record["username"], **client_meta(request))
+    csrf_token = set_session(response, refresh)
     token = auth.issue_token(record)
     # The client remembers this to offer "continue as X" next time, the way a
     # browser password manager does.
-    return {**token, "username": record["username"]}
+    return {**token, "username": record["username"], "csrf_token": csrf_token}

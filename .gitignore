@@ -2,22 +2,15 @@
 .env
 .streamlit/secrets.toml
 
-# User data (holdings, accounts/credentials)
-data/portfolio.json
-data/portfolios.json
-data/users.json
-data/watchlists.json
-data/alerts.json
-data/notes.json
-data/workspaces.json
-data/audit.jsonl
-data/vc_reports.jsonl
-data/vc_overrides.json
-data/vc_history.jsonl
-data/sentiment.jsonl
-data/.jwt_secret
-data/INITIAL_ADMIN_PASSWORD.txt
-data/notify_settings.json
+# User data (holdings, accounts/credentials, sessions) — the whole directory.
+#
+# This was a per-file list, which is the wrong shape for a rule whose failure
+# mode is committing credentials: every new store needs a new line, and the
+# atomic writer's .bak siblings were never covered, so data/notes.json was
+# ignored while data/notes.json.bak was not. Nothing in here is tracked or
+# should be — it is all runtime state on a mounted volume — so ignore the
+# directory and stop maintaining a list that only fails in one direction.
+data/
 
 # Deploy-time secrets + runtime data (Oracle/Docker VM)
 deploy/.env

@@ -19,6 +19,11 @@ class LoginResponse(BaseModel):
     token_type: str = "bearer"
     expires_at: str
     role: str
+    # Echoed back in the X-CSRF-Token header on /auth/refresh and /auth/logout,
+    # the two cookie-authenticated endpoints. It is also set as a readable
+    # cookie; returning it here as well means a client never has to parse
+    # document.cookie to find it.
+    csrf_token: str | None = None
 
 
 class MeResponse(BaseModel):

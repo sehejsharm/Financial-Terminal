@@ -28,6 +28,12 @@ vi.mock("@/lib/api", () => ({
     }),
   },
   token: { get: () => null, set: () => {}, clear: () => {} },
+  // The store now awaits this before opening a socket (the access token is
+  // short-lived and held in memory). Mocked even though this environment has
+  // no `window` and so never connects — a mock that omits an import the
+  // module actually uses passes for the wrong reason and stops matching the
+  // real module.
+  ensureToken: async () => null,
 }));
 
 /** Let the coalescing window (50ms) elapse and the fetch resolve. */

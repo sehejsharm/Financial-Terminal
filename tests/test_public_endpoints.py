@@ -166,6 +166,16 @@ class TestTheAuthFreeRoutesAreEnumerated:
         # cannot set an Authorization header. Verified by reading them: both
         # call auth.decode_token and reject with 4401/401.
         token_in_query = {"/api/v1/stream", "/api/v1/stream/sse"}
+        # Authenticated by the HttpOnly refresh cookie plus the double-submit
+        # CSRF check, not by a FastAPI dependency — so they look dependency-free
+        # here while in fact being the only cookie-authenticated routes in the
+        # API. They cannot require a bearer token: refresh is how the client
+        # OBTAINS one, and sign-out has to work when the access token has
+        # already expired. See backend/csrf.py.
+        cookie_authenticated = {
+            "/api/v1/auth/refresh",
+            "/api/v1/auth/logout",
+        }
         # The login and passkey ceremony endpoints cannot require a token —
         # they are how you get one. They are rate-limited instead.
         credential_issuing = {
@@ -175,7 +185,7 @@ class TestTheAuthFreeRoutesAreEnumerated:
             "/api/v1/auth/passkey/login/finish",
         }
         allowed = (set(INTENTIONALLY_PUBLIC) | token_in_query
-                   | credential_issuing)
+                   | credential_issuing | cookie_authenticated)
 
         unguarded = [path for path, ndeps in _walk(app_mod.app.routes)
                      if path not in allowed and not ndeps]

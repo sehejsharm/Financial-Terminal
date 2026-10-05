@@ -10,7 +10,10 @@
 const API_URL =
   process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
 
+// Only still referenced to clear any cookie a previous build left behind —
+// the access token is no longer stored in one. See the session block below.
 const TOKEN_COOKIE = "mb_token";
+const CSRF_COOKIE = "mb_csrf";
 
 export class ApiError extends Error {
   constructor(public status: number, public detail: string) {
@@ -56,11 +59,124 @@ function clearCookie(name: string) {
   document.cookie = `${name}=; expires=Thu, 01 Jan 1970 00:00:00 GMT; path=/`;
 }
 
+// ── session ──────────────────────────────────────────────────────────────
+//
+// The access token lives in a MODULE VARIABLE and nowhere else. It is not in a
+// cookie, not in localStorage, not in sessionStorage.
+//
+// It used to be a 12-hour JWT in a JS-readable cookie, which meant any XSS —
+// including one arriving through a compromised dependency — could read a
+// full-length session credential straight out of document.cookie. Now the
+// readable half is short-lived and dies with the page, and the long-lived half
+// is an HttpOnly cookie that script cannot see at all.
+//
+// The cost is that a fresh page load starts with no token and has to ask for
+// one. That is what `bootstrap` is for.
+let accessToken: string | null = null;
+let accessExpiry = 0;          // epoch ms
+let csrfToken: string | null = null;
+let refreshInFlight: Promise<string | null> | null = null;
+
+// Refresh this far before the token actually expires, so a request never goes
+// out holding a token that dies in flight.
+const REFRESH_SKEW_MS = 60_000;
+
+const AUTH_BASE = "/api/v1/auth";   // same-origin on purpose; see next.config.js
+
 export const token = {
-  get: () => readCookie(TOKEN_COOKIE),
-  set: (v: string) => writeCookie(TOKEN_COOKIE, v),
-  clear: () => clearCookie(TOKEN_COOKIE),
+  /** The in-memory access token, or null. Synchronous: callers that may run
+   *  before bootstrap should use `ensureToken` instead. */
+  get: () => accessToken,
+  set: (v: string, expiresAt?: string) => {
+    accessToken = v;
+    // Trust the server's expiry when it sends one. Falling back to a guess is
+    // fine because an early refresh is harmless and a late one is caught by
+    // the 401 retry.
+    const parsed = expiresAt ? Date.parse(expiresAt) : NaN;
+    accessExpiry = Number.isFinite(parsed) ? parsed : Date.now() + 15 * 60_000;
+  },
+  clear: () => { accessToken = null; accessExpiry = 0; csrfToken = null; },
 };
+
+export const csrf = {
+  get: () => csrfToken ?? readCookie(CSRF_COOKIE),
+  set: (v: string | null | undefined) => { if (v) csrfToken = v; },
+};
+
+/** Ask the server for a new access token using the refresh cookie.
+ *
+ *  SINGLE-FLIGHT, and that is a correctness requirement rather than an
+ *  optimisation. The refresh token rotates on every use, and the server treats
+ *  a superseded token coming back as evidence of theft and kills the session.
+ *  A page load fires several requests at once, so without this the first would
+ *  rotate the cookie and the rest would present the old one — and the app
+ *  would sign the user out for the crime of loading normally. Concurrent
+ *  callers share one in-flight promise instead.
+ */
+export function refreshSession(): Promise<string | null> {
+  if (refreshInFlight) return refreshInFlight;
+  refreshInFlight = (async () => {
+    try {
+      const headers = new Headers({ Accept: "application/json" });
+      const ct = csrf.get();
+      if (ct) headers.set("X-CSRF-Token", ct);
+      const res = await fetch(`${AUTH_BASE}/refresh`, {
+        method: "POST",
+        headers,
+        // Same-origin via the rewrite, but stated explicitly: this is the one
+        // request in the app that depends on a cookie being attached.
+        credentials: "include",
+        cache: "no-store",
+      });
+      if (!res.ok) { token.clear(); return null; }
+      const body = await res.json();
+      token.set(body.access_token, body.expires_at);
+      csrf.set(body.csrf_token);
+      return accessToken;
+    } catch {
+      // Offline. Deliberately does NOT clear the token: a dropped connection
+      // is not a sign-out, and treating it as one would bounce someone to
+      // /login for a flaky tunnel.
+      return accessToken;
+    } finally {
+      refreshInFlight = null;
+    }
+  })();
+  return refreshInFlight;
+}
+
+/** A usable access token, refreshing first if there isn't one or it is about
+ *  to expire. */
+export async function ensureToken(): Promise<string | null> {
+  if (accessToken && Date.now() < accessExpiry - REFRESH_SKEW_MS) {
+    return accessToken;
+  }
+  return refreshSession();
+}
+
+/** Called once when the app mounts: turns an HttpOnly refresh cookie into a
+ *  live session, or reports that there isn't one. This is what replaces
+ *  "read the cookie and assume we're logged in". */
+export async function bootstrapSession(): Promise<boolean> {
+  return (await ensureToken()) !== null;
+}
+
+/** End this session server-side and locally. */
+export async function endSession(): Promise<void> {
+  try {
+    const headers = new Headers();
+    const ct = csrf.get();
+    if (ct) headers.set("X-CSRF-Token", ct);
+    await fetch(`${AUTH_BASE}/logout`, {
+      method: "POST", headers, credentials: "include", cache: "no-store",
+    });
+  } catch { /* signing out locally matters more than the round trip */ }
+  token.clear();
+  cacheClearAll();
+  // The old session cookie, if a previous build left one behind. Without this
+  // an upgraded client keeps a stale mb_token around forever.
+  clearCookie(TOKEN_COOKIE);
+}
 
 // ── client-side cache ────────────────────────────────────────────────────
 // Tiny localStorage cache for GET responses that are slow upstream and don't
@@ -140,6 +256,9 @@ export async function apiFetchMeta<T = unknown>(
   path: string,
   init: RequestInit = {},
   opts: FetchOpts = {},
+  /** Internal: 1 on the single post-refresh retry. Not part of the public
+   *  surface — callers never set it. */
+  attempt = 0,
 ): Promise<FetchMeta<T>> {
   const isGet = !init.method || init.method.toUpperCase() === "GET";
   if (isGet && !opts.fresh) {
@@ -152,15 +271,32 @@ export async function apiFetchMeta<T = unknown>(
   if (init.body && !headers.has("Content-Type")) {
     headers.set("Content-Type", "application/json");
   }
-  const tk = token.get();
+  // Refreshes first if the token is missing or nearly expired, so a 15-minute
+  // access token is invisible to the rest of the app.
+  const tk = await ensureToken();
   if (tk) headers.set("Authorization", `Bearer ${tk}`);
 
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), opts.timeoutMs ?? 30_000);
   let res: Response;
   try {
-    res = await fetch(`${API_URL}${path}`,
-                      { ...init, headers, cache: "no-store", signal: ctrl.signal });
+    // Auth endpoints go to THIS origin and carry cookies; everything else
+    // goes straight to the API with a bearer header and no cookies.
+    //
+    // The split is what makes the HttpOnly session cookie work at all: the
+    // app and the API are on different registrable domains, so a cookie set
+    // by the API directly would be third-party — never sent under
+    // SameSite=Strict, and blocked outright by Safari. next.config.js
+    // rewrites just these paths through this origin, so the browser sees the
+    // Set-Cookie as first-party, which it is.
+    const isAuth = path.startsWith(AUTH_BASE + "/");
+    res = await fetch(isAuth ? path : `${API_URL}${path}`, {
+      ...init,
+      headers,
+      cache: "no-store",
+      signal: ctrl.signal,
+      ...(isAuth ? { credentials: "include" as RequestCredentials } : {}),
+    });
   } catch (e: any) {
     throw new ApiError(0, e?.name === "AbortError"
       ? "Timed out waiting for the server. The upstream data provider is "
@@ -175,7 +311,25 @@ export async function apiFetchMeta<T = unknown>(
       const body = await res.json();
       detail = (body?.detail || body?.message || detail) as string;
     } catch { /* not JSON */ }
-    if (res.status === 401) { token.clear(); cacheClearAll(); }
+    if (res.status === 401) {
+      // One retry after a refresh, then give up. A 401 here means the access
+      // token was rejected despite ensureToken — the clock drifted, the
+      // server restarted with a new JWT secret, or the token expired mid
+      // flight. Retrying once converts that into a hiccup instead of
+      // bouncing someone to /login mid-session.
+      //
+      // `attempt` guards the obvious trap: a genuinely revoked session would
+      // otherwise retry forever, and each retry would rotate the refresh
+      // token.
+      if (attempt === 0) {
+        token.clear();
+        if (await refreshSession()) {
+          return apiFetchMeta<T>(path, init, opts, 1);
+        }
+      }
+      token.clear();
+      cacheClearAll();
+    }
     // A 5xx is the SERVER failing, not the user's network. Telling someone
     // to check their connection when the backend returned 502 sends them
     // to debug the one thing that is working.
@@ -534,11 +688,22 @@ function normScreen(r: unknown): ScreenResult {
 export const api = {
   // auth
   login: (username: string, password: string) =>
-    apiFetch<{ access_token: string; expires_at: string; role: string }>(
+    apiFetch<{ access_token: string; expires_at: string; role: string;
+               csrf_token?: string }>(
       "/api/v1/auth/login",
       { method: "POST", body: JSON.stringify({ username, password }) },
     ),
   me: () => apiFetch<{ username: string; role: string }>("/api/v1/auth/me"),
+
+  // Where this account is signed in, so someone can spot a device they do
+  // not recognise and end it.
+  sessions: () => apiFetch<{ sessions: SessionRecord[] }>("/api/v1/auth/sessions"),
+  revokeSession: (id: string) =>
+    apiFetch<void>(`/api/v1/auth/sessions/${encodeURIComponent(id)}`,
+                   { method: "DELETE" }),
+  logoutEverywhere: () =>
+    apiFetch<{ sessions_ended: number }>("/api/v1/auth/logout-all",
+                                         { method: "POST" }),
 
   // passkeys. Registration is authenticated; login is not — the signature is
   // what proves identity, so there is no username to send.
@@ -561,7 +726,7 @@ export const api = {
       "/api/v1/auth/passkey/login/begin", { method: "POST" }),
   passkeyLoginFinish: (body: Record<string, unknown>) =>
     apiFetch<{ access_token: string; expires_at: string; role: string;
-               username: string }>(
+               username: string; csrf_token?: string }>(
       "/api/v1/auth/passkey/login/finish",
       { method: "POST", body: JSON.stringify(body) }),
 
@@ -881,4 +1046,15 @@ export const api = {
     apiFetch<unknown>("/api/v1/screens/custom", {
       method: "POST", body: JSON.stringify({ filters, match, sectors }),
     }).then(normScreen),
+};
+
+/** One row in the signed-in-devices list. `id` is the server's session id,
+ *  which is safe to hand to the browser — it is not derived from the token. */
+export type SessionRecord = {
+  id: string;
+  created: number;
+  last_used: number;
+  user_agent: string;
+  ip: string;
+  current: boolean;
 };

@@ -9,7 +9,8 @@ import {
 } from "lucide-react";
 
 import { InfoTip } from "@/components/ui";
-import { ApiError, api, token, type AlertEvent, type Quote } from "@/lib/api";
+import { ApiError, api, bootstrapSession, endSession, token,
+         type AlertEvent, type Quote } from "@/lib/api";
 import { useLiveStatus } from "@/lib/useLive";
 import { useSmoothStreamStatus } from "@/lib/useQuote";
 import { cn, fmtPct } from "@/lib/utils";
@@ -169,7 +170,6 @@ export function Shell({ children }: { children: React.ReactNode }) {
   // transient errors are retried with a short backoff and the token is left
   // alone.
   useEffect(() => {
-    if (!token.get()) { router.replace("/login"); return; }
     let alive = true;
     let attempt = 0;
 
@@ -192,7 +192,15 @@ export function Shell({ children }: { children: React.ReactNode }) {
           }
         });
     };
-    verify();
+    // A fresh page load holds no access token — it lives in memory and the
+    // page just started. So the gate can no longer be a synchronous cookie
+    // read: it has to exchange the HttpOnly refresh cookie for a token first,
+    // and only treat the ABSENCE of a session as "go to /login".
+    bootstrapSession().then((ok) => {
+      if (!alive) return;
+      if (!ok) { router.replace("/login"); return; }
+      verify();
+    });
     return () => { alive = false; };
   }, [router]);
 
@@ -253,7 +261,13 @@ export function Shell({ children }: { children: React.ReactNode }) {
   // Close the mobile drawer on navigation.
   useEffect(() => { setMenuOpen(false); }, [pathname]);
 
-  function logout() { token.clear(); router.replace("/login"); }
+  function logout() {
+    // Fire-and-forget on purpose: the redirect must not wait on the network,
+    // but the server call is what actually ends the session rather than just
+    // forgetting it locally.
+    void endSession();
+    router.replace("/login");
+  }
 
   const navLinks = NAV
     .filter((n) => !n.adminOnly || me?.role === "master_admin")

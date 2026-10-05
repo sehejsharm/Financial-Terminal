@@ -33,7 +33,14 @@ from backend.body_limit import BodyLimitMiddleware
 from backend.ratelimit import RateLimitMiddleware
 from backend.security_headers import SecurityHeadersMiddleware
 from backend.reliability import DeadlineMiddleware, configure_thread_pool
-from backend.config import CORS_ORIGINS
+from backend import sessions
+from backend.config import CORS_ORIGINS, DATA_DIR
+
+# Point the session store at the data volume. Done at import rather than in a
+# startup hook so that anything touching sessions during app construction —
+# or a test that builds the app without running startup events — gets a
+# configured store instead of a RuntimeError.
+sessions.configure(DATA_DIR)
 from backend.routes import (
     admin,
     passkeys,
