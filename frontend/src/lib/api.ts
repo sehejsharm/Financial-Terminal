@@ -75,6 +75,17 @@ const CACHE_TTL_MS: Record<string, number> = {
   "/api/v1/market/search": 5 * 60_000,
   "/api/v1/value-chain/": 12 * 60 * 60_000,
   "/api/v1/macro/": 30 * 60_000,
+  // News and deals had NO entry, so every visit to /news or /sharks refetched
+  // from scratch and sat on a skeleton for as long as the upstream took —
+  // measured at 15-20s. Both are short-TTL rather than long: a headline list
+  // 60 seconds old is still the news, and bulk/block deals are published
+  // end-of-day so five minutes cannot miss anything.
+  //
+  // This cache returns early WITHOUT revalidating, so the TTL is also the
+  // staleness ceiling. That is the reason these two are measured in seconds
+  // and minutes rather than hours.
+  "/api/v1/market/news": 60_000,
+  "/api/v1/deals/": 5 * 60_000,
 };
 function ttlFor(path: string): number {
   for (const [pref, ttl] of Object.entries(CACHE_TTL_MS)) {

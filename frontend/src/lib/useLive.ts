@@ -41,10 +41,21 @@ export function useLiveStatus(): { polling: boolean; lastTick: number } {
 }
 
 // ── the hook ────────────────────────────────────────────────────────────────
+
+/** How long a single poll may take before it is abandoned.
+ *
+ *  Without this, a request that never settles does more than hang a spinner:
+ *  `inFlightRef` never clears, so every subsequent tick returns early and the
+ *  poller is dead for the rest of the session. The surface does not recover
+ *  until the user reloads the page. Matches useAsync's deadline so the two
+ *  hooks fail the same way. */
+export const LIVE_TIMEOUT_MS = 25_000;
+
 export function useLive<T>(
   loader: () => Promise<T>,
   intervalMs: number,
   deps: unknown[] = [],
+  opts: { timeoutMs?: number } = {},
 ): {
   data: T | null;
   error: string | null;
@@ -52,6 +63,7 @@ export function useLive<T>(
   updatedAt: number | null;
   refresh: () => void;
 } {
+  const { timeoutMs = LIVE_TIMEOUT_MS } = opts;
   const [data, setData] = useState<T | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -68,19 +80,34 @@ export function useLive<T>(
     inFlightRef.current = true;
     lastRunRef.current = Date.now();
     setBusy(true);
+    let timer: ReturnType<typeof setTimeout> | null = null;
     try {
-      const d = await loaderRef.current();
+      // The loader is raced, not cancelled — it may still be in flight after
+      // we give up on it. That is fine: whatever it eventually does, this
+      // poll has already released the lock so the next tick can run.
+      const d = await Promise.race([
+        loaderRef.current(),
+        new Promise<never>((_, reject) => {
+          timer = setTimeout(() => reject(new Error("__mb_timeout__")), timeoutMs);
+        }),
+      ]);
       setData(d);
       setError(null);
       setUpdatedAt(Date.now());
       ticked();
     } catch (e: any) {
-      setError(e?.detail || e?.message || "Failed to load");
+      setError(
+        e?.message === "__mb_timeout__"
+          ? `Gave up after ${Math.round(timeoutMs / 1000)}s. The data provider `
+            + "is slow or unreachable — this will retry on the next tick."
+          : e?.detail || e?.message || "Failed to load",
+      );
     } finally {
+      if (timer) clearTimeout(timer);
       inFlightRef.current = false;
       setBusy(false);
     }
-  }, []);
+  }, [timeoutMs]);
 
   useEffect(() => {
     let timer: ReturnType<typeof setInterval> | null = null;
