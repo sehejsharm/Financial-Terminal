@@ -8,10 +8,12 @@ from __future__ import annotations
 
 import functools
 import hashlib
+import threading
 import logging
 import pickle
 import time
 from collections import OrderedDict
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 from typing import Any, Callable
 
@@ -22,6 +24,54 @@ log = logging.getLogger("motherboard.cache")
 # How long a last-known-good copy stays servable after the fresh TTL lapses.
 # One provider outage must degrade to "cached as of X", not a blank page.
 STALE_TTL = 24 * 3600
+
+# Stale-while-revalidate.
+#
+# `cached` used to serve a stale copy only when the function RAISED. A cold
+# miss against a slow provider still blocked the request for as long as the
+# provider took — measured at 40s on /screens/fields, which runs a whole
+# universe scan. The user waited for data we already had a perfectly good
+# slightly-older copy of.
+#
+# Now a miss with a stale copy available returns that copy immediately and
+# refreshes in the background. Only a key that has NEVER been computed blocks,
+# because then there is genuinely nothing to serve.
+#
+# Single-flight: one refresh per key at a time. Without it, N concurrent
+# requests to a cold key would each start their own scan — a stampede that
+# makes the slow path slower the more people hit it.
+_REVALIDATE_POOL = ThreadPoolExecutor(max_workers=4,
+                                      thread_name_prefix="mb-revalidate")
+_inflight: set[str] = set()
+_inflight_lock = threading.Lock()
+
+
+def _revalidate(key: str, fn: Callable, args: tuple, kwargs: dict,
+                store: Callable) -> None:
+    """Recompute `key` off the request path, at most once concurrently."""
+    with _inflight_lock:
+        if key in _inflight:
+            return
+        _inflight.add(key)
+
+    def _run():
+        try:
+            store(key, fn(*args, **kwargs))
+        except Exception:
+            # The stale copy stays served; a background failure must never
+            # surface to whoever happened to trigger it.
+            log.warning("background revalidate failed for %s",
+                        getattr(fn, "__qualname__", key), exc_info=True)
+        finally:
+            with _inflight_lock:
+                _inflight.discard(key)
+
+    try:
+        _REVALIDATE_POOL.submit(_run)
+    except RuntimeError:
+        # Interpreter shutting down — drop it rather than raise into a request.
+        with _inflight_lock:
+            _inflight.discard(key)
 
 _redis = None
 if REDIS_URL:
@@ -119,6 +169,21 @@ def cached(ttl: int = 600) -> Callable:
                 hit = _lru.get(key)
                 if hit is not None:
                     return hit
+            # Fresh copy absent. Before paying for a recompute, see whether a
+            # stale one exists — serving it now and refreshing behind the
+            # request is what keeps a cold cache from being a 40-second wall.
+            prev = _stale(key)
+            if prev is not None:
+                stored_at, stale_value = prev
+                _revalidate(key, fn, args, kwargs, _store)
+                if isinstance(stale_value, dict):
+                    stale_value = {**stale_value,
+                                   "stale": True,
+                                   "cached_as_of": datetime.fromtimestamp(
+                                       stored_at, tz=timezone.utc
+                                   ).isoformat(timespec="seconds")}
+                return stale_value
+
             try:
                 value = fn(*args, **kwargs)
             except Exception:

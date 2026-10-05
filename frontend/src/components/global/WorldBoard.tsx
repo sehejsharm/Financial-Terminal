@@ -1,6 +1,6 @@
 "use client";
 
-import Link from "next/link";
+import { TickerLink } from "@/components/TickerLink";
 import { useMemo } from "react";
 
 import { LiveNumber } from "@/components/LiveNumber";
@@ -71,7 +71,7 @@ function HeatCell({ sym }: { sym: string }) {
   const cur = curForTicker(sym, tick?.ccy);
 
   return (
-    <Link href={`/terminal?t=${encodeURIComponent(sym)}`}
+    <TickerLink href={`/terminal?t=${encodeURIComponent(sym)}`}
           title={`${meta.label} — open in Terminal`}
           className="hud mb-lift px-2.5 py-2 flex flex-col justify-between min-h-[74px] relative overflow-hidden">
       <span aria-hidden className="absolute inset-0 pointer-events-none transition-colors duration-500"
@@ -88,7 +88,7 @@ function HeatCell({ sym }: { sym: string }) {
           {cp == null ? "—" : <>{cp >= 0 ? "▲" : "▼"} <LiveNumber value={cp} format="pct" /></>}
         </span>
       </span>
-    </Link>
+    </TickerLink>
   );
 }
 

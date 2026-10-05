@@ -1,6 +1,6 @@
 "use client";
 
-import Link from "next/link";
+import { TickerLink } from "@/components/TickerLink";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Plus, Star, Trash2, X } from "lucide-react";
 
@@ -40,7 +40,7 @@ function Row({ ticker, wlId, onRemove, editing }: {
               background: cp == null ? "transparent"
                 : up ? "rgb(var(--c-green) / 0.09)" : "rgb(var(--c-red) / 0.09)",
             }} />
-      <Link href={`/terminal?t=${encodeURIComponent(ticker)}`}
+      <TickerLink href={`/terminal?t=${encodeURIComponent(ticker)}`}
             className="flex items-center gap-2 flex-1 min-w-0 relative">
         <span className="text-[12px] truncate min-w-0 flex-1 group-hover:text-amber transition-colors"
               title={meta.label !== ticker ? meta.label : undefined}>
@@ -55,7 +55,7 @@ function Row({ ticker, wlId, onRemove, editing }: {
           cp == null ? "text-mut" : up ? "text-green" : "text-red"}`}>
           {cp != null ? <LiveNumber value={cp} format="pct" /> : "—"}
         </span>
-      </Link>
+      </TickerLink>
       {editing && (
         <button onClick={onRemove} title={`Remove ${ticker}`}
                 className="relative text-mut hover:text-red shrink-0">

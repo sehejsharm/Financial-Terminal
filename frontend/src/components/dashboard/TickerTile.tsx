@@ -1,6 +1,6 @@
 "use client";
 
-import Link from "next/link";
+import { TickerLink } from "@/components/TickerLink";
 import { ChevronLeft, ChevronRight, X } from "lucide-react";
 
 import { LiveNumber } from "@/components/LiveNumber";
@@ -136,9 +136,9 @@ export function TickerTile({
   }
 
   return (
-    <Link href={`/terminal?t=${encodeURIComponent(sym)}`}
+    <TickerLink href={`/terminal?t=${encodeURIComponent(sym)}`}
           title={`${meta.label} — open in Terminal`}>
       {body}
-    </Link>
+    </TickerLink>
   );
 }

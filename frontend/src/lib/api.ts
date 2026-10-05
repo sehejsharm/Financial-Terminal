@@ -566,10 +566,13 @@ export const api = {
     apiFetch<LiquidityBook>(
       `/api/v1/market/liquidity?symbols=${encodeURIComponent(tickers.join(","))}`
       + `&notional=${notional}&participation=${participation}`),
+  // POST, not GET: a whole board's symbols in a query string runs into URL
+  // length limits, which would then decide how many quotes you get.
   quoteBulk: (tickers: string[]) =>
-    apiFetch<Record<string, Quote | null>>(
-      `/api/v1/market/quote-bulk?symbols=${encodeURIComponent(tickers.join(","))}`,
-    ),
+    apiFetch<Record<string, Quote | null>>("/api/v1/market/quote-bulk", {
+      method: "POST",
+      body: JSON.stringify({ symbols: tickers }),
+    }),
   history: (ticker: string, period = "1Y") =>
     apiFetch<{ ticker: string; period: string; candles: any[] }>(
       `/api/v1/market/history/${encodeURIComponent(ticker)}?period=${period}`,

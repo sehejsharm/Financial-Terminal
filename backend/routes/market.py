@@ -4,6 +4,7 @@ from __future__ import annotations
 import time
 
 from fastapi import APIRouter, Depends, HTTPException, Query
+from pydantic import BaseModel, Field
 
 from backend import auth
 from backend import providers
@@ -63,6 +64,33 @@ def _bulk_quotes(syms: tuple[str, ...]) -> dict:
 #: is actively polling always answers from memory.
 _LIVE_TICK_MAX_AGE_MS = 20_000
 
+# Symbols accepted in one quote-bulk request.
+#
+# This was 30, and it TRUNCATED rather than paginating — a 41-symbol board
+# silently lost 11 of them. That was survivable only because the client used
+# to send one symbol per request; now that seeds are coalesced into a single
+# call, the cap has to clear a whole board or the coalescer would turn a
+# performance fix into a correctness bug.
+_MAX_BULK_SYMBOLS = 120
+
+
+class BulkQuoteRequest(BaseModel):
+    symbols: list[str] = Field(..., min_length=1, max_length=_MAX_BULK_SYMBOLS)
+
+
+@router.post("/quote-bulk")
+def quote_bulk_post(body: BulkQuoteRequest,
+                    _user: dict = Depends(auth.current_user)):
+    """Batch quote, symbols in the BODY.
+
+    The GET form carries symbols in the query string, which puts a whole
+    board's worth of tickers in a URL — browser and proxy length limits then
+    decide how many quotes you get, which is not a decision a URL should be
+    making. POST is the form the client uses; GET stays for anything already
+    pointed at it.
+    """
+    return _quote_bulk(body.symbols)
+
 
 @router.get("/quote-bulk")
 def quote_bulk(symbols: str = Query(..., description="Comma-separated tickers"),
@@ -80,9 +108,19 @@ def quote_bulk(symbols: str = Query(..., description="Comma-separated tickers"),
     carries `as_of` and `age_ms` so the UI can say how old a number is
     rather than implying everything is live.
     """
-    syms = [s.strip().upper() for s in symbols.split(",") if s.strip()][:30]
+    return _quote_bulk([s for s in symbols.split(",")])
+
+
+def _quote_bulk(raw_symbols: list[str]) -> dict[str, dict | None]:
+    syms = [s.strip().upper() for s in raw_symbols if s and s.strip()]
     if not syms:
         raise HTTPException(400, "No symbols provided")
+    if len(syms) > _MAX_BULK_SYMBOLS:
+        # Refuse rather than truncate: a caller that asked for 200 symbols and
+        # silently got 120 has no way to notice the other 80 are missing.
+        raise HTTPException(
+            400, f"Too many symbols: {len(syms)} (max {_MAX_BULK_SYMBOLS}). "
+                 "Split the request.")
 
     from backend.stream import hub
 

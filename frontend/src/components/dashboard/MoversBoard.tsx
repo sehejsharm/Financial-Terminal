@@ -1,6 +1,6 @@
 "use client";
 
-import Link from "next/link";
+import { TickerLink } from "@/components/TickerLink";
 import { useEffect, useMemo, useState } from "react";
 import { TrendingDown, TrendingUp } from "lucide-react";
 
@@ -40,7 +40,7 @@ function MoverRow({ m, rank, max, tone }: {
   const width = max > 0 ? Math.min(100, (Math.abs(cp) / max) * 100) : 0;
 
   return (
-    <Link href={`/terminal?t=${encodeURIComponent(sym)}`}
+    <TickerLink href={`/terminal?t=${encodeURIComponent(sym)}`}
           title={`${name} — open in Terminal`}
           className="relative flex items-center gap-2 px-2.5 py-[7px] rounded
                      hover:bg-panel2 border border-transparent hover:border-line2
@@ -60,7 +60,7 @@ function MoverRow({ m, rank, max, tone }: {
       <span className={`num text-[13px] shrink-0 relative ${cp >= 0 ? "text-green" : "text-red"}`}>
         <LiveNumber value={cp} format="pct" />
       </span>
-    </Link>
+    </TickerLink>
   );
 }
 

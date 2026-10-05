@@ -53,6 +53,16 @@ const SSE_URL = API + "/api/v1/stream/sse";
 const STALE_MS = 15_000;
 const PERSIST_KEY = "mb_last_ticks";
 
+// How long to collect subscriptions before issuing one seed request. Long
+// enough to catch a whole component tree mounting in the same frame, short
+// enough that nobody perceives it as delay — first paint already shows the
+// persisted tick from the last session, so this window costs nothing visible.
+const SEED_WINDOW_MS = 50;
+
+// Symbols per seed request. Must stay at or under the server's own cap
+// (backend/routes/market.py), which truncates rather than paginates.
+const SEED_CHUNK = 100;
+
 type Listener = () => void;
 
 class QuoteStore {
@@ -273,22 +283,66 @@ class QuoteStore {
   }
 
   // ── REST seed + persistence (no blank first paint / reload) ────────────
-  private async seed(symbols: string[]) {
+  //
+  // Seeding is COALESCED. It used to fire immediately, once per subscribe()
+  // call, which on the dashboard meant 40 HTTP requests each carrying exactly
+  // one symbol — through an endpoint named "bulk".
+  //
+  // The reason it fanned out is subtle and worth recording. The dashboard page
+  // DOES bulk-subscribe: useQuotes(allSymbols) asks for the whole board in one
+  // call, which would seed in one request. But React runs child effects before
+  // parent effects, so all 41 TickerTiles have already run their own
+  // useQuote(symbol) — each a separate subscribe([one]) — by the time the
+  // page-level subscription runs and finds nothing fresh left to seed. The
+  // per-cell subscriptions win the race and the bulk one becomes a no-op.
+  //
+  // Rather than fight the effect ordering, seeds are buffered: every symbol
+  // that needs a first value lands in `seedQueue`, and one flush SEED_WINDOW_MS
+  // later issues a single request for all of them. 41 cells mounting in the
+  // same tick produce one call, and the component tree does not have to know.
+  private seedQueue = new Set<string>();
+  private seedTimer: ReturnType<typeof setTimeout> | null = null;
+
+  private seed(symbols: string[]) {
+    for (const s of symbols) {
+      // A symbol that already has a value needs no seed — the socket owns it
+      // from here.
+      if (!this.ticks.get(s)) this.seedQueue.add(s);
+    }
+    if (!this.seedQueue.size || this.seedTimer) return;
+    this.seedTimer = setTimeout(() => {
+      this.seedTimer = null;
+      const batch = [...this.seedQueue];
+      this.seedQueue.clear();
+      void this.flushSeed(batch);
+    }, SEED_WINDOW_MS);
+  }
+
+  private async flushSeed(symbols: string[]) {
+    // Re-check: a live tick may have landed during the coalescing window, in
+    // which case the REST round trip for that symbol is pure waste.
     const need = symbols.filter((s) => !this.ticks.get(s));
     if (!need.length) return;
-    try {
-      const quotes = await api.quoteBulk(need);
-      let touched = false;
-      for (const [sym, q] of Object.entries(quotes)) {
-        const s = sym.toUpperCase();
-        if (this.ticks.get(s) || !q) continue; // a live tick already arrived
-        this.ticks.set(s, this.fromQuote(s, q));
-        touched = true;
-        const set = this.symListeners.get(s);
-        if (set) for (const cb of set) cb();
-      }
-      if (touched) this.persist();
-    } catch { /* live socket will fill it */ }
+
+    // The server caps a single request; chunk rather than let it truncate.
+    // Silently dropping the tail would be worse than an extra request — the
+    // cells would sit blank with nothing to explain why.
+    for (let i = 0; i < need.length; i += SEED_CHUNK) {
+      const chunk = need.slice(i, i + SEED_CHUNK);
+      try {
+        const quotes = await api.quoteBulk(chunk);
+        let touched = false;
+        for (const [sym, q] of Object.entries(quotes)) {
+          const s = sym.toUpperCase();
+          if (this.ticks.get(s) || !q) continue; // a live tick already arrived
+          this.ticks.set(s, this.fromQuote(s, q));
+          touched = true;
+          const set = this.symListeners.get(s);
+          if (set) for (const cb of set) cb();
+        }
+        if (touched) this.persist();
+      } catch { /* live socket will fill it */ }
+    }
   }
 
   private fromQuote(sym: string, q: Quote): Tick {
