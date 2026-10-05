@@ -12,13 +12,42 @@ on:
 jobs:
   probe:
     runs-on: ubuntu-latest
+    # Job-level, because a step's `if` is evaluated before that step's own
+    # `env` block exists — declaring these inside the step would make the
+    # condition always false.
+    env:
+      ADMIN_USER: ${{ secrets.ADMIN_USER }}
+      ADMIN_PASSWORD: ${{ secrets.ADMIN_PASSWORD }}
+      API: https://sehejmotherboard.duckdns.org
     steps:
       - name: Backend /healthz
         run: |
           curl -fsS --max-time 20 https://sehejmotherboard.duckdns.org/healthz
           echo
 
+      # /diag now requires a master-admin token (it disclosed which provider
+      # keys are configured plus raw upstream error text to anyone who asked,
+      # and each hit makes four live calls to metered providers — this probe
+      # alone was ~96 free quota hits a day).
+      #
+      # So it logs in first, and it only runs when the credentials are
+      # present: without them the step is skipped rather than failing, which
+      # keeps the /healthz probe above as the signal and stops a missing
+      # secret from showing up as a red "app is down" run.
+      #
+      # To enable it, set the ADMIN_USER and ADMIN_PASSWORD repo secrets to
+      # the master-admin credentials from deploy/.env.
       - name: Backend /diag (provider status)
+        if: ${{ env.ADMIN_PASSWORD != '' }}
         run: |
-          curl -fsS --max-time 30 https://sehejmotherboard.duckdns.org/diag | head -c 2000
-          echo
+          set -euo pipefail
+          TOKEN=$(curl -fsS --max-time 20 -X POST "$API/api/v1/auth/login" \
+            -H 'Content-Type: application/json' \
+            -d "{\"username\":\"$ADMIN_USER\",\"password\":\"$ADMIN_PASSWORD\"}" \
+            | python3 -c 'import json,sys; print(json.load(sys.stdin)["access_token"])')
+          # Report only which providers are reachable. The raw body carries
+          # upstream error strings and key-configuration flags, and these logs
+          # are more widely readable than the endpoint now is.
+          curl -fsS --max-time 30 "$API/diag" \
+            -H "Authorization: Bearer $TOKEN" \
+            | python3 .github/scripts/diag_summary.py

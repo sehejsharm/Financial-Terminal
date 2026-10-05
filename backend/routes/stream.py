@@ -14,7 +14,8 @@ import json
 import logging
 import time
 
-from fastapi import APIRouter, Query, Request, WebSocket, WebSocketDisconnect
+from fastapi import (APIRouter, Depends, Query, Request, WebSocket,
+                     WebSocketDisconnect)
 from fastapi.responses import StreamingResponse
 
 from backend import auth
@@ -121,7 +122,13 @@ async def stream_sse(request: Request, symbols: str = Query(""),
 
 
 @router.get("/stream/health")
-def stream_health():
-    """Observability for the /admin panel: sockets, symbols, feed latency."""
+def stream_health(_: dict = Depends(auth.current_user)):
+    """Observability for the /admin panel: sockets, symbols, feed latency.
+
+    Authenticated, because its own docstring says who it is for. It had no
+    dependency at all while its siblings — the WebSocket and the SSE stream —
+    both validate a token, so the operational telemetry was the one public
+    thing in this file.
+    """
     return {**hub.stats(), **ingest.metrics(),
             "marketOpen": session.any_market_open()}

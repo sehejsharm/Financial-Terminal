@@ -19,6 +19,13 @@ services:
     environment:
       - APP_VERSION=oracle-1
       - REDIS_URL=redis://redis:6379/0   # shared cache; survives backend restarts
+      # Exactly one reverse proxy (the caddy service below) sits in front of
+      # this container, and nothing else can reach it — port 8000 is `expose`,
+      # not `ports`. Set here rather than in .env because it describes THIS
+      # topology, not an operator preference: get it wrong and the rate
+      # limiter charges every request on the internet to Caddy's bridge IP,
+      # i.e. one shared bucket for all users. See backend/ratelimit.client_ip.
+      - TRUSTED_PROXY_HOPS=1
     depends_on:
       - redis
     # Cap memory so a runaway scan OOMs THIS container (Docker restarts it via

@@ -41,3 +41,40 @@ jobs:
 
       - name: Run tests
         run: pytest --ignore=tests/invariants -m "not live"
+
+  # Dependency CVEs, as a separate job so it runs in parallel with the tests
+  # and a vulnerable transitive package cannot hide behind a green test run.
+  #
+  # ADVISORY, not blocking (continue-on-error). That is deliberate: a new
+  # advisory lands on someone else's schedule, and a gate that turns the whole
+  # pipeline red for an unrelated CVE in a transitive dev dependency is a gate
+  # people start ignoring or deleting. The job's job is to put the list in
+  # front of whoever is looking. Turn off continue-on-error once the backlog
+  # is at zero and it can be kept there.
+  audit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: pip-audit (Python dependencies)
+        continue-on-error: true
+        run: |
+          python -m pip install --upgrade pip pip-audit
+          pip-audit -r requirements.txt -r requirements-backend.txt \
+                    -r requirements-dev.txt --progress-spinner off
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: npm audit (frontend dependencies)
+        continue-on-error: true
+        working-directory: frontend
+        run: npm audit --audit-level=moderate

@@ -4,8 +4,9 @@ from __future__ import annotations
 import os
 from datetime import datetime, timezone
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
 
+from backend.auth import require_master_admin
 from backend.cache import cache_info
 
 router = APIRouter(tags=["health"])
@@ -27,10 +28,17 @@ def version():
 
 
 @router.get("/diag")
-def diag():
+def diag(_: dict = Depends(require_master_admin)):
     """Live data-provider diagnostics. Hit this to see which providers are
     actually reachable from this host — answers "why is X empty?" in one call.
-    Unauthenticated by design so it works from a browser during ops triage.
+
+    Master-admin only. It used to be unauthenticated "so it works from a
+    browser during ops triage", which was convenient and wrong on two counts:
+    it published which provider keys are configured plus up to 200 characters
+    of raw upstream error text (URLs, provider detail) to anonymous callers,
+    and every hit makes four live upstream calls — an unauthenticated,
+    unmetered way to drain paid provider quota. Triage still works; it needs
+    the admin token the operator already has.
     """
     out: dict = {
         "providers": {

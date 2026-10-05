@@ -145,10 +145,19 @@ def test_stream_ws_subscribe_and_delta(client):
 
 
 def test_stream_health_endpoint(client):
-    r = client.get("/api/v1/stream/health")
+    # Authenticated now. This endpoint reports open socket counts, subscribed
+    # symbols and feed latency for the /admin panel, and it was the only thing
+    # in this router without a token check while both the WebSocket and the
+    # SSE stream validated one. See tests/test_public_endpoints.py.
+    r = client.get("/api/v1/stream/health",
+                   headers={"Authorization": f"Bearer {_token(client)}"})
     assert r.status_code == 200
     body = r.json()
     assert "connections" in body and "symbols" in body and "marketOpen" in body
+
+
+def test_stream_health_requires_auth(client):
+    assert client.get("/api/v1/stream/health").status_code == 401
 
 
 def test_hub_evicts_last_on_unsubscribe():

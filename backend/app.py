@@ -29,7 +29,9 @@ socket.setdefaulttimeout(20)
 from fastapi.middleware.cors import CORSMiddleware
 
 from backend.audit import AuditMiddleware
+from backend.body_limit import BodyLimitMiddleware
 from backend.ratelimit import RateLimitMiddleware
+from backend.security_headers import SecurityHeadersMiddleware
 from backend.reliability import DeadlineMiddleware, configure_thread_pool
 from backend.config import CORS_ORIGINS
 from backend.routes import (
@@ -61,9 +63,19 @@ app = FastAPI(
         "Educational research API extracted from the Streamlit prototype. "
         "All financial figures are advisory only and not investment advice."
     ),
-    openapi_url="/openapi.json",
-    docs_url="/docs",
-    redoc_url="/redoc",
+    # The interactive docs are a development tool, and in production they are
+    # a free target map: every route, every schema, the whole /admin surface
+    # and the query-param token auth on /data/bdp, handed to anonymous
+    # callers. Off unless EXPOSE_API_DOCS=1.
+    #
+    # Default-on would have been the friendlier choice and is how this shipped;
+    # the problem with default-on is that the person who most needs the docs
+    # off is the one who never thinks to turn them off. Local dev sets the flag
+    # once in .env; production simply never sets it.
+    **({"openapi_url": "/openapi.json", "docs_url": "/docs",
+        "redoc_url": "/redoc"}
+       if os.getenv("EXPOSE_API_DOCS") == "1"
+       else {"openapi_url": None, "docs_url": None, "redoc_url": None}),
 )
 
 # ── error monitoring ──────────────────────────────────────────────────────
@@ -91,11 +103,15 @@ async def _unhandled(request: Request, exc: Exception):
 
 
 # Starlette nests middleware with the LAST added outermost. Desired nesting:
-# CORS (outermost — 429s and 504s still get CORS headers so the browser can
-# read the error) ⊃ Audit (both appear in the audit log) ⊃ RateLimit ⊃
-# Deadline (innermost: it times the handler, not the queueing in front of
-# it) ⊃ routes.
+# SecurityHeaders (outermost — see below) ⊃ CORS (429s and 504s still get CORS
+# headers so the browser can read the error) ⊃ Audit (both appear in the audit
+# log) ⊃ RateLimit ⊃ BodyLimit ⊃ Deadline (innermost: it times the handler,
+# not the queueing in front of it) ⊃ routes.
 app.add_middleware(DeadlineMiddleware)
+# Inside the rate limiter, so a flood of oversized bodies is throttled by IP
+# before each one is measured, and outside the routes so no handler ever sees
+# a body it did not agree to.
+app.add_middleware(BodyLimitMiddleware)
 app.add_middleware(RateLimitMiddleware)
 app.add_middleware(AuditMiddleware)
 app.add_middleware(
@@ -106,6 +122,13 @@ app.add_middleware(
     allow_headers=["*"],
     max_age=600,  # cache CORS preflight 10 min -> far fewer OPTIONS round-trips
 )
+# Added LAST, and that is the whole point: it must be the outermost layer so it
+# stamps every response, including the ones that never reach a route — the 429
+# the rate limiter short-circuits, the 504 from the deadline, the CORS preflight
+# CORSMiddleware answers itself, and the 500 from the exception handler. Added
+# any earlier it sits *inside* those layers and silently misses exactly the
+# responses that matter most. tests/test_security_headers.py pins this.
+app.add_middleware(SecurityHeadersMiddleware)
 
 # Unversioned health
 app.include_router(health.router)
