@@ -357,6 +357,18 @@ export async function apiFetch<T = unknown>(
 export type Quote = {
   symbol: string; price: number | null; prev_close: number | null;
   change_pct: number | null; currency?: string | null;
+  // Which data plane served this, and what the data is. Optional because the
+  // live stream sends compact deltas that omit them; the REST quote path
+  // always sets them. See backend/dataplane.py.
+  tier?: "realtime" | "delayed";
+  source_class?: "public" | "licensed";
+  /** Epoch SECONDS (not ms) — the provider's own timestamp where it gave one. */
+  as_of?: number;
+  /** True when as_of is our clock rather than the provider's, so the UI can
+   *  avoid implying a precision it does not have. */
+  as_of_estimated?: boolean;
+  /** Only present when a delay was actually applied. */
+  delayed_by_seconds?: number;
 };
 export type Snapshot = Record<string, unknown> & {
   name?: string; sector?: string; industry?: string;

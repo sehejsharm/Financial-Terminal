@@ -15,7 +15,7 @@ import asyncio
 import logging
 import time
 
-from backend import providers
+from backend import feeds, providers
 from backend.stream import hub, session
 
 log = logging.getLogger("motherboard.stream.ingest")
@@ -109,6 +109,20 @@ async def _poll_once() -> None:
             n = _misses.get(sym, 0) + 1
             _misses[sym] = n
             _next_due[sym] = now + next_delay_ms(base, n) / 1000.0
+    # Serve the delayed plane. A no-op unless a licensed feed is active —
+    # public ticks are never recorded for delay, so `released` finds nothing
+    # and this costs one dict lookup per active symbol.
+    #
+    # Driven from the poll loop rather than its own timer because it needs no
+    # better resolution than this: a delayed quote is fifteen minutes old, so
+    # releasing it a second or two late is not observable, and a second timer
+    # would be a second thing that can stop running.
+    if feeds.active() is not None:
+        released = 0
+        for sym in active:
+            released += hub.publish_delayed(sym)
+        _metrics["delayed_served"] = released
+
     _metrics["last_batch"] = len(due)
     _metrics["polls"] += 1
     _metrics["backed_off"] = sum(1 for n in _misses.values() if n > _BACKOFF_AFTER)

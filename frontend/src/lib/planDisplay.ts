@@ -67,3 +67,30 @@ export function relativeTime(epochSeconds: number): string {
   const days = Math.floor(hours / 24);
   return days === 1 ? "yesterday" : `${days} days ago`;
 }
+
+/** The one-phrase description of where a price came from.
+ *
+ *  Mirrors backend/dataplane.label, and deliberately makes no claim the
+ *  server would not: public data is never called "real-time" because nobody
+ *  knows NSE's or Twelve Data's actual lag, and a delay is only named when
+ *  one was actually applied.
+ *
+ *  Returns null when there is nothing honest to say — the stream's compact
+ *  deltas carry no provenance, and a label that defaulted to "Live" on absent
+ *  data would be the one claim most worth getting right.
+ */
+export function dataSourceLabel(q: {
+  tier?: string;
+  source_class?: string;
+  delayed_by_seconds?: number;
+}): string | null {
+  if (!q.source_class) return null;
+  if (q.delayed_by_seconds) {
+    const mins = Math.max(1, Math.round(q.delayed_by_seconds / 60));
+    return `Delayed ${mins} min`;
+  }
+  if (q.source_class === "licensed") {
+    return q.tier === "realtime" ? "Live" : "Delayed";
+  }
+  return "Public data";
+}

@@ -10,7 +10,8 @@
 
 import { describe, expect, it } from "vitest";
 
-import { describeDevice, planValue, relativeTime } from "@/lib/planDisplay";
+import { dataSourceLabel, describeDevice, planValue, relativeTime }
+  from "@/lib/planDisplay";
 
 const UNLIMITED = -1;
 
@@ -108,5 +109,35 @@ describe("relative times", () => {
     // Server and browser clocks disagree by seconds routinely; "-3 min ago"
     // on a security screen reads as a bug in the product.
     expect(relativeTime(now() + 30)).toBe("just now");
+  });
+});
+
+describe("data source labels", () => {
+  it("never calls public data real-time", () => {
+    // The claim most worth getting right on a finance screen.
+    expect(dataSourceLabel({ source_class: "public", tier: "realtime" }))
+      .toBe("Public data");
+  });
+
+  it("states a delay only when one was applied", () => {
+    expect(dataSourceLabel({ source_class: "licensed", tier: "delayed",
+                             delayed_by_seconds: 900 })).toBe("Delayed 15 min");
+  });
+
+  it("calls an entitled licensed quote live", () => {
+    expect(dataSourceLabel({ source_class: "licensed", tier: "realtime" }))
+      .toBe("Live");
+  });
+
+  it("says nothing when there is no provenance", () => {
+    // Stream deltas carry none. Defaulting to "Live" here would be the
+    // worst possible default.
+    expect(dataSourceLabel({})).toBeNull();
+    expect(dataSourceLabel({ tier: "realtime" })).toBeNull();
+  });
+
+  it("does not round a sub-minute delay down to zero", () => {
+    expect(dataSourceLabel({ source_class: "licensed", tier: "delayed",
+                             delayed_by_seconds: 20 })).toBe("Delayed 1 min");
   });
 });

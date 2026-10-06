@@ -6,7 +6,8 @@ import time
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 
-from backend import auth
+from backend import auth, dataplane, feeds
+from backend.stream import delayed
 from backend import providers
 from backend.cache import cached
 from lib import market_data as md
@@ -44,11 +45,47 @@ def resolve_symbol(q: str = Query(..., min_length=1),
 
 @router.get("/quote/{ticker}")
 @cached(ttl=15)
-def quote(ticker: str, _user: dict = Depends(auth.current_user)):
-    q = providers.quote(ticker)
+def quote(ticker: str, user: dict = Depends(auth.current_user)):
+    q = _serve_quote(ticker, user)
     if not q or q.get("price") is None:
         raise HTTPException(404, f"No quote for '{ticker}'")
     return q
+
+
+def _serve_quote(ticker: str, user: dict) -> dict | None:
+    """One quote, from the plane this caller is entitled to, labelled.
+
+    The order matters. A licensed feed is consulted first for an entitled
+    caller and for nobody else; everyone else is served the public providers,
+    which is what this app has always done. So with no feed configured this is
+    exactly the previous behaviour plus three honest labels.
+    """
+    tier = dataplane.tier_for(user)
+    feed = feeds.active()
+
+    if feed is not None:
+        if tier == dataplane.REALTIME:
+            live = feed.latest(ticker)
+            if live:
+                return dataplane.annotate(live, tier=tier,
+                                          source_class=feeds.SOURCE_CLASS,
+                                          as_of=live.get("as_of"))
+        else:
+            held = delayed.released(ticker.upper(), time.time())
+            if held:
+                return dataplane.annotate(
+                    held, tier=tier, source_class=feeds.SOURCE_CLASS,
+                    as_of=(held.get("ts") / 1000.0
+                           if isinstance(held.get("ts"), (int, float)) else None))
+        # Fall through: a licensed feed that has not yet seen this symbol, or
+        # a delayed window not yet filled, must still return a price. Public
+        # data labelled as public is better than an empty panel.
+
+    q = providers.quote(ticker)
+    if not q:
+        return None
+    return dataplane.annotate(q, tier=tier, source_class=dataplane.PUBLIC,
+                              as_of=q.get("as_of"))
 
 
 @cached(ttl=30)

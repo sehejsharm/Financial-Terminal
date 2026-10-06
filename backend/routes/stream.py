@@ -18,7 +18,7 @@ from fastapi import (APIRouter, Depends, Query, Request, WebSocket,
                      WebSocketDisconnect)
 from fastapi.responses import StreamingResponse
 
-from backend import auth
+from backend import auth, dataplane
 from backend.stream import hub, ingest, session
 
 log = logging.getLogger("motherboard.stream")
@@ -37,11 +37,15 @@ def _stat_frame() -> dict:
 
 @router.websocket("/stream")
 async def stream_ws(ws: WebSocket, token: str | None = Query(None)):
-    if auth.decode_token(token) is None:
+    claims = auth.decode_token(token)
+    if claims is None:
         await ws.close(code=4401)  # unauthenticated
         return
     await ws.accept()
-    conn = hub.Connection()
+    # The plane this socket is entitled to, taken from the plan in the token.
+    # Bound to the CONNECTION rather than checked per tick, so a client cannot
+    # change it mid-stream and there is no per-tick lookup on the hot path.
+    conn = hub.Connection(tier=dataplane.tier_for(claims))
     hub.register(conn)
 
     async def _send_loop() -> None:
@@ -90,10 +94,11 @@ async def stream_sse(request: Request, symbols: str = Query(""),
                      token: str | None = Query(None)):
     """SSE fallback. Subscriptions are fixed at connect time (query param);
     reconnect with a new ?symbols= to change them."""
-    if auth.decode_token(token) is None:
+    claims = auth.decode_token(token)
+    if claims is None:
         return StreamingResponse(iter(()), status_code=401)
     syms = [s.strip().upper() for s in symbols.split(",") if s.strip()][:_MAX_SYMBOLS]
-    conn = hub.Connection()
+    conn = hub.Connection(tier=dataplane.tier_for(claims))
 
     async def _gen():
         # Register INSIDE the generator so registration and the finally's
