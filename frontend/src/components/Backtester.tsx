@@ -522,7 +522,8 @@ export function Backtester({ seedTicker }: { seedTicker?: string }) {
             {" "}Apart from the out-of-sample block, every number above is
             fitted to this exact window and this exact parameter set — it
             describes what the rule would have done, which is not evidence of
-            what it will do. Educational only, not advice.
+            what it will do. Past performance is not indicative of future
+            results. Educational only, not advice.
           </div>
         </>
       )}

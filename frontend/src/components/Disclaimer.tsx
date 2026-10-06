@@ -15,14 +15,17 @@ export function Disclaimer() {
         the related documents carefully before investing.
       </p>
       <p className="mt-1">
-        Motherboard Terminal is an educational and research tool. It does not
-        provide personalised investment advice, recommendations, or portfolio
-        management, and nothing shown here is a solicitation to buy or sell any
+        Motherboard Terminal is an educational and research tool, and is not
+        registered with SEBI as a Research Analyst or Investment Adviser. It
+        does not provide personalised investment advice, recommendations, or
+        portfolio management, and nothing shown here is a solicitation to buy or sell any
         security. Market data may be delayed, incomplete, or sourced from free
         providers, and figures can be wrong — verify against a primary source
         before acting.
       </p>
       <p className="mt-2">
+        <a href="/disclosures" className="hover:text-amber underline">Disclosures</a>
+        <span className="mx-2">·</span>
         <a href="/privacy" className="hover:text-amber underline">Privacy</a>
         <span className="mx-2">·</span>
         <a href="/terms" className="hover:text-amber underline">Terms</a>

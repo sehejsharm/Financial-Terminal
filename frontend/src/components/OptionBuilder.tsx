@@ -395,8 +395,11 @@ export function OptionBuilder({ ticker, spot: spotProp }: {
         {" "}Greeks assume European exercise, no dividends and a constant rate.
         &ldquo;Model P(profit)&rdquo; is the lognormal probability implied by the same
         assumptions used to price the legs — real return distributions have fatter
-        tails, so tail-risk structures are riskier than it suggests. Educational
-        analysis only, not advice.
+        tails, so tail-risk structures are riskier than it suggests.
+        {" "}Derivatives are leveraged: a short or spread position can lose
+        more than the margin you put up, a long option can expire worthless
+        and lose the whole premium, and most individual traders in index
+        derivatives lose money. Educational analysis only, not advice.
       </div>
       <Methodology id="greeks" className="mt-3" />
     </div>

@@ -34,6 +34,7 @@ from backend.ratelimit import RateLimitMiddleware
 from backend.security_headers import SecurityHeadersMiddleware
 from backend.reliability import DeadlineMiddleware, configure_thread_pool
 from backend import invites, plans, sessions, usage
+from backend.routes import support as support_store
 from backend.config import CORS_ORIGINS, DATA_DIR
 
 # Point the session store at the data volume. Done at import rather than in a
@@ -43,9 +44,11 @@ from backend.config import CORS_ORIGINS, DATA_DIR
 sessions.configure(DATA_DIR)
 invites.configure(DATA_DIR)
 usage.configure(DATA_DIR)
+support_store.configure(DATA_DIR)
 from backend.routes import (
     admin,
     billing,
+    support,
     passkeys,
     ai,
     alerts,
@@ -148,7 +151,7 @@ _V1 = "/api/v1"
 for r in (auth.router, market.router, fundamentals.router, screens.router,
           options.router, value_chain.router, ai.router, watchlists.router,
           macro.router, deals.router, admin.router, portfolio.router,
-          billing.router, passkeys.router,
+          billing.router, passkeys.router, support.router,
           alerts.router, notes.router, workspaces.router, stream.router,
           data_api.router):
     app.include_router(r, prefix=_V1)

@@ -707,6 +707,11 @@ export const api = {
     ),
   me: () => apiFetch<{ username: string; role: string }>("/api/v1/auth/me"),
 
+  // Complaints. Unauthenticated on purpose — see backend/routes/support.py.
+  fileGrievance: (body: string, email: string) =>
+    apiFetch<{ ok: boolean; reference: string }>("/api/v1/support/grievance",
+      { method: "POST", body: JSON.stringify({ body, email }) }),
+
   // Plans, entitlements and usage.
   myPlan: () => apiFetch<PlanState>("/api/v1/billing/plan"),
   planCatalogue: () => apiFetch<{ plans: PlanOffer[] }>("/api/v1/billing/plans"),

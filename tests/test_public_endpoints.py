@@ -27,7 +27,20 @@ from fastapi.testclient import TestClient
 #   /api/v1/billing/plans — the price list. A pricing table people cannot
 #               read until after they sign up is not a pricing table. Contains
 #               no account data: it is the same catalogue for everyone.
-INTENTIONALLY_PUBLIC = ["/healthz", "/version", "/api/v1/billing/plans"]
+#   /api/v1/support/grievance — the complaint channel. The people most likely
+#               to need it are the ones who cannot sign in, so requiring a
+#               login would exclude exactly the complaints it exists for.
+#               Rate-limited tightly instead (it writes to disk and sends mail).
+INTENTIONALLY_PUBLIC = ["/healthz", "/version", "/api/v1/billing/plans",
+                        "/api/v1/support/grievance"]
+
+# The subset of the above that answers a GET. Split out because the list above
+# is the REVIEWED-PUBLIC allowlist for the route audit, and not every reviewed
+# route is a GET — /support/grievance is POST-only, so fetching it correctly
+# returns 405. Asserting 200 on all of them conflated "is public" with
+# "answers a GET", and the 405 is itself evidence the route exists and is not
+# auth-gated.
+PUBLIC_GET = ["/healthz", "/version", "/api/v1/billing/plans"]
 
 # Must NOT answer an anonymous caller.
 MUST_BE_GATED = [
@@ -84,11 +97,17 @@ class TestGatedEndpoints:
 
 
 class TestIntentionallyPublic:
-    @pytest.mark.parametrize("path", INTENTIONALLY_PUBLIC)
+    @pytest.mark.parametrize("path", PUBLIC_GET)
     def test_still_answers_without_credentials(self, client, path):
         # The watchdog and the container healthcheck have no token. Gating
         # /healthz would make the restart loop the outage.
         assert client.get(path).status_code == 200
+
+    def test_a_post_only_public_route_is_reachable_without_a_login(self, client):
+        # 405, not 401: the route exists and does not demand credentials. A
+        # 401 here would mean the complaint channel is shut to the people most
+        # likely to need it.
+        assert client.get("/api/v1/support/grievance").status_code == 405
 
     def test_healthz_discloses_nothing_but_liveness(self, client):
         assert set(client.get("/healthz").json()) == {"ok", "ts"}

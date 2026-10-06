@@ -52,6 +52,10 @@ _RULES: list[tuple[str, frozenset[str] | None, int, int]] = [
     # to use this app to spam a third party. Tight on both counts.
     ("/api/v1/auth/invite", None, 20, 60),
     ("/api/v1/auth/forgot-password", None, 5, 60),
+    # Public, writes to the data volume and sends mail. Someone with a real
+    # complaint files one; five a minute is well past that and short of being
+    # a way to fill the disk or mail-bomb an address.
+    ("/api/v1/support", None, 5, 60),
     ("/api/v1/alerts", frozenset({"POST", "PUT", "DELETE"}), 30, 60),
     ("/api/v1/admin", None, 60, 60),
     ("/api/v1/ai", frozenset({"POST"}), 20, 60),   # LLM calls cost quota
