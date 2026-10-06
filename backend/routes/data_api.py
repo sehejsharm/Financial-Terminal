@@ -35,7 +35,8 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from fastapi.responses import PlainTextResponse
 from pydantic import BaseModel, Field
 
-from backend import auth
+from backend import auth, entitlements
+from lib import auth as user_store
 from backend.cache import cached
 from backend.storage import get_storage
 
@@ -159,7 +160,19 @@ def api_token_user(request: Request) -> dict:
             if t["id"] == rec["id"]:
                 t["last_used_at"] = rec["last_used_at"]
         _save(username, doc)
-        return {"username": username, "role": "user", "via": "api_token"}
+        # The token's OWNER, with their real role and plan — not a hardcoded
+        # "user". The spreadsheet API is a paid entitlement, so a dict that
+        # claimed role=user and no plan would refuse a Pro subscriber access
+        # to the one feature they are paying for, and would do it only on the
+        # API-token path, which is the path least likely to be tested by hand.
+        #
+        # None means the account was deactivated or deleted since the token
+        # was minted; the token must stop working at that moment.
+        owner = user_store.get_user(username)
+        if owner is None:
+            raise HTTPException(status.HTTP_401_UNAUTHORIZED,
+                                "This account is no longer active")
+        return {**owner, "via": "api_token"}
 
     claims = auth.decode_token(raw)
     if not claims:
@@ -219,6 +232,12 @@ def bdp(tickers: str = Query(..., description="Comma-separated tickers"),
         format: str = Query("csv", pattern="^(csv|json)$"),
         user: dict = Depends(api_token_user)):
     """Current values, one row per ticker — the BDP() equivalent."""
+    # The spreadsheet API is a paid entitlement. Checked here rather
+    # than as a dependency because api_token_user already resolved the
+    # caller (it accepts a personal API token as well as a browser
+    # JWT), and a second auth dependency would mean two ideas of who
+    # this is.
+    entitlements.assert_allows(user, "data_api")
     syms = [t.strip().upper() for t in tickers.split(",") if t.strip()][:MAX_TICKERS]
     if not syms:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "No tickers given")
@@ -257,6 +276,12 @@ def bdh(ticker: str = Query(..., min_length=1),
         format: str = Query("csv", pattern="^(csv|json)$"),
         user: dict = Depends(api_token_user)):
     """Historical bars for one ticker — the BDH() equivalent."""
+    # The spreadsheet API is a paid entitlement. Checked here rather
+    # than as a dependency because api_token_user already resolved the
+    # caller (it accepts a personal API token as well as a browser
+    # JWT), and a second auth dependency would mean two ideas of who
+    # this is.
+    entitlements.assert_allows(user, "data_api")
     from backend import providers
     try:
         candles = providers.history(ticker.strip().upper(), period) or []

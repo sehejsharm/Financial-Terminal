@@ -695,6 +695,10 @@ export const api = {
     ),
   me: () => apiFetch<{ username: string; role: string }>("/api/v1/auth/me"),
 
+  // Plans, entitlements and usage.
+  myPlan: () => apiFetch<PlanState>("/api/v1/billing/plan"),
+  planCatalogue: () => apiFetch<{ plans: PlanOffer[] }>("/api/v1/billing/plans"),
+
   // Invites and password resets. inspectInvite is read-only on the server:
   // checking a link must not spend the single use the submit needs.
   inspectInvite: (token: string, purpose = "invite") =>
@@ -1084,4 +1088,27 @@ export type SessionRecord = {
   user_agent: string;
   ip: string;
   current: boolean;
+};
+
+/** What the caller's plan allows, and what they have spent today. */
+export type PlanState = {
+  plan: string;
+  plan_name: string;
+  price_inr_month: number;
+  /** True when the caller is the operator, not a subscriber — so the UI can
+   *  say so rather than claiming they are on a plan they do not pay for. */
+  admin_override: boolean;
+  entitlements: Record<string, boolean | number>;
+  usage: Record<string, { used: number; limit: number }>;
+  /** The sentinel the server uses for "no ceiling" (-1). Read from the
+   *  response rather than hardcoded, so the two cannot disagree. */
+  unlimited: number;
+};
+
+export type PlanOffer = {
+  id: string;
+  name: string;
+  price_inr_month: number;
+  blurb: string;
+  entitlements: Record<string, boolean | number>;
 };

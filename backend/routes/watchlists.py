@@ -5,7 +5,7 @@ import uuid
 
 from fastapi import APIRouter, Depends, HTTPException
 
-from backend import auth
+from backend import auth, entitlements
 from backend.schemas import Watchlist, WatchlistCreate
 from backend.storage import get_storage
 
@@ -33,6 +33,11 @@ def list_all(user: dict = Depends(auth.current_user)):
 
 @router.post("", response_model=Watchlist, status_code=201)
 def create(body: WatchlistCreate, user: dict = Depends(auth.current_user)):
+    # There was no ceiling here at all — an account could hold unlimited
+    # watchlists, each of which the dashboard subscribes to.
+    entitlements.ensure_room(user, "max_watchlists",
+                             len(get_storage().watchlists_for(user["username"])),
+                             "watchlists")
     wl = {"id": str(uuid.uuid4()),
           "name": body.name.strip() or "Untitled",
           "tickers": _norm_tickers(body.tickers)}

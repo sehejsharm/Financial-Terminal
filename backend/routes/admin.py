@@ -207,3 +207,43 @@ def nse_probe(ticker: str, quarterly: bool = True, max_docs: int = 2,
         raise HTTPException(400, "prefer must be consolidated or standalone")
     return nse_financials.probe(ticker, quarterly=quarterly, max_docs=max_docs,
                                 prefer=prefer)
+
+
+@router.post("/users/{username}/plan")
+def set_plan(username: str, plan: str,
+             user: dict = Depends(auth.require_master_admin)):
+    """Move an account onto a plan.
+
+    This is how paying users are onboarded until a payment provider is wired
+    up, and it stays useful afterwards: a failed webhook, a refund, a goodwill
+    upgrade and a support fix all need a human to be able to set this.
+
+    NOTE on timing: the plan rides in the access token, so a change here takes
+    effect for the gates when that token next rolls over — within one
+    access-token lifetime. /billing/plan reads the user table directly and so
+    reflects it immediately, which is why the client forces a refresh after an
+    upgrade rather than waiting.
+    """
+    from backend import plans as plan_table
+    if not plan_table.known(plan):
+        raise HTTPException(
+            400, f"Unknown plan {plan!r}. Known: "
+                 f"{', '.join(sorted(plan_table.PLANS))}.")
+    ok, msg = user_store.set_plan(username, plan)
+    if not ok:
+        raise HTTPException(404, msg)
+    _audit_action(user, "plan_changed", username, f"plan={plan}")
+    return {"ok": True, "message": msg}
+
+
+@router.post("/users/{username}/usage/reset", status_code=200)
+def reset_usage(username: str, user: dict = Depends(auth.require_master_admin)):
+    """Give a user's daily quota back.
+
+    For support. When someone was metered by a bug of ours, the honest fix is
+    to return the quota, not to tell them to wait until tomorrow.
+    """
+    from backend import usage
+    usage.reset(username)
+    _audit_action(user, "usage_reset", username)
+    return {"ok": True, "message": f"Daily usage cleared for {username}."}

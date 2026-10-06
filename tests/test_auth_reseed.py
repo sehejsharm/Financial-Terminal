@@ -13,8 +13,12 @@ def test_env_admin_created_when_missing(monkeypatch, tmp_path):
     monkeypatch.setenv("MOTHERBOARD_ADMIN_USER", "Sehej")
     monkeypatch.setenv("MOTHERBOARD_ADMIN_PASSWORD", "first-password")
     auth.ensure_env_admin()
-    assert auth.verify_credentials("Sehej", "first-password") == {
-        "username": "Sehej", "role": auth.ROLE_MASTER}
+    # Compared field by field rather than as a whole dict: the sanitized user
+    # shape has grown (plan, email) and pinning the exact dict makes every
+    # future field an unrelated test failure here.
+    got = auth.verify_credentials("Sehej", "first-password")
+    assert got["username"] == "Sehej"
+    assert got["role"] == auth.ROLE_MASTER
     assert auth.verify_credentials("sehej", "first-password") is not None  # case-insens
 
 

@@ -15,13 +15,12 @@ from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 
-from backend import auth, providers
+from backend import auth, entitlements, providers
 from backend.cache import cached
 from backend.storage import get_storage
 
 router = APIRouter(prefix="/portfolio", tags=["portfolio"])
 
-_MAX_PORTFOLIOS = 10
 _MAX_POSITIONS = 200
 _MAX_HISTORY_DAYS = 730
 
@@ -99,8 +98,9 @@ def list_portfolios(user: dict = Depends(auth.current_user)):
 def create_portfolio(body: PortfolioCreate,
                      user: dict = Depends(auth.current_user)):
     doc = _doc(user["username"])
-    if len(doc["portfolios"]) >= _MAX_PORTFOLIOS:
-        raise HTTPException(400, f"Portfolio limit reached ({_MAX_PORTFOLIOS}).")
+    # Was a flat _MAX_PORTFOLIOS for everyone; the ceiling is now the plan's.
+    entitlements.ensure_room(user, "max_portfolios",
+                             len(doc["portfolios"]), "portfolios")
     p = _new_portfolio(body.name.strip())
     doc["portfolios"].append(p)
     _save(user["username"], doc)

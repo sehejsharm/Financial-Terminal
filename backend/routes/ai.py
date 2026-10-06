@@ -5,7 +5,7 @@ from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, status
 
-from backend import auth
+from backend import auth, entitlements
 from backend.cache import cached
 from pydantic import BaseModel, Field
 
@@ -108,7 +108,8 @@ def _analysis_payload(ticker: str, text: str, f: dict) -> dict:
 
 
 @router.post("/bull-bear")
-def bull_bear(body: AIRequest, _user: dict = Depends(auth.current_user)):
+def bull_bear(body: AIRequest, _user: dict = Depends(
+        entitlements.meter("ai", "ai_per_day"))):
     _guard()
     f = _normalize_units(get_stock_fundamentals(body.ticker) or {})
     try:
@@ -119,7 +120,8 @@ def bull_bear(body: AIRequest, _user: dict = Depends(auth.current_user)):
 
 
 @router.post("/deep-analysis")
-def deep(body: AIRequest, _user: dict = Depends(auth.current_user)):
+def deep(body: AIRequest, _user: dict = Depends(
+        entitlements.meter("ai", "ai_per_day"))):
     _guard()
     f = _normalize_units(get_stock_fundamentals(body.ticker) or {})
     try:
@@ -187,7 +189,8 @@ def _append_sentiment_history(ticker: str, score: float, n: int) -> None:
 
 
 @router.post("/sentiment")
-def sentiment(body: AIRequest, _user: dict = Depends(auth.current_user)):
+def sentiment(body: AIRequest, _user: dict = Depends(
+        entitlements.meter("ai", "ai_per_day"))):
     """Tag each recent headline bull/bear/neutral (one Groq call, cached 30m)
     and roll up a [-1, 1] score. Each rollup is appended to a history log so
     a per-ticker sentiment trend accumulates over time."""
@@ -312,7 +315,8 @@ def _chain_for_prompt(context: dict) -> str:
 
 @router.post("/value-chain-scenario")
 def value_chain_scenario(body: ScenarioRequest,
-                         _user: dict = Depends(auth.current_user)):
+                         _user: dict = Depends(
+        entitlements.meter("ai", "ai_per_day"))):
     """Cascading what-if across the mapped chain."""
     _guard()
     prompt = _SCENARIO_PROMPT.format(
@@ -533,7 +537,8 @@ def build_ask_context(user: dict, ticker: str | None) -> list[tuple[str, str]]:
 
 
 @router.post("/ask")
-def ask(body: AskRequest, user: dict = Depends(auth.current_user)):
+def ask(body: AskRequest, user: dict = Depends(
+        entitlements.meter("ai", "ai_per_day"))):
     """Answer a question from the user's own modules, or admit it can't."""
     _guard()
     blocks = build_ask_context(user, body.context_ticker)

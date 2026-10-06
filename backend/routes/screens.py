@@ -14,7 +14,7 @@ from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException
 
-from backend import auth, providers
+from backend import auth, entitlements, providers
 from backend.cache import cached
 from pydantic import BaseModel, Field
 
@@ -115,7 +115,8 @@ def preset(name: str, _user: dict = Depends(auth.current_user)):
 
 @router.post("/custom")
 def custom(body: CustomScreenRequest,
-           _user: dict = Depends(auth.current_user)):
+           _user: dict = Depends(
+               entitlements.meter("screens", "screens_per_day"))):
     bad = [f.key for f in body.filters if f.key not in screens.FIELD_KEYS]
     if bad:
         raise HTTPException(400, f"Unknown field(s): {', '.join(sorted(set(bad)))}")
@@ -193,14 +194,16 @@ def put_saved(body: SavedScreensBody, user: dict = Depends(auth.current_user)):
 
 @router.post("/buffett")
 def buffett(body: BuffettScreenRequest,
-            _user: dict = Depends(auth.current_user)):
+            _user: dict = Depends(
+               entitlements.meter("screens", "screens_per_day"))):
     rows = screens.buffett_screen(body.min_score)
     return _envelope(rows, scanned=_UNIVERSE_SIZE, evaluable=None)
 
 
 @router.post("/graham")
 def graham(body: GrahamScreenRequest,
-           _user: dict = Depends(auth.current_user)):
+           _user: dict = Depends(
+               entitlements.meter("screens", "screens_per_day"))):
     rows = screens.graham_screen(body.growth_default, body.bond_yield,
                                  body.min_mos)
     return _envelope(rows, scanned=_UNIVERSE_SIZE, evaluable=None)
@@ -208,6 +211,7 @@ def graham(body: GrahamScreenRequest,
 
 @router.post("/etfs")
 def etfs(body: ETFScreenRequest,
-         _user: dict = Depends(auth.current_user)):
+         _user: dict = Depends(
+               entitlements.meter("screens", "screens_per_day"))):
     rows = screens.etf_screen(body.sort_by, body.sector)
     return _envelope(rows, scanned=len(screens.ETF_UNIVERSE), evaluable=None)

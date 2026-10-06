@@ -33,7 +33,7 @@ from backend.body_limit import BodyLimitMiddleware
 from backend.ratelimit import RateLimitMiddleware
 from backend.security_headers import SecurityHeadersMiddleware
 from backend.reliability import DeadlineMiddleware, configure_thread_pool
-from backend import invites, sessions
+from backend import invites, plans, sessions, usage
 from backend.config import CORS_ORIGINS, DATA_DIR
 
 # Point the session store at the data volume. Done at import rather than in a
@@ -42,8 +42,10 @@ from backend.config import CORS_ORIGINS, DATA_DIR
 # configured store instead of a RuntimeError.
 sessions.configure(DATA_DIR)
 invites.configure(DATA_DIR)
+usage.configure(DATA_DIR)
 from backend.routes import (
     admin,
+    billing,
     passkeys,
     ai,
     alerts,
@@ -146,7 +148,7 @@ _V1 = "/api/v1"
 for r in (auth.router, market.router, fundamentals.router, screens.router,
           options.router, value_chain.router, ai.router, watchlists.router,
           macro.router, deals.router, admin.router, portfolio.router,
-          passkeys.router,
+          billing.router, passkeys.router,
           alerts.router, notes.router, workspaces.router, stream.router,
           data_api.router):
     app.include_router(r, prefix=_V1)
@@ -173,6 +175,27 @@ def _bound_threads() -> None:
     """
     n = configure_thread_pool()
     _log.info("worker thread pool limited to %s", n or "default")
+
+
+@app.on_event("startup")
+def _grandfather_plans() -> None:
+    """Stamp a plan on accounts that predate plans existing.
+
+    Deliberately the PAID tier. These accounts were created when the limits
+    were whatever each router hardcoded (40 alerts, 10 portfolios), and nobody
+    agreed to less — defaulting them to free would retroactively cut a working
+    account below what it already holds. New accounts get free; existing ones
+    keep working. No-op after the first boot.
+    """
+    try:
+        from lib import auth as user_store
+        n = user_store.backfill_plans(plans.PRO)
+        if n:
+            _log.info("grandfathered %s pre-existing account(s) to %s", n, plans.PRO)
+    except Exception:
+        # Must never stop the app booting; the worst case is that an account
+        # reads as free until someone sets its plan.
+        _log.exception("plan backfill failed")
 
 
 @app.on_event("startup")

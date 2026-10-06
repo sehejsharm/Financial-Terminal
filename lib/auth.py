@@ -29,6 +29,15 @@ USERS_PATH = DATA_DIR / "users.json"
 INITIAL_PW_PATH = DATA_DIR / "INITIAL_ADMIN_PASSWORD.txt"
 
 ROLE_MASTER = "master_admin"
+
+# The plan a NEW account starts on. Duplicated from backend.plans.FREE rather
+# than imported, because lib/ sits below backend/ and must not depend upward.
+# tests/test_entitlements.py asserts the two agree, so they cannot drift.
+#
+# It matters that create_user sets this explicitly: an account written with no
+# `plan` key at all looks, to backfill_plans, like a record that predates plans
+# existing — and would be grandfathered onto the PAID tier at the next restart.
+DEFAULT_PLAN = "free"
 ROLE_USER = "user"
 _ITERATIONS = 200_000
 
@@ -192,7 +201,45 @@ def verify_credentials(username: str, password: str) -> dict | None:
         return None
     if _hash(password, rec["salt"]) != rec["hash"]:
         return None
-    return {"username": rec["display"], "role": rec["role"]}
+    return {"username": rec["display"], "role": rec["role"],
+            "plan": rec.get("plan", "")}
+
+
+def set_plan(username: str, plan: str) -> tuple[bool, str]:
+    """Move an account to a plan. The only way a plan changes."""
+    data = _load()
+    rec = data["users"].get((username or "").strip().lower())
+    if not rec:
+        return False, "User not found."
+    rec["plan"] = plan
+    rec["plan_since"] = _now()
+    _save(data)
+    return True, f"{rec['display']} moved to {plan}."
+
+
+def backfill_plans(default_plan: str) -> int:
+    """Stamp a plan on accounts that predate plans existing. Returns how many.
+
+    GRANDFATHERED DELIBERATELY, and `default_plan` is expected to be the PAID
+    tier, not the free one. These accounts were created when the limits were
+    whatever the routers hardcoded — 40 alerts, 10 portfolios — and nobody
+    agreed to less. Defaulting them to free would retroactively cut a working
+    account below what it already holds, which is the one thing a limit change
+    must never do. New accounts get the free tier; existing ones keep working.
+
+    Runs once at startup and is a no-op afterwards, since it only touches
+    records with no `plan` key at all.
+    """
+    data = _load()
+    touched = 0
+    for rec in data["users"].values():
+        if "plan" not in rec:
+            rec["plan"] = default_plan
+            rec["plan_since"] = rec.get("created") or _now()
+            touched += 1
+    if touched:
+        _save(data)
+    return touched
 
 
 def find_by_email(email: str) -> dict | None:
@@ -210,7 +257,8 @@ def find_by_email(email: str) -> dict | None:
             if not rec.get("active", True):
                 return None
             return {"username": rec["display"], "role": rec["role"],
-                    "email": rec.get("email", "")}
+                    "email": rec.get("email", ""),
+                    "plan": rec.get("plan", "")}
     return None
 
 
@@ -230,7 +278,8 @@ def get_user(username: str) -> dict | None:
     rec = _load()["users"].get((username or "").strip().lower())
     if not rec or not rec.get("active", True):
         return None
-    return {"username": rec["display"], "role": rec["role"]}
+    return {"username": rec["display"], "role": rec["role"],
+            "plan": rec.get("plan", "")}
 
 
 def create_user(username: str, password: str | None = None,
@@ -263,6 +312,7 @@ def create_user(username: str, password: str | None = None,
         "display": username, "salt": salt, "hash": _hash(password, salt),
         "role": role if role in (ROLE_USER, ROLE_MASTER) else ROLE_USER,
         "active": True, "created": _now(),
+        "plan": DEFAULT_PLAN,
         "email": (email or "").strip(),
         # Shown in the admin list so an account waiting on its invite is
         # distinguishable from one whose owner simply has not logged in.
@@ -314,7 +364,8 @@ def list_users() -> list[dict]:
          "created": r.get("created", ""),
          "created_at": r.get("created") or None,
          "email": r.get("email", ""),
-         "pending": bool(r.get("pending")),}
+         "pending": bool(r.get("pending")),
+         "plan": r.get("plan", ""),}
         for r in data["users"].values()
     ]
 

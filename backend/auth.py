@@ -26,6 +26,12 @@ def issue_token(user: dict) -> dict:
     payload = {
         "sub": user["username"],
         "role": user.get("role", "user"),
+        # The plan rides in the token so an entitlement check is free rather
+        # than a user-table read on every request. It can therefore be up to
+        # one access-token lifetime stale (15 minutes), which is fine for a
+        # DOWNGRADE and not fine for an upgrade — so the client forces a
+        # refresh after a plan change, and /billing/plan always reads live.
+        "plan": user.get("plan") or "",
         "iat": int(now.timestamp()),
         "exp": int(exp.timestamp()),
     }
@@ -64,7 +70,8 @@ def current_user(credentials: HTTPAuthorizationCredentials | None
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Token expired")
     except jwt.InvalidTokenError:
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Invalid token")
-    return {"username": claims["sub"], "role": claims.get("role", "user")}
+    return {"username": claims["sub"], "role": claims.get("role", "user"),
+            "plan": claims.get("plan") or ""}
 
 
 def decode_token(token: str | None) -> dict | None:
@@ -76,7 +83,8 @@ def decode_token(token: str | None) -> dict | None:
         claims = jwt.decode(token, get_jwt_secret(), algorithms=[JWT_ALGO])
     except jwt.InvalidTokenError:
         return None
-    return {"username": claims["sub"], "role": claims.get("role", "user")}
+    return {"username": claims["sub"], "role": claims.get("role", "user"),
+            "plan": claims.get("plan") or ""}
 
 
 def require_master_admin(user: dict = Depends(current_user)) -> dict:

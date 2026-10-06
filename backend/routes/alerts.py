@@ -17,7 +17,7 @@ from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 
-from backend import auth, providers
+from backend import auth, entitlements, providers
 from backend.storage import get_storage
 from lib import notify
 
@@ -28,7 +28,6 @@ _MAX_PUSH_SUBS = 5
 KINDS = {"price", "pe", "spread_10y2y", "move", "volume_spike"}
 _TICKER_KINDS = {"price", "pe", "move", "volume_spike"}
 _MAX_EVENTS = 50
-_MAX_ALERTS = 40
 
 
 class AlertCreate(BaseModel):
@@ -57,8 +56,7 @@ def create(body: AlertCreate, user: dict = Depends(auth.current_user)):
     if body.kind in _TICKER_KINDS and not (body.ticker or "").strip():
         raise HTTPException(400, f"'{body.kind}' alerts need a ticker")
     doc = _doc(user["username"])
-    if len(doc["alerts"]) >= _MAX_ALERTS:
-        raise HTTPException(400, f"Alert limit reached ({_MAX_ALERTS}).")
+    entitlements.ensure_room(user, "max_alerts", len(doc["alerts"]), "alerts")
     from lib.resolve import canonicalize
     raw_ticker = body.ticker.strip().upper() if body.ticker else None
     alert = {

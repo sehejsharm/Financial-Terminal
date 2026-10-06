@@ -24,7 +24,10 @@ from fastapi.testclient import TestClient
 #               no credentials; returns {ok, ts} only.
 #   /version  — APP_VERSION plus cache entry counts. Mild infrastructure
 #               disclosure, no secret, and useful without a login.
-INTENTIONALLY_PUBLIC = ["/healthz", "/version"]
+#   /api/v1/billing/plans — the price list. A pricing table people cannot
+#               read until after they sign up is not a pricing table. Contains
+#               no account data: it is the same catalogue for everyone.
+INTENTIONALLY_PUBLIC = ["/healthz", "/version", "/api/v1/billing/plans"]
 
 # Must NOT answer an anonymous caller.
 MUST_BE_GATED = [

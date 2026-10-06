@@ -12,7 +12,7 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel, Field
 
-from backend import auth
+from backend import auth, entitlements
 from backend.storage import get_storage
 
 router = APIRouter(prefix="/workspaces", tags=["workspaces"])
@@ -70,6 +70,15 @@ def get_layouts(user: dict = Depends(auth.current_user)):
 
 @router.put("")
 def put_layouts(body: LayoutsBody, user: dict = Depends(auth.current_user)):
+    # This endpoint replaces the whole collection, so the ceiling is checked
+    # against what is being SAVED rather than what already exists — and only
+    # when the count is going up. A user whose plan narrowed keeps the layouts
+    # they have and can still reorder or edit them; they just cannot add more.
+    existing = (get_storage().user_doc("workspaces", user["username"],
+                                       {"layouts": []}) or {}).get("layouts", [])
+    if len(body.layouts) > len(existing):
+        entitlements.ensure_room(user, "max_workspaces", len(existing),
+                                 "saved workspaces")
     doc = body.model_dump(exclude_none=False)
     # Drop empty legacy fields so v2 documents don't carry dead weight.
     for layout in doc.get("layouts", []):
