@@ -195,6 +195,30 @@ def verify_credentials(username: str, password: str) -> dict | None:
     return {"username": rec["display"], "role": rec["role"]}
 
 
+def find_by_email(email: str) -> dict | None:
+    """The account for an email address, or None.
+
+    Used by the password-reset request, where people type the address rather
+    than the username. Returns the sanitized dict, and honours `active` so a
+    deactivated account cannot be reset back into use.
+    """
+    want = (email or "").strip().lower()
+    if not want:
+        return None
+    for rec in _load()["users"].values():
+        if (rec.get("email") or "").strip().lower() == want:
+            if not rec.get("active", True):
+                return None
+            return {"username": rec["display"], "role": rec["role"],
+                    "email": rec.get("email", "")}
+    return None
+
+
+def email_for(username: str) -> str:
+    rec = _load()["users"].get((username or "").strip().lower())
+    return (rec or {}).get("email", "") or ""
+
+
 def get_user(username: str) -> dict | None:
     """The sanitized user dict, without checking a password.
 
@@ -209,9 +233,25 @@ def get_user(username: str) -> dict | None:
     return {"username": rec["display"], "role": rec["role"]}
 
 
-def create_user(username: str, password: str, role: str = ROLE_USER) -> tuple[bool, str]:
+def create_user(username: str, password: str | None = None,
+                role: str = ROLE_USER, email: str = "") -> tuple[bool, str]:
+    """Create an account.
+
+    `password=None` creates a PENDING account: the stored hash is of a random
+    value nobody has ever seen, so password login is impossible until the user
+    sets one through an invite link. That is deliberately not the same as
+    "no hash" — an empty or absent hash is the kind of thing a later code path
+    treats as "any password matches", and this way there is nothing special to
+    remember about the record.
+    """
     username = (username or "").strip()
-    if not username or not password:
+    if not username:
+        return False, "A username is required."
+    pending = password is None
+    if pending:
+        # Unguessable and never surfaced. The invite token is the only way in.
+        password = secrets.token_urlsafe(48)
+    elif not password:
         return False, "Username and password are required."
     if len(password) < 6:
         return False, "Password must be at least 6 characters."
@@ -223,6 +263,10 @@ def create_user(username: str, password: str, role: str = ROLE_USER) -> tuple[bo
         "display": username, "salt": salt, "hash": _hash(password, salt),
         "role": role if role in (ROLE_USER, ROLE_MASTER) else ROLE_USER,
         "active": True, "created": _now(),
+        "email": (email or "").strip(),
+        # Shown in the admin list so an account waiting on its invite is
+        # distinguishable from one whose owner simply has not logged in.
+        "pending": pending,
     }
     _save(data)
     return True, f"User '{username}' created."
@@ -253,6 +297,8 @@ def reset_password(username: str, password: str) -> tuple[bool, str]:
         return False, "User not found."
     rec["salt"] = secrets.token_hex(16)
     rec["hash"] = _hash(password, rec["salt"])
+    # Setting a password is what completes an invite.
+    rec["pending"] = False
     _save(data)
     return True, f"Password updated for '{rec['display']}'."
 
@@ -266,7 +312,9 @@ def list_users() -> list[dict]:
         {"username": r["display"], "role": r["role"],
          "active": r.get("active", True),
          "created": r.get("created", ""),
-         "created_at": r.get("created") or None}
+         "created_at": r.get("created") or None,
+         "email": r.get("email", ""),
+         "pending": bool(r.get("pending")),}
         for r in data["users"].values()
     ]
 

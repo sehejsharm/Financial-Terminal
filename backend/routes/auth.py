@@ -25,10 +25,13 @@ from fastapi import (APIRouter, Depends, HTTPException, Request, Response,
                      status)
 from fastapi.responses import JSONResponse
 
-from backend import auth, csrf, sessions
+from backend import auth, csrf, invites, mailer, sessions
 from backend.config import REFRESH_COOKIE
+from backend.invite_mail import send_reset
 from backend.session_cookies import (clear_session, client_meta, set_session)
-from backend.schemas import LoginRequest, LoginResponse, MeResponse
+from backend.schemas import (AcceptInviteRequest, ForgotPasswordRequest,
+                             LoginRequest, LoginResponse, MeResponse)
+from lib import auth as user_store
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
@@ -163,3 +166,110 @@ def revoke_session(session_id: str, user: dict = Depends(auth.current_user)):
 @router.get("/me", response_model=MeResponse)
 def me(user: dict = Depends(auth.current_user)):
     return user
+
+
+# ── invites and password resets ──────────────────────────────────────────
+#
+# Public, because they are how someone who cannot sign in gets in. That makes
+# them the most carefully-worded endpoints here: everything they say has to be
+# useless to someone enumerating accounts.
+
+
+@router.get("/invite")
+def inspect_invite(token: str, purpose: str = invites.PURPOSE_INVITE):
+    """What the set-password page needs to render, without spending the token.
+
+    Deliberately read-only. Validating on page load must not consume the one
+    use the user needs for the submit — that would turn opening the link twice,
+    or a mail client prefetching it, into a dead invite.
+    """
+    if purpose not in (invites.PURPOSE_INVITE, invites.PURPOSE_RESET):
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Unknown purpose.")
+    rec = invites.peek(token, purpose)
+    if rec is None:
+        # One message for expired, already-used and never-existed. Telling
+        # them apart would confirm which tokens were once real.
+        raise HTTPException(
+            status.HTTP_404_NOT_FOUND,
+            "This link is no longer valid. It may have expired or already "
+            "been used — ask for a new one.")
+    return {"username": rec["username"], "email": rec.get("email", ""),
+            "purpose": rec["purpose"]}
+
+
+@router.post("/invite/accept", response_model=LoginResponse)
+def accept_invite(body: AcceptInviteRequest, request: Request,
+                  response: Response,
+                  purpose: str = invites.PURPOSE_INVITE):
+    """Set the password a token authorises, then sign the user in.
+
+    Signing them in immediately is the point of doing it this way: the
+    alternative is setting a password and then being asked for it, which makes
+    people think it did not work.
+    """
+    if purpose not in (invites.PURPOSE_INVITE, invites.PURPOSE_RESET):
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Unknown purpose.")
+    rec = invites.consume(token=body.token, purpose=purpose)
+    if rec is None:
+        raise HTTPException(
+            status.HTTP_404_NOT_FOUND,
+            "This link is no longer valid. It may have expired or already "
+            "been used — ask for a new one.")
+
+    ok, msg = user_store.reset_password(rec["username"], body.password)
+    if not ok:
+        # The token is already spent at this point, which is the safe
+        # direction to fail: a weak password means asking for a new link
+        # rather than leaving a live credential in a mailbox.
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, msg)
+
+    user = auth.user_for_session(rec["username"])
+    if user is None:
+        raise HTTPException(status.HTTP_403_FORBIDDEN,
+                            "This account is not active.")
+
+    # Every other session ends. On a RESET this is the main event — the reason
+    # people reset a password is that someone else may have it, and leaving
+    # existing sessions alive would defeat the whole exercise.
+    sessions.revoke_all(rec["username"])
+    refresh = sessions.create(user["username"], **client_meta(request))
+    csrf_token = set_session(response, refresh)
+    return {**auth.issue_token(user), "csrf_token": csrf_token}
+
+
+@router.post("/forgot-password")
+def forgot_password(body: ForgotPasswordRequest, request: Request):
+    """Start a password reset.
+
+    ALWAYS reports the same thing, whether or not the account exists. An
+    endpoint that says "no such user" is an account enumerator, and this one is
+    public and unauthenticated. The cost is that someone who mistypes their
+    address waits for an email that never comes; the alternative is handing
+    over a list of who banks here.
+    """
+    identifier = (body.email or body.username or "").strip()
+    generic = {"ok": True,
+               "message": "If that account exists, a reset link is on its way. "
+                          "Check your email, including the spam folder."}
+    if not identifier:
+        return generic
+
+    record = (user_store.find_by_email(identifier) if "@" in identifier
+              else user_store.get_user(identifier))
+    if record is None:
+        return generic
+    email = record.get("email") or user_store.email_for(record["username"])
+    if not email:
+        # Nothing to send to. Still the generic answer: "that account has no
+        # email on file" is itself a statement that the account exists.
+        return generic
+
+    token = invites.issue(record["username"], email, invites.PURPOSE_RESET)
+    try:
+        send_reset(email, record["username"], token)
+    except mailer.MailError:
+        # Logged by the mailer. Not surfaced, for the same reason as above —
+        # and a mail outage is not something the person at the keyboard can
+        # act on differently.
+        pass
+    return generic

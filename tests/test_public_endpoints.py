@@ -179,6 +179,16 @@ class TestTheAuthFreeRoutesAreEnumerated:
         # The login and passkey ceremony endpoints cannot require a token —
         # they are how you get one. They are rate-limited instead.
         credential_issuing = {
+            # How someone who CANNOT sign in gets in: an invite link, or a
+            # reset. Authenticated by the single-use token in the request
+            # rather than by a session. Each is deliberately non-enumerating —
+            # one message for expired, used and never-existed, and
+            # forgot-password answers identically whether or not the account
+            # exists — and each is rate-limited tightly (see
+            # backend/ratelimit.py) because token guessing is the attack.
+            "/api/v1/auth/invite",
+            "/api/v1/auth/invite/accept",
+            "/api/v1/auth/forgot-password",
             "/api/v1/auth/login",
             "/api/v1/auth/passkey/support",
             "/api/v1/auth/passkey/login/begin",

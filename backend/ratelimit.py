@@ -47,6 +47,11 @@ _RULES: list[tuple[str, frozenset[str] | None, int, int]] = [
     # An assertion cannot be brute-forced (it needs a valid signature), so the
     # ceiling here is really about capping challenge minting.
     ("/api/v1/auth/passkey", None, 40, 60),
+    # Invite and reset links are guessed by trying tokens, and the
+    # forgot-password endpoint is public and sends mail — so it is also a way
+    # to use this app to spam a third party. Tight on both counts.
+    ("/api/v1/auth/invite", None, 20, 60),
+    ("/api/v1/auth/forgot-password", None, 5, 60),
     ("/api/v1/alerts", frozenset({"POST", "PUT", "DELETE"}), 30, 60),
     ("/api/v1/admin", None, 60, 60),
     ("/api/v1/ai", frozenset({"POST"}), 20, 60),   # LLM calls cost quota

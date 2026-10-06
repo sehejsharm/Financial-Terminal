@@ -82,5 +82,28 @@ class WatchlistCreate(BaseModel):
 # ── admin ────────────────────────────────────────────────────────────────────
 class CreateUserRequest(BaseModel):
     username: str
-    password: str
+    # Optional now. Omit it and the user is invited by email and sets their own
+    # password, which is the preferred path — an admin who types a password
+    # knows their users' passwords and has to deliver them over some channel
+    # that keeps a copy. Still accepted so the existing admin screen keeps
+    # working; see backend/routes/admin.py.
+    password: str | None = None
     role: str = "user"
+    email: str | None = None
+
+
+class InviteRequest(BaseModel):
+    username: str
+    email: str
+    role: str = "user"
+
+
+class AcceptInviteRequest(BaseModel):
+    token: str
+    password: str
+
+
+class ForgotPasswordRequest(BaseModel):
+    # Either identifier works: people remember one or the other.
+    username: str | None = None
+    email: str | None = None

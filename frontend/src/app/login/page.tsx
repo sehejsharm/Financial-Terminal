@@ -30,6 +30,11 @@ export default function LoginPage() {
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [busy, setBusy] = useState(false);
+  // The reset flow. `sent` holds the server's deliberately vague confirmation,
+  // which is the same whether or not the account exists.
+  const [resetting, setResetting] = useState(false);
+  const [resetId, setResetId] = useState("");
+  const [sent, setSent] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   // null while the capability probe is still running, so the button does not
@@ -76,6 +81,23 @@ export default function LoginPage() {
       setBusy(false);
     }
   }, [router]);
+
+  async function onForgot(e: FormEvent) {
+    e.preventDefault();
+    setBusy(true); setError(null);
+    try {
+      const r = await api.forgotPassword(resetId);
+      setSent(r.message);
+    } catch {
+      // Even a failure here is reported as the generic message. Anything
+      // else — including "we could not send mail" — is a statement about
+      // whether that account exists.
+      setSent("If that account exists, a reset link is on its way. Check "
+              + "your email, including the spam folder.");
+    } finally {
+      setBusy(false);
+    }
+  }
 
   async function onSubmit(e: FormEvent) {
     e.preventDefault();
@@ -168,6 +190,40 @@ export default function LoginPage() {
               </button>
             )}
           </form>
+        )}
+
+        {passwordFormVisible && !resetting && !sent && (
+          <button
+            type="button"
+            onClick={() => { setResetting(true); setError(null); }}
+            className="text-[10px] text-mut hover:text-txt underline text-center"
+          >
+            Forgot your password?
+          </button>
+        )}
+
+        {resetting && !sent && (
+          <form onSubmit={onForgot} className="flex flex-col gap-2 border-t border-line2 pt-3">
+            <label className="label-xs" htmlFor="reset-id">
+              Your username or email
+            </label>
+            <input
+              id="reset-id"
+              autoFocus
+              value={resetId}
+              onChange={(e) => setResetId(e.target.value)}
+              className="input-bare"
+            />
+            <button disabled={busy} className="btn-ghost !py-1 text-[11px] mt-1 disabled:opacity-60">
+              {busy ? "Sending…" : "Send a reset link"}
+            </button>
+          </form>
+        )}
+
+        {sent && (
+          <div className="border-t border-line2 pt-3 text-xs text-mut leading-relaxed">
+            {sent}
+          </div>
         )}
 
         {error && <div className="text-red text-xs mt-1">{error}</div>}

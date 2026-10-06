@@ -695,6 +695,33 @@ export const api = {
     ),
   me: () => apiFetch<{ username: string; role: string }>("/api/v1/auth/me"),
 
+  // Invites and password resets. inspectInvite is read-only on the server:
+  // checking a link must not spend the single use the submit needs.
+  inspectInvite: (token: string, purpose = "invite") =>
+    apiFetch<{ username: string; email: string; purpose: string }>(
+      `/api/v1/auth/invite?token=${encodeURIComponent(token)}`
+      + `&purpose=${encodeURIComponent(purpose)}`),
+  acceptInvite: (token: string, password: string, purpose = "invite") =>
+    apiFetch<{ access_token: string; expires_at: string; role: string;
+               csrf_token?: string }>(
+      `/api/v1/auth/invite/accept?purpose=${encodeURIComponent(purpose)}`,
+      { method: "POST", body: JSON.stringify({ token, password }) }),
+  // Always reports the same thing whether or not the account exists — the
+  // endpoint is public, and one that said "no such user" would be an account
+  // enumerator.
+  forgotPassword: (identifier: string) =>
+    apiFetch<{ ok: boolean; message: string }>("/api/v1/auth/forgot-password",
+      { method: "POST",
+        body: JSON.stringify(identifier.includes("@")
+          ? { email: identifier } : { username: identifier }) }),
+  inviteUser: (username: string, email: string, role = "user") =>
+    apiFetch<{ ok: boolean; message: string }>("/api/v1/admin/invites",
+      { method: "POST", body: JSON.stringify({ username, email, role }) }),
+  resendInvite: (username: string) =>
+    apiFetch<{ ok: boolean; message: string }>(
+      `/api/v1/admin/invites/${encodeURIComponent(username)}/resend`,
+      { method: "POST" }),
+
   // Where this account is signed in, so someone can spot a device they do
   // not recognise and end it.
   sessions: () => apiFetch<{ sessions: SessionRecord[] }>("/api/v1/auth/sessions"),
