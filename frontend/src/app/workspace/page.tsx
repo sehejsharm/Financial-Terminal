@@ -326,7 +326,7 @@ function WorkspaceBody() {
               {l.name}
             </button>
             <button onClick={() => deleteLayout(l)} title={`Delete "${l.name}"`}
-                    className="px-1 py-1 rounded-r border border-l-0 border-line2 text-mut hover:text-red">
+                    className="px-1 py-1 rounded-r border border-l-0 border-line2 text-mut hover:text-red hit-target">
               <Trash2 size={10} />
             </button>
           </span>
@@ -364,7 +364,7 @@ function WorkspaceBody() {
       {err && (
         <div className="hud p-3 mb-3 text-xs text-red flex items-center gap-3">
           <span className="flex-1">{err}</span>
-          <button onClick={() => setErr(null)} className="text-mut hover:text-txt"><X size={12} /></button>
+          <button onClick={() => setErr(null)} className="text-mut hover:text-txt hit-target"><X size={12} /></button>
         </div>
       )}
 
@@ -408,28 +408,28 @@ function WorkspaceBody() {
                     <button onClick={() => update((x) => addPane(x, row.id, "news"))}
                             disabled={row.panes.length >= MAX_PANES_PER_ROW || total >= MAX_PANES}
                             title="Add a pane to this row"
-                            className="h-5 rounded border border-line2 flex items-center justify-center
+                            className="h-5 rounded border border-line2 flex items-center justify-center hit-target
                                        text-mut hover:text-amber hover:border-amber
                                        disabled:opacity-25 disabled:hover:text-mut disabled:hover:border-line2">
                       <Plus size={11} />
                     </button>
                     <button onClick={() => update((x) => moveRow(x, row.id, -1))}
                             disabled={ri === 0} title="Move row up"
-                            className="h-5 rounded border border-line2 flex items-center justify-center
+                            className="h-5 rounded border border-line2 flex items-center justify-center hit-target
                                        text-mut hover:text-amber hover:border-amber
                                        disabled:opacity-25 disabled:hover:text-mut disabled:hover:border-line2">
                       <ChevronUp size={11} />
                     </button>
                     <button onClick={() => update((x) => moveRow(x, row.id, 1))}
                             disabled={ri === ws.rows.length - 1} title="Move row down"
-                            className="h-5 rounded border border-line2 flex items-center justify-center
+                            className="h-5 rounded border border-line2 flex items-center justify-center hit-target
                                        text-mut hover:text-amber hover:border-amber
                                        disabled:opacity-25 disabled:hover:text-mut disabled:hover:border-line2">
                       <ChevronDown size={11} />
                     </button>
                     <button onClick={() => update((x) => removeRow(x, row.id))}
                             disabled={ws.rows.length <= 1} title="Remove this row"
-                            className="h-5 rounded border border-line2 flex items-center justify-center
+                            className="h-5 rounded border border-line2 flex items-center justify-center hit-target
                                        text-mut hover:text-red hover:border-red
                                        disabled:opacity-25 disabled:hover:text-mut disabled:hover:border-line2">
                       <Trash2 size={10} />

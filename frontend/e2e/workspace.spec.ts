@@ -1,6 +1,6 @@
 import { expect, test } from "@playwright/test";
 
-import { ADMIN_PASS, ADMIN_USER, BOUNDARY_TEXT } from "./helpers";
+import { ADMIN_PASS, ADMIN_USER, BOUNDARY_TEXT, signIn, apiToken } from "./helpers";
 
 /**
  * Workspace: the tiling grid, pane linking and desk persistence.
@@ -9,28 +9,18 @@ import { ADMIN_PASS, ADMIN_USER, BOUNDARY_TEXT } from "./helpers";
  * structure — which is exactly what the linking model guarantees.
  */
 
-/** One login for the file; per-test login trips the backend's 10/min guard. */
-let tokenPromise: Promise<string> | null = null;
 
 test.beforeEach(async ({ page }) => {
-  tokenPromise ??= page.request
-    .post("http://localhost:8000/api/v1/auth/login", {
-      data: { username: ADMIN_USER, password: ADMIN_PASS },
-    })
-    .then(async (res) => {
-      if (!res.ok()) throw new Error(`login failed: ${res.status()}`);
-      return (await res.json()).access_token as string;
-    });
-
-  await page.context().addCookies([{
-    name: "mb_token", value: await tokenPromise,
-    url: "http://localhost:3000", sameSite: "Lax",
-  }]);
+  // Sign in through the shared helper. These specs each carried their own
+  // copy of a cookie-injection login, which is why fixing helpers.ts alone
+  // left them all on the sign-in screen: the duplicated code set an mb_token
+  // cookie that nothing reads any more.
+  await signIn(page);
   // Wipe saved desks server-side. The e2e backend keeps one data dir across
   // runs, so without this a desk saved by an earlier run (or an earlier test)
   // leaks in and the pane/desk counts stop being deterministic.
   await page.request.put("http://localhost:8000/api/v1/workspaces", {
-    headers: { Authorization: `Bearer ${await tokenPromise}` },
+    headers: { Authorization: `Bearer ${await apiToken(page)}` },
     data: { layouts: [], active_id: null },
   });
   // Forget which desk was last open so every test starts from the default.
@@ -194,7 +184,7 @@ test("dragging the divider actually resizes the panes", async ({ page }) => {
 
 test("a corrupt saved desk falls back instead of white-screening", async ({ page }) => {
   await page.request.put("http://localhost:8000/api/v1/workspaces", {
-    headers: { Authorization: `Bearer ${await tokenPromise}` },
+    headers: { Authorization: `Bearer ${await apiToken(page)}` },
     data: { layouts: [{ id: "junk", name: "Junk", rows: [] }] },
   });
   await page.reload();

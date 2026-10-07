@@ -437,7 +437,7 @@ export default function AlertsPage() {
                   </span>
                 )}
                 {a.triggered_at && <span className="text-[10px] text-mut">fired {a.triggered_at.slice(0, 16).replace("T", " ")}</span>}
-                <button onClick={() => del(a.id)} className="text-mut hover:text-red" title="Delete alert">
+                <button onClick={() => del(a.id)} className="text-mut hover:text-red hit-target" title="Delete alert">
                   <Trash2 size={13} />
                 </button>
               </div>

@@ -59,6 +59,14 @@ COOKIE_SECURE = IS_PRODUCTION or (os.getenv("COOKIE_SECURE") == "1")
 # See backend/csrf.py for why a readable cookie is the right shape here.
 CSRF_COOKIE = "mb_csrf"
 CSRF_HEADER = "X-CSRF-Token"
+# Site-wide, unlike the refresh cookie, and this is load-bearing rather than
+# lazy. The client has to READ this value to echo it back, and document.cookie
+# only exposes cookies whose path is a prefix of the current page's path
+# (RFC 6265 5.1.4). Scoped to /api/v1/auth it was invisible to a page at "/",
+# so the refresh on first load could not send the header and got a 403 — which
+# signed the user out on every reload. The token is worthless on its own, so a
+# wider path costs nothing; the SESSION cookie stays narrowly scoped.
+CSRF_COOKIE_PATH = "/"
 
 
 def get_jwt_secret() -> str:

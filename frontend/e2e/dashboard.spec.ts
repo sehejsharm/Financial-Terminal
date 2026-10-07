@@ -1,6 +1,6 @@
 import { expect, test } from "@playwright/test";
 
-import { ADMIN_PASS, ADMIN_USER, BOUNDARY_TEXT } from "./helpers";
+import { ADMIN_PASS, ADMIN_USER, BOUNDARY_TEXT, signIn } from "./helpers";
 
 /**
  * Dashboard: layout editing, region switching and persistence.
@@ -19,24 +19,13 @@ import { ADMIN_PASS, ADMIN_USER, BOUNDARY_TEXT } from "./helpers";
  * working as designed, so the suite adapts to it rather than the other way
  * round. It's also several seconds faster.
  */
-/** Token fetched at most once for the whole file, then replayed as a cookie. */
-let tokenPromise: Promise<string> | null = null;
 
 test.beforeEach(async ({ page }) => {
-  tokenPromise ??= page.request
-    .post("http://localhost:8000/api/v1/auth/login", {
-      data: { username: ADMIN_USER, password: ADMIN_PASS },
-    })
-    .then(async (res) => {
-      if (!res.ok()) throw new Error(`login failed: ${res.status()}`);
-      return (await res.json()).access_token as string;
-    });
-
-  // The app reads its JWT from a non-HttpOnly cookie (see lib/api.ts).
-  await page.context().addCookies([{
-    name: "mb_token", value: await tokenPromise,
-    url: "http://localhost:3000", sameSite: "Lax",
-  }]);
+  // Sign in through the shared helper. These specs each carried their own
+  // copy of a cookie-injection login, which is why fixing helpers.ts alone
+  // left them all on the sign-in screen: the duplicated code set an mb_token
+  // cookie that nothing reads any more.
+  await signIn(page);
 
   // Start from a known state. BOTH keys matter: the region-switch test
   // persists a home region, and leaving it set would rebuild every later

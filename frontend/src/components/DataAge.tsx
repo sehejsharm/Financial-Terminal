@@ -33,10 +33,15 @@ export function DataAge({
           disabled={busy}
           aria-label="Refresh now, bypassing the cache"
           title="Refresh now (bypasses cache)"
-          // p-1.5 widens the tap area past the 24px AA floor without pushing
-          // this inline stamp around; -m-1 pulls the extra padding back out of
-          // the layout so nothing shifts.
-          className="p-1.5 -m-1 hover:text-amber disabled:opacity-40 transition-colors"
+          // Widens the tap area to the 24px WCAG 2.5.8 AA floor without
+          // pushing this inline stamp around; -m-1 pulls the extra padding
+          // back out of the layout so nothing shifts.
+          //
+          // min-h/min-w rather than padding alone, because padding alone was
+          // one pixel short: p-1.5 is 6px a side and the icon is 11px, which
+          // measures 23x23. The previous comment here claimed it cleared the
+          // floor, and it very nearly did.
+          className="p-1.5 -m-1 min-w-6 min-h-6 inline-flex items-center justify-center hover:text-amber disabled:opacity-40 transition-colors"
         >
           <RefreshCw size={11} className={busy ? "animate-spin" : ""} />
         </button>

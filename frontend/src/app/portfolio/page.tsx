@@ -63,7 +63,7 @@ function LivePositionRow({ p, onClose }: { p: PortfolioRow; onClose: (id: string
       </td>
       <td className="px-3 py-2 num text-right">{p.weight != null ? `${fmtNum(p.weight, 1)}%` : "—"}</td>
       <td className="px-3 py-2 text-right">
-        <button onClick={() => onClose(p.id)} className="text-mut hover:text-red" title="Close position (with optional sell price)">
+        <button onClick={() => onClose(p.id)} className="text-mut hover:text-red hit-target" title="Close position (with optional sell price)">
           <Trash2 size={13} />
         </button>
       </td>
@@ -369,7 +369,7 @@ export default function PortfolioPage() {
             <span>{p.name}</span>
             <span className="num text-[10px] opacity-60">{p.positions}</span>
             <button onClick={(e) => { e.stopPropagation(); deletePortfolio(p); }}
-                    className="text-mut hover:text-red" title="Delete portfolio">
+                    className="text-mut hover:text-red hit-target" title="Delete portfolio">
               <X size={11} />
             </button>
           </div>

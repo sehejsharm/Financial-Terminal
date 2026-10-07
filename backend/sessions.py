@@ -43,6 +43,7 @@ Three choices worth stating:
 from __future__ import annotations
 
 import hashlib
+import os
 import secrets
 import threading
 import time
@@ -67,6 +68,22 @@ REFRESH_TTL_SECONDS = 30 * 24 * 3600
 # predecessor is answered with the successor that already exists; outside it,
 # the same request is treated as reuse.
 ROTATION_GRACE_SECONDS = 30
+
+# The most concurrent sessions one account may hold. Beyond this, creating a
+# new one signs out the least recently used.
+#
+# This is not a tidiness limit, it is a missing bound that showed up as a
+# measurement: the end-to-end suite signs in once per test and left 335 live
+# sessions on one account, which made the account screen render 335 rows and
+# put a 335-entry linear scan on every token refresh. A real user is the same
+# shape, more slowly — logging in daily from three devices for thirty days is
+# ninety live refresh tokens, every one of them a usable credential long after
+# the device was last touched.
+#
+# Ten is comfortably more devices than anyone uses at once, and the eviction is
+# least-recently-used, so the session being dropped is always the one nobody
+# has touched.
+MAX_SESSIONS_PER_USER = int(os.getenv("MAX_SESSIONS_PER_USER") or 10)
 
 _lock = threading.Lock()
 _path: Path | None = None
@@ -152,6 +169,7 @@ def create(username: str, *, user_agent: str = "", ip: str = "") -> str:
             "ip": ip,
         }
         _prune_locked(data)
+        _evict_surplus_locked(data, username)
         _save(data)
     return token
 
@@ -294,6 +312,24 @@ def list_for(username: str, *, current_token: str | None = None) -> list[dict]:
             })
     out.sort(key=lambda r: r["last_used"], reverse=True)
     return out
+
+
+def _evict_surplus_locked(data: dict[str, Any], username: str) -> None:
+    """Keep a user within MAX_SESSIONS_PER_USER, dropping the least recently
+    used. Caller holds _lock.
+
+    Least-recently-used rather than oldest-created: a session created months
+    ago and used this morning is someone's main machine, while one created
+    yesterday and never used again is a browser they tried once.
+    """
+    want = (username or "").lower()
+    mine = [(k, r) for k, r in data["sessions"].items()
+            if r.get("username", "").lower() == want]
+    if len(mine) <= MAX_SESSIONS_PER_USER:
+        return
+    mine.sort(key=lambda kv: kv[1].get("last_used", 0))
+    for key, _ in mine[:len(mine) - MAX_SESSIONS_PER_USER]:
+        del data["sessions"][key]
 
 
 def _prune_locked(data: dict[str, Any]) -> None:

@@ -14,8 +14,8 @@ from __future__ import annotations
 from fastapi import Request, Response
 
 from backend import csrf, ratelimit, sessions
-from backend.config import (COOKIE_SECURE, CSRF_COOKIE, REFRESH_COOKIE,
-                            REFRESH_COOKIE_PATH)
+from backend.config import (COOKIE_SECURE, CSRF_COOKIE, CSRF_COOKIE_PATH,
+                            REFRESH_COOKIE, REFRESH_COOKIE_PATH)
 
 
 def set_session(response: Response, refresh_token: str) -> str:
@@ -39,7 +39,10 @@ def set_session(response: Response, refresh_token: str) -> str:
         httponly=False,            # deliberately readable — see backend/csrf.py
         secure=COOKIE_SECURE,
         samesite="strict",
-        path=REFRESH_COOKIE_PATH,
+        # Site-wide, so a page at "/" can actually read it. See the note on
+        # CSRF_COOKIE_PATH in backend/config.py — scoping this to the auth
+        # path made it invisible to every page that needed it.
+        path=CSRF_COOKIE_PATH,
     )
     return token
 
@@ -54,8 +57,9 @@ def clear_session(response: Response) -> None:
     # so it works anyway today — but relying on attributes being ignored on
     # the way out, for a cookie whose whole job is being strict on the way in,
     # is the kind of detail that stops being true in one browser.
-    for name in (REFRESH_COOKIE, CSRF_COOKIE):
-        response.delete_cookie(name, path=REFRESH_COOKIE_PATH,
+    for name, path in ((REFRESH_COOKIE, REFRESH_COOKIE_PATH),
+                       (CSRF_COOKIE, CSRF_COOKIE_PATH)):
+        response.delete_cookie(name, path=path,
                                secure=COOKIE_SECURE, samesite="strict",
                                httponly=(name == REFRESH_COOKIE))
 

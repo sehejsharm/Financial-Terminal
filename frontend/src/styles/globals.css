@@ -306,3 +306,42 @@ a > .hud:hover, button > .hud:hover {
 @media (prefers-reduced-motion: reduce) {
   .vc-pulse > circle:first-of-type { animation: none; }
 }
+
+/* ── touch targets for icon-only controls ─────────────────────────────────
+   WCAG 2.2 (2.5.8, AA) asks for a 24×24 CSS-pixel minimum target. Measured
+   across every route at 360px, the app's icon-only buttons sat at 11×11,
+   14×14, 19×20 and 23×23 — a close/remove/collapse control that small is a
+   coin-flip on a phone, and the two smallest are the destructive ones.
+
+   This expands the TARGET without changing the icon. A pseudo-element
+   centred on the button covers 24×24 and takes the taps; nothing moves, no
+   padding is added, and the surrounding layout is untouched — which matters
+   because these controls sit in dense table rows and headers where real
+   padding would reflow the row.
+
+   Deliberately NOT applied to inline text links. 2.5.8 exempts targets in a
+   sentence, and inflating the footer's "Privacy · Terms · Disclosures" would
+   be a redesign rather than a fix.
+
+   `position: relative` is set here so callers cannot forget it — without a
+   positioned ancestor the overlay escapes to the nearest one and the hit area
+   lands somewhere else entirely. */
+.hit-target {
+  position: relative;
+}
+.hit-target::after {
+  content: "";
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 24px;
+  height: 24px;
+  transform: translate(-50%, -50%);
+  /* No background: this is an invisible catcher, not a visual change. */
+}
+/* An icon inside the button must not sit above the catcher, or the catcher's
+   extra area works everywhere except directly over the icon. */
+.hit-target > * {
+  position: relative;
+  z-index: 1;
+}

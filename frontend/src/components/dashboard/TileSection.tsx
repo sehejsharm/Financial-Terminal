@@ -63,7 +63,7 @@ export function TileSection({
     <section className="mb-7">
       <div className="flex items-center gap-2 mb-2 flex-wrap pb-1.5 border-b border-line2">
         <button onClick={onToggleCollapsed}
-                className="text-mut hover:text-amber shrink-0"
+                className="text-mut hover:text-amber shrink-0 hit-target"
                 title={section.collapsed ? "Expand" : "Collapse"}>
           {section.collapsed ? <ChevronRight size={14} /> : <ChevronDown size={14} />}
         </button>

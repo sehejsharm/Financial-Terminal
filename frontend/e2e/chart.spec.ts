@@ -1,6 +1,6 @@
 import { expect, test } from "@playwright/test";
 
-import { ADMIN_PASS, ADMIN_USER, BOUNDARY_TEXT } from "./helpers";
+import { ADMIN_PASS, ADMIN_USER, BOUNDARY_TEXT, signIn } from "./helpers";
 
 /**
  * Chart indicators, driven by a STUBBED price feed.
@@ -12,7 +12,6 @@ import { ADMIN_PASS, ADMIN_USER, BOUNDARY_TEXT } from "./helpers";
  * overlay and sub-pane is actually rendered by the real charting library.
  */
 
-let tokenPromise: Promise<string> | null = null;
 
 /** 260 deterministic daily bars — a drifting random-ish walk with volume. */
 function bars() {
@@ -32,18 +31,11 @@ function bars() {
 }
 
 test.beforeEach(async ({ page }) => {
-  tokenPromise ??= page.request
-    .post("http://localhost:8000/api/v1/auth/login", {
-      data: { username: ADMIN_USER, password: ADMIN_PASS },
-    })
-    .then(async (res) => {
-      if (!res.ok()) throw new Error(`login failed: ${res.status()}`);
-      return (await res.json()).access_token as string;
-    });
-  await page.context().addCookies([{
-    name: "mb_token", value: await tokenPromise,
-    url: "http://localhost:3000", sameSite: "Lax",
-  }]);
+  // Sign in through the shared helper. These specs each carried their own
+  // copy of a cookie-injection login, which is why fixing helpers.ts alone
+  // left them all on the sign-in screen: the duplicated code set an mb_token
+  // cookie that nothing reads any more.
+  await signIn(page);
 
   await page.route("**/api/v1/market/history/**", (r) =>
     r.fulfill({ json: { ticker: "TEST", period: "1Y", candles: bars() } }));

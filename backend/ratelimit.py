@@ -32,6 +32,17 @@ from starlette.types import ASGIApp
 # matters rather than a list of proxy addresses.
 TRUSTED_PROXY_HOPS = int(os.getenv("TRUSTED_PROXY_HOPS", "0") or 0)
 
+# The /auth/login ceiling, per client per minute. Configurable for ONE reason:
+# the end-to-end suite signs in once per test and runs far more than ten tests
+# a minute, so a fixed ten makes the suite fail on its own throttle rather than
+# on a defect.
+#
+# The default is the strict value and must stay that way — this is the
+# brute-force guard. A production deploy should never set it. It is honoured
+# per-client (see client_ip), so raising it does NOT make a shared bucket
+# again; it only widens how fast one address may guess.
+LOGIN_RATE_PER_MIN = int(os.getenv("BACKEND_LOGIN_RATE_PER_MIN", "10") or 10)
+
 # (prefix, methods or None for all) -> (max requests, window seconds)
 #
 # FIRST MATCH WINS, so specific prefixes must precede the general ones and the
@@ -40,7 +51,7 @@ TRUSTED_PROXY_HOPS = int(os.getenv("TRUSTED_PROXY_HOPS", "0") or 0)
 # control — and tightest where a request costs us money (metered providers,
 # LLM tokens) or where guessing is the attack (credentials).
 _RULES: list[tuple[str, frozenset[str] | None, int, int]] = [
-    ("/api/v1/auth/login", None, 10, 60),          # brute-force guard
+    ("/api/v1/auth/login", None, LOGIN_RATE_PER_MIN, 60),  # brute-force guard
     # Passkey ceremonies are two POSTs each and a failed biometric is a normal
     # thing to retry, so this is looser than the password rule. It is a
     # separate bucket: exhausting it must never block the password fallback.

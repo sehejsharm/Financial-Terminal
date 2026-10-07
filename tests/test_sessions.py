@@ -231,3 +231,46 @@ class TestTheDeviceList:
         time.sleep(0.01)
         sessions.rotate(a)              # touches 'old', making it newest
         assert sessions.list_for("alice")[0]["user_agent"] == "old"
+
+
+class TestThePerUserCap:
+    """Sessions must not accumulate without bound.
+
+    Found by measurement, not by review: the e2e suite signs in once per test
+    and left 335 live sessions on one account — which rendered 335 rows on the
+    account screen and put a 335-entry linear scan on every token refresh. A
+    real user reaches the same place more slowly; logging in daily from three
+    devices for a month is ninety live refresh tokens, each one a usable
+    credential long after the device was last touched.
+    """
+
+    def test_sessions_stop_accumulating(self):
+        for _ in range(sessions.MAX_SESSIONS_PER_USER + 15):
+            sessions.create("alice")
+        assert len(sessions.list_for("alice")) == sessions.MAX_SESSIONS_PER_USER
+
+    def test_the_least_recently_used_is_the_one_dropped(self):
+        # Not the oldest-created: a session made months ago and used this
+        # morning is someone's main machine.
+        keep = sessions.create("alice", user_agent="daily-driver")
+        for i in range(sessions.MAX_SESSIONS_PER_USER - 1):
+            sessions.create("alice", user_agent=f"other-{i}")
+        sessions.rotate(keep)          # touches it, making it most recent
+        sessions.create("alice", user_agent="newcomer")
+
+        agents = {r["user_agent"] for r in sessions.list_for("alice")}
+        assert "daily-driver" in agents, "the actively used session was evicted"
+        assert "newcomer" in agents
+
+    def test_one_users_logins_do_not_evict_anothers(self):
+        bob = sessions.create("bob")
+        for _ in range(sessions.MAX_SESSIONS_PER_USER + 5):
+            sessions.create("alice")
+        assert sessions.get(bob) is not None
+
+    def test_the_newest_session_always_survives(self):
+        # Whatever else is dropped, the token just handed to the caller has to
+        # work — otherwise logging in would sometimes log you straight out.
+        for _ in range(sessions.MAX_SESSIONS_PER_USER + 3):
+            tok = sessions.create("alice")
+        assert sessions.get(tok) is not None

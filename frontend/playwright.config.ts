@@ -43,6 +43,11 @@ export default defineConfig({
         MB_DATA_DIR: "e2e-data",
         PREWARM_SCAN_SEC: "0",
         ALERT_EVAL_SEC: "3600",
+        // Each test signs in, and the suite runs far more than ten tests a
+        // minute, so the production brute-force ceiling would make the suite
+        // fail on its own throttle rather than on a defect. Raised HERE only:
+        // the default stays strict and production must never set this.
+        BACKEND_LOGIN_RATE_PER_MIN: "2000",
       },
     },
     {
