@@ -54,7 +54,7 @@ function TearSheetInner() {
 
   if (notFound) {
     return (
-      <div className="max-w-[820px] mx-auto p-8 bg-bg text-txt min-h-screen">
+      <div className="max-w-[820px] mx-auto p-8 bg-bg text-txt min-h-dvh">
         <h1 className="text-xl font-bold mb-2">Symbol not found: <span className="text-amber">{ticker}</span></h1>
         <p className="text-mut text-sm mb-4">
           No data provider recognizes this ticker. Check the suffix — NSE listings need
@@ -80,7 +80,7 @@ function TearSheetInner() {
   const price = (snap?.price ?? quote?.price) ?? null;
 
   return (
-    <div className="max-w-[820px] mx-auto p-8 print:p-0 bg-bg text-txt min-h-screen">
+    <div className="max-w-[820px] mx-auto p-8 print:p-0 bg-bg text-txt min-h-dvh">
       {/* print helper */}
       <style>{`@media print { body { background: white !important; color: #111 !important; }
         .panel-2, .panel { border-color: #ccc !important; background: white !important; }

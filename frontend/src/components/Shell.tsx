@@ -122,6 +122,10 @@ export function Shell({ children }: { children: React.ReactNode }) {
   // round trip showed nothing but the nav, which reads as the app hanging.
   // Only a real rejection blanks the page.
   const [rejected, setRejected] = useState(false);
+  // "We could not reach the server", as distinct from "you are not signed in".
+  // An installed app opened with no signal is the first case and used to be
+  // treated as the second.
+  const [offline, setOffline] = useState(false);
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
   const [unseenAlerts, setUnseenAlerts] = useState(0);
@@ -172,6 +176,7 @@ export function Shell({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     let alive = true;
     let attempt = 0;
+    let retry: ReturnType<typeof setTimeout> | undefined;
 
     const verify = () => {
       api.me()
@@ -196,12 +201,26 @@ export function Shell({ children }: { children: React.ReactNode }) {
     // page just started. So the gate can no longer be a synchronous cookie
     // read: it has to exchange the HttpOnly refresh cookie for a token first,
     // and only treat the ABSENCE of a session as "go to /login".
-    bootstrapSession().then((ok) => {
+    const boot = () => bootstrapSession().then((state) => {
       if (!alive) return;
-      if (!ok) { router.replace("/login"); return; }
+      if (state === "offline") {
+        // Could not REACH the server, which is not the same as not being
+        // signed in. Redirecting here would throw away the user's context to
+        // show them a login form that cannot succeed without a network —
+        // which is exactly what an installed app opened on the metro used to
+        // do. Keep the shell, say what is wrong, and retry.
+        setOffline(true);
+        // Keep trying, so the app recovers by itself when signal comes back
+        // rather than needing a manual reload.
+        retry = setTimeout(boot, 5000);
+        return;
+      }
+      setOffline(false);
+      if (state === "unauthenticated") { router.replace("/login"); return; }
       verify();
     });
-    return () => { alive = false; };
+    boot();
+    return () => { alive = false; clearTimeout(retry); };
   }, [router]);
 
   // Header bell: poll triggered-alert events, badge anything newer than the
@@ -303,7 +322,7 @@ export function Shell({ children }: { children: React.ReactNode }) {
     });
 
   return (
-    <div className="min-h-screen grid grid-cols-1 md:grid-cols-[220px_1fr]">
+    <div className="min-h-dvh grid grid-cols-1 md:grid-cols-[220px_1fr]">
       {/* Keyboard/screen-reader users land on the nav first on every route;
           this lets them jump straight to the page body (WCAG 2.4.1). Hidden
           until focused, then it appears as a normal button. */}
@@ -314,6 +333,8 @@ export function Shell({ children }: { children: React.ReactNode }) {
         Skip to content
       </a>
       {/* Side nav (desktop) */}
+      {/* h-screen, not h-dvh, on purpose: `hidden md:flex` means this only
+          renders on desktop, where the two are identical. */}
       <aside className="border-r border-line bg-bg2/60 sticky top-0 h-screen hidden md:flex flex-col">
         <div className="px-4 py-4 border-b border-line">
           <div className="text-amber font-bold tracking-[0.18em] text-base">MOTHERBOARD</div>
@@ -454,6 +475,16 @@ export function Shell({ children }: { children: React.ReactNode }) {
             home indicator on notched phones. */}
         <main id="main-content" key={pathname}
               className="p-3 md:p-5 pb-[calc(4.5rem+env(safe-area-inset-bottom))] md:pb-5 mb-rise min-w-0 max-w-full overflow-x-hidden">
+          {offline && (
+            <div role="status"
+                 className="mb-3 border border-amber/40 bg-amber/5 rounded
+                            px-3 py-2 text-[11.5px] leading-relaxed text-mut">
+              <span className="text-amber font-medium">Offline.</span>{" "}
+              Cannot reach the server, so prices and figures below are whatever
+              was last loaded and may be well out of date. Reconnecting
+              automatically — nothing has been signed out.
+            </div>
+          )}
           {rejected ? null : children}
           {!rejected && <Disclaimer />}
         </main>

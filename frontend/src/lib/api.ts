@@ -76,6 +76,11 @@ let accessToken: string | null = null;
 let accessExpiry = 0;          // epoch ms
 let csrfToken: string | null = null;
 let refreshInFlight: Promise<string | null> | null = null;
+// Set when the last refresh failed to REACH the server, as opposed to being
+// refused by it. The difference decides whether someone is signed out or
+// merely offline, and conflating the two is what made an installed app with
+// no signal show a login form that could not possibly work.
+let lastRefreshWasOffline = false;
 
 // Refresh this far before the token actually expires, so a request never goes
 // out holding a token that dies in flight.
@@ -128,15 +133,30 @@ export function refreshSession(): Promise<string | null> {
         credentials: "include",
         cache: "no-store",
       });
-      if (!res.ok) { token.clear(); return null; }
+      lastRefreshWasOffline = false;
+      if (!res.ok) {
+        // A 5xx is NOT a refusal. The server is broken, which is much closer
+        // to being offline than to being signed out — so do not clear the
+        // token and do not let the caller conclude "unauthenticated", or a
+        // brief API outage signs every user out and makes them log in again.
+        //
+        // Only a 4xx here is the server actually saying no.
+        if (res.status >= 500) {
+          lastRefreshWasOffline = true;
+          return accessToken;
+        }
+        token.clear();
+        return null;
+      }
       const body = await res.json();
       token.set(body.access_token, body.expires_at);
       csrf.set(body.csrf_token);
       return accessToken;
     } catch {
-      // Offline. Deliberately does NOT clear the token: a dropped connection
-      // is not a sign-out, and treating it as one would bounce someone to
-      // /login for a flaky tunnel.
+      // Could not reach the server. Deliberately does NOT clear the token: a
+      // dropped connection is not a sign-out, and treating it as one would
+      // bounce someone to /login for a flaky tunnel.
+      lastRefreshWasOffline = true;
       return accessToken;
     } finally {
       refreshInFlight = null;
@@ -154,11 +174,22 @@ export async function ensureToken(): Promise<string | null> {
   return refreshSession();
 }
 
+/** What the app knows about the session after trying to establish one. */
+export type SessionState = "authenticated" | "unauthenticated" | "offline";
+
 /** Called once when the app mounts: turns an HttpOnly refresh cookie into a
- *  live session, or reports that there isn't one. This is what replaces
- *  "read the cookie and assume we're logged in". */
-export async function bootstrapSession(): Promise<boolean> {
-  return (await ensureToken()) !== null;
+ *  live session, or says why it could not.
+ *
+ *  THREE states, not two. This returned a boolean, and that was a real defect
+ *  on mobile: an installed app opened with no connection could not refresh, so
+ *  "false" meant "not signed in" and the gate redirected to a login form that
+ *  could not possibly succeed — destroying the user's context to show them a
+ *  dead end. "Offline" is a different answer and deserves a different screen.
+ */
+export async function bootstrapSession(): Promise<SessionState> {
+  lastRefreshWasOffline = false;
+  if (await ensureToken()) return "authenticated";
+  return lastRefreshWasOffline ? "offline" : "unauthenticated";
 }
 
 /** End this session server-side and locally. */

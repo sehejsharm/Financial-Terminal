@@ -127,9 +127,11 @@ describe("refresh is single-flight", () => {
 
 describe("refresh outcomes", () => {
   it("a 401 means there is no session", async () => {
+    // bootstrapSession returns a three-state answer now, not a boolean — see
+    // the "offline is not the same as signed out" block below for why.
     installFetch(() => new Response("{}", { status: 401 }));
     const { bootstrapSession, token } = await freshModule();
-    expect(await bootstrapSession()).toBe(false);
+    expect(await bootstrapSession()).toBe("unauthenticated");
     expect(token.get()).toBeNull();
   });
 
@@ -196,5 +198,77 @@ describe("signing out", () => {
     const { endSession } = await freshModule();
     await endSession();
     expect(document.cookie).not.toContain("stale-jwt");
+  });
+});
+
+describe("offline is not the same as signed out", () => {
+  it("reports 'offline' when the server cannot be reached", async () => {
+    // The mobile defect this exists for: an installed app opened with no
+    // signal could not refresh, "false" meant "not signed in", and the gate
+    // redirected to a login form that could not possibly succeed — throwing
+    // away the user's context to show them a dead end.
+    installFetch(() => { throw new TypeError("Failed to fetch"); });
+    const { bootstrapSession } = await freshModule();
+    expect(await bootstrapSession()).toBe("offline");
+  });
+
+  it("reports 'unauthenticated' when the server REFUSES", async () => {
+    // A 401 is a real answer. This one should redirect.
+    installFetch(() => new Response("{}", { status: 401 }));
+    const { bootstrapSession } = await freshModule();
+    expect(await bootstrapSession()).toBe("unauthenticated");
+  });
+
+  it("reports 'authenticated' on success", async () => {
+    installFetch(() => tokenResponse("tok"));
+    const { bootstrapSession } = await freshModule();
+    expect(await bootstrapSession()).toBe("authenticated");
+  });
+
+  it("does not report offline after a later successful refresh", async () => {
+    // The flag has to be reset, or one dropped connection would make the app
+    // claim to be offline for the rest of the session.
+    let fail = true;
+    installFetch(() => {
+      if (fail) throw new TypeError("Failed to fetch");
+      return tokenResponse("tok");
+    });
+    const { bootstrapSession } = await freshModule();
+    expect(await bootstrapSession()).toBe("offline");
+    fail = false;
+    expect(await bootstrapSession()).toBe("authenticated");
+  });
+});
+
+describe("a broken server is not a refusal", () => {
+  it("treats a 500 as offline, not as signed out", async () => {
+    // A 5xx used to read as "unauthenticated", which redirected to /login —
+    // so a brief API outage signed every user out and made them log in again.
+    installFetch(() => new Response("Internal Server Error", { status: 500 }));
+    const { bootstrapSession } = await freshModule();
+    expect(await bootstrapSession()).toBe("offline");
+  });
+
+  it("does not throw away the held token on a 502", async () => {
+    installFetch(() => new Response("Bad Gateway", { status: 502 }));
+    const { refreshSession, token } = await freshModule();
+    token.set("held", new Date(Date.now() + 60_000).toISOString());
+    await refreshSession();
+    expect(token.get()).toBe("held");
+  });
+
+  it("still treats a 401 as signed out", async () => {
+    // The distinction has to cut both ways, or a genuinely revoked session
+    // would keep pretending to be an outage forever.
+    installFetch(() => new Response("{}", { status: 401 }));
+    const { bootstrapSession, token } = await freshModule();
+    expect(await bootstrapSession()).toBe("unauthenticated");
+    expect(token.get()).toBeNull();
+  });
+
+  it("still treats a 403 as signed out", async () => {
+    installFetch(() => new Response("{}", { status: 403 }));
+    const { bootstrapSession } = await freshModule();
+    expect(await bootstrapSession()).toBe("unauthenticated");
   });
 });

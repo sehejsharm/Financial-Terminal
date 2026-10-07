@@ -22,10 +22,23 @@ self.addEventListener("install", (event) => {
   // Take over as soon as installed rather than waiting for every old tab to
   // close — pair with clients.claim() below.
   self.skipWaiting();
-  event.waitUntil(
+  event.waitUntil(Promise.all([
     caches.open(STATIC_CACHE).then((c) =>
       c.addAll(["/manifest.json", "/icon-192.png", "/icon-512.png"]).catch(() => {})),
-  );
+    // Precache the app shell, so the FIRST offline load works.
+    //
+    // Without this the shell is only cached as a side effect of a successful
+    // navigation — and the worker does not control the page that installed it,
+    // so a user's first visit cached nothing. Measured: going offline after one
+    // visit served the worker's bare "You're offline" page rather than the app.
+    // Install-time precaching closes that window.
+    //
+    // Failures are swallowed on purpose: if "/" cannot be fetched at install
+    // time there is nothing useful to do about it, and a rejected waitUntil
+    // would abort the whole installation and leave the user with no worker at
+    // all rather than one that is merely incomplete.
+    caches.open(SHELL_CACHE).then((c) => c.add("/").catch(() => {})),
+  ]));
 });
 
 self.addEventListener("activate", (event) => {

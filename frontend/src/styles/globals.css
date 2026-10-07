@@ -54,7 +54,18 @@ html.light.cb {
     background:
       radial-gradient(1200px 600px at 80% -10%, rgba(255,176,0,0.05), transparent 60%),
       theme(colors.bg);
+    /* 100vh first as the fallback, then dvh for browsers that have it.
+       On mobile Safari and Chrome, 100vh is the LARGEST viewport — the one
+       with the browser chrome collapsed — so a page sized to it is taller
+       than what is actually visible, and a page whose content fits still
+       scrolls. dvh tracks the viewport as the chrome comes and goes.
+
+       NOT VERIFIED IN THIS REPO'S HARNESS: Playwright's viewport has no
+       collapsing chrome, so 100vh and 100dvh measure identically there and no
+       test can tell them apart. This is a known-correct change made on
+       reasoning, and it needs a real device to confirm. */
     min-height: 100vh;
+    min-height: 100dvh;
   }
   /* Numerals look the same width regardless of digit — important for tables. */
   table, tbody, thead, td, th { font-variant-numeric: tabular-nums; }

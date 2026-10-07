@@ -23,7 +23,7 @@ function H({ children }: { children: React.ReactNode }) {
 
 export default function TermsPage() {
   return (
-    <div className="min-h-screen bg-bg text-txt">
+    <div className="min-h-dvh bg-bg text-txt">
       <div className="max-w-2xl mx-auto px-5 py-10 text-[13.5px]">
         <Link href="/" className="text-amber text-sm">← Motherboard Terminal</Link>
         <h1 className="text-xl font-bold mt-4 mb-1">Terms of Service</h1>

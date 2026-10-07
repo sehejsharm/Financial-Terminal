@@ -372,7 +372,7 @@ function WorkspaceBody() {
 
       {/* ── maximized pane ── */}
       {maximized ? (
-        <div className="h-[calc(100vh-190px)] min-h-[420px]">
+        <div className="h-[calc(100dvh-190px)] min-h-[420px]">
           <PaneFrame {...paneProps(maximized,
             ws.rows.find((r) => r.panes.some((p) => p.id === maximized.id))!)} />
         </div>
@@ -383,7 +383,7 @@ function WorkspaceBody() {
               the rows fit, but each row also carries a minimum derived from
               its tallest widget, so on a short screen the page scrolls
               instead of clipping the bottom row off the fold. */}
-          <div className="hidden md:flex flex-col min-h-[calc(100vh-215px)]">
+          <div className="hidden md:flex flex-col min-h-[calc(100dvh-215px)]">
             {ws.rows.map((row, ri) => (
               // Fragment, NOT a display:contents div: the divider measures its
               // parentElement, and a contents box reports clientWidth/Height 0,

@@ -88,7 +88,7 @@ function SetPasswordForm() {
   }
 
   return (
-    <div className="min-h-screen flex flex-col items-center justify-center p-6">
+    <div className="min-h-dvh flex flex-col items-center justify-center p-6">
       <div className="text-amber font-bold tracking-[0.22em] text-2xl mb-1">MOTHERBOARD</div>
       <div className="label-xs mb-8">
         {purpose === "reset" ? "Reset your password" : "Finish setting up your account"}

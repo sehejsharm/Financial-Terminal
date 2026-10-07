@@ -106,7 +106,7 @@ function GrievanceForm() {
 
 export default function DisclosuresPage() {
   return (
-    <div className="min-h-screen max-w-2xl mx-auto px-5 py-10">
+    <div className="min-h-dvh max-w-2xl mx-auto px-5 py-10">
       <a href="/" className="label-xs hover:text-amber">← Motherboard Terminal</a>
       <h1 className="text-lg font-semibold mt-3 mb-6">Disclosures</h1>
 
