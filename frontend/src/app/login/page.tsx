@@ -163,16 +163,33 @@ export default function LoginPage() {
                 Sign in with a password
               </div>
             )}
-            <label className="label-xs">Username</label>
+            {/* htmlFor/id, not just adjacent text. Visually these read as
+                labels; programmatically they were not associated with
+                anything, so a screen reader announced two unlabelled text
+                boxes on the one screen where knowing which field is which
+                matters most. axe flags it as critical, and it was the only
+                automated violation left in the app.
+
+                autoComplete is here for the same reason it is good practice
+                generally: a password manager that can fill this form is an
+                accessibility feature for anyone who struggles to type a long
+                credential. */}
+            <label className="label-xs" htmlFor="login-username">Username</label>
             <input
+              id="login-username"
+              name="username"
+              autoComplete="username"
               autoFocus
               value={username}
               onChange={(e) => setUsername(e.target.value)}
               className="input-bare"
             />
-            <label className="label-xs mt-2">Password</label>
+            <label className="label-xs mt-2" htmlFor="login-password">Password</label>
             <input
+              id="login-password"
+              name="password"
               type="password"
+              autoComplete="current-password"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
               className="input-bare"

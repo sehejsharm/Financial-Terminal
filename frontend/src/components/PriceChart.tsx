@@ -427,7 +427,21 @@ export function PriceChart({
 
   return (
     <div>
-      <div ref={ref} style={{ height: config.pane !== "none" ? height - 130 : height }} className="panel" />
+      {/* The chart is drawn to a canvas by lightweight-charts, so there is
+          nothing in the DOM for assistive tech to read — it is an unlabelled
+          graphic. role="img" plus a name at least says WHAT it is and what it
+          covers, instead of silence.
+          
+          This is a floor, not parity: the figures behind the chart are the
+          real answer for a screen-reader user, and the surrounding panels
+          already carry them as text. A full data table alternative would be
+          better and is not done here. */}
+      <div ref={ref}
+           role="img"
+           aria-label={`Price chart${symbol ? ` for ${symbol}` : ""}`
+             + ` — ${points.length} data points.`
+             + " The same figures are available as text in the panels on this page."}
+           style={{ height: config.pane !== "none" ? height - 130 : height }} className="panel" />
       {config.pane !== "none" && (
         <div ref={paneRef} style={{ height: 120 }} className="panel mt-1" />
       )}

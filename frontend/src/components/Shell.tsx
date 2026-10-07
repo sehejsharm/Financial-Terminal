@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef } from "react";
 import {
   Activity, Bell, Briefcase, Eye, Filter, Globe, Globe2, Home, LayoutGrid,
   LogOut, Menu, Moon, Newspaper, Search, Shield, Sigma, Sun, Terminal, Waves, X,
@@ -43,7 +43,23 @@ function StreamBadge({ polling }: { polling: boolean }) {
       : { label: "STATIC", cls: "text-mut", tip: "No auto-refresh on this page — data loads on demand." };
 
   return (
-    <div className="hidden sm:flex items-center gap-2 text-[11px] text-mut">
+    // A polite live region, so a change in the data connection is ANNOUNCED
+    // rather than only shown. A sighted user sees this badge go from LIVE to
+    // STALE and knows the numbers stopped moving; without this a screen-reader
+    // user is told nothing and keeps reading figures that are no longer being
+    // updated.
+    //
+    // "polite" and not "assertive" on purpose: it must wait for a gap rather
+    // than interrupt whatever is being read. And it is only safe to make a
+    // live region at all because this reflects the CONNECTION, which changes
+    // rarely — wiring one to the prices themselves would announce every tick
+    // and make the app unusable.
+    //
+    // hidden sm:flex means this is not rendered at all on the narrowest
+    // screens, so the announcement follows the same rule; that is a tradeoff
+    // worth knowing about rather than a decision made here.
+    <div role="status" aria-live="polite"
+         className="hidden sm:flex items-center gap-2 text-[11px] text-mut">
       <InfoTip
         align="right"
         width={330}
@@ -126,6 +142,7 @@ export function Shell({ children }: { children: React.ReactNode }) {
   // An installed app opened with no signal is the first case and used to be
   // treated as the second.
   const [offline, setOffline] = useState(false);
+  const drawerRef = useRef<HTMLDivElement | null>(null);
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
   const [unseenAlerts, setUnseenAlerts] = useState(0);
@@ -280,6 +297,50 @@ export function Shell({ children }: { children: React.ReactNode }) {
   // Close the mobile drawer on navigation.
   useEffect(() => { setMenuOpen(false); }, [pathname]);
 
+  // The drawer is a modal overlay, so it needs the three things a modal owes
+  // a keyboard user. It had none of them: it could be OPENED from the
+  // keyboard and not closed, which is a trap, and a trap is worse than no
+  // drawer. axe cannot see any of this — it checks markup, not behaviour.
+  useEffect(() => {
+    if (!menuOpen) return;
+    const opener = document.activeElement as HTMLElement | null;
+
+    // 1. Escape closes it.
+    // 2. Tab stays inside it, so focus does not wander behind the backdrop
+    //    onto controls the user cannot see.
+    function onKey(e: KeyboardEvent) {
+      if (e.key === "Escape") { setMenuOpen(false); return; }
+      if (e.key !== "Tab") return;
+      const root = drawerRef.current;
+      if (!root) return;
+      const focusable = [...root.querySelectorAll<HTMLElement>(
+        'a[href], button:not([disabled]), input, select, textarea, [tabindex]:not([tabindex="-1"])',
+      )].filter((el) => el.offsetParent !== null);
+      if (!focusable.length) return;
+      const first = focusable[0];
+      const last = focusable[focusable.length - 1];
+      if (e.shiftKey && document.activeElement === first) {
+        e.preventDefault(); last.focus();
+      } else if (!e.shiftKey && document.activeElement === last) {
+        e.preventDefault(); first.focus();
+      }
+    }
+    window.addEventListener("keydown", onKey);
+
+    // 3. Focus moves in on open. Without this a screen-reader user is told a
+    //    dialog opened and left pointing at whatever was behind it.
+    const toFocus = drawerRef.current?.querySelector<HTMLElement>(
+      '[aria-label="Close navigation"]');
+    toFocus?.focus();
+
+    return () => {
+      window.removeEventListener("keydown", onKey);
+      // And back out again on close, to where it was — not to the top of the
+      // document, which would make every close cost a re-tab.
+      opener?.focus?.();
+    };
+  }, [menuOpen]);
+
   function logout() {
     // Fire-and-forget on purpose: the redirect must not wait on the network,
     // but the server call is what actually ends the session rather than just
@@ -363,7 +424,13 @@ export function Shell({ children }: { children: React.ReactNode }) {
           {/* w-[82vw] capped at 288px: at 375-414px viewports the fixed
               width clipped the wordmark and sign-out row. min-w-0 +
               truncate keep long usernames from overflowing. */}
+          {/* role/aria-modal so assistive tech scopes itself to the drawer
+              instead of reading the page behind the backdrop. */}
           <div onClick={(e) => e.stopPropagation()}
+               ref={drawerRef}
+               role="dialog"
+               aria-modal="true"
+               aria-label="Navigation"
                className="absolute left-0 top-0 bottom-0 w-[82vw] max-w-72 bg-bg2 border-r border-line p-3 flex flex-col gap-1 overflow-y-auto overflow-x-hidden">
             <div className="flex items-center justify-between gap-2 px-1 pb-3 border-b border-line mb-2 min-w-0">
               <span className="text-amber font-bold tracking-[0.14em] text-sm truncate">MOTHERBOARD</span>
