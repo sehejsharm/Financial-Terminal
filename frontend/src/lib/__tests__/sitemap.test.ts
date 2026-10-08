@@ -15,8 +15,7 @@
  *  caught the original mistake.
  */
 
-import { readFileSync } from "node:fs";
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 
 import { describe, expect, it } from "vitest";
@@ -28,6 +27,19 @@ function sitemapRoutes(): string[] {
   const block = src.match(/const ROUTES = \[([\s\S]*?)\];/);
   if (!block) throw new Error("ROUTES array not found in sitemap.ts");
   return [...block[1].matchAll(/"([^"]*)"/g)].map((m) => m[1]);
+}
+
+/** Every route that renders without a session, discovered from disk.
+ *
+ *  Read from the filesystem rather than listed here on purpose: a hardcoded
+ *  list can only ever confirm what its author already knew, which is what
+ *  made the first version of the second test below pass vacuously. */
+function publicRoutes(): string[] {
+  return readdirSync(APP, { withFileTypes: true })
+    .filter((d) => d.isDirectory() && !d.name.startsWith("_")
+      && !d.name.startsWith("(") && existsSync(join(APP, d.name, "page.tsx")))
+    .map((d) => `/${d.name}`)
+    .filter((r) => !isAuthGated(r));
 }
 
 /** A page behind the auth gate renders the Shell, which redirects without a
@@ -49,24 +61,28 @@ describe("sitemap", () => {
     expect(gated).toEqual([]);
   });
 
-  it("lists every route that exists and is public", () => {
+  it("lists every public page that exists", () => {
     // The other direction: a public page missing from the sitemap is a page
-    // nobody finds. Checked so adding a public route forces a decision rather
-    // than being silently unlisted.
+    // nobody finds.
+    //
+    // The first version of this test was TAUTOLOGICAL — it looped over a
+    // hardcoded array identical to ROUTES, so `missing` was always empty and
+    // the claim in its own comment ("forces a decision rather than being
+    // silently unlisted") was false. Adding a route would have left it green
+    // while the sitemap omitted the route.
+    //
+    // It now DISCOVERS the public pages from the filesystem, which is the only
+    // way it can notice something it was not told about.
     const listed = new Set(sitemapRoutes());
-    const PUBLIC_BUT_INTENTIONALLY_UNLISTED = new Set([
-      // Reached only from a one-time emailed link, and noindex for that
-      // reason — indexing it would leak the token and burn its single use.
+    const INTENTIONALLY_UNLISTED = new Set([
+      // One-time emailed link: indexing it would leak the token and burn its
+      // single use. It is noindex for the same reason.
       "/set-password",
-      // Needs a ticker in the query string to render anything.
+      // Renders nothing without a ?t= ticker.
       "/tearsheet",
     ]);
-    const missing: string[] = [];
-    for (const route of ["/login", "/privacy", "/terms", "/disclosures"]) {
-      if (!listed.has(route) && !PUBLIC_BUT_INTENTIONALLY_UNLISTED.has(route)) {
-        missing.push(route);
-      }
-    }
+    const missing = publicRoutes()
+      .filter((r) => !listed.has(r) && !INTENTIONALLY_UNLISTED.has(r));
     expect(missing).toEqual([]);
   });
 

@@ -17,16 +17,22 @@ const SITE = "https://financial-terminal-peach.vercel.app";
  *  Revisit per route if any of them ever renders content server-side. */
 export default function robots(): MetadataRoute.Robots {
   return {
-    rules: {
-      userAgent: "*",
-      allow: ["/login", "/privacy", "/terms", "/disclosures"],
-      disallow: [
-        "/admin", "/account", "/set-password",
-        // Auth-gated app routes: real HTML, no content.
-        "/terminal", "/screeners", "/portfolio", "/alerts", "/news",
-        "/macro", "/global", "/quant", "/sharks", "/workspace", "/tearsheet",
-      ],
-    },
+    // Crawling is ALLOWED everywhere, and that is deliberate — it is not an
+    // oversight and it is not a weaker version of the previous attempt.
+    //
+    // The first attempt at this listed the app routes under `disallow`. Two
+    // things were wrong with it. It did not even work: robots.txt is
+    // allow-by-default, so `allow:` lines exclude nothing and "/" stayed
+    // crawlable with no `Disallow: /` anywhere — verified in the built
+    // robots.txt. And the instrument was wrong anyway: Disallow blocks
+    // CRAWLING, while what we want is to stop INDEXING. A URL that is
+    // disallowed can never be re-fetched, so a crawler never sees the noindex
+    // and anything already in the index stays there as a title-only result.
+    //
+    // So indexing is now controlled by a per-page `robots: { index: false }`,
+    // defaulted at the root layout and opted back in by the public pages, and
+    // this file's job is simply to let crawlers reach those pages to read it.
+    rules: { userAgent: "*", allow: "/" },
     sitemap: `${SITE}/sitemap.xml`,
   };
 }

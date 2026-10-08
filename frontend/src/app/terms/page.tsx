@@ -1,9 +1,14 @@
 import type { Metadata } from "next";
 import Link from "next/link";
+import { CONTACT_EMAIL } from "@/lib/compliance";
 
 export const metadata: Metadata = {
   title: "Terms of Service",
   openGraph: { url: "/terms" },
+  // Its own snippet rather than the root product pitch, which every public
+  // page was sharing.
+  description: "The terms of use for Motherboard Terminal, including what the service does not do.",
+  alternates: { canonical: "/terms" },
   robots: { index: true, follow: true },
 };
 
@@ -12,7 +17,9 @@ export const metadata: Metadata = {
 // contact address and governing-law choice before launch.
 
 const UPDATED = "4 September 2026";
-const CONTACT = "support@your-domain.example"; // TODO: replace with a real address
+// Shared and env-driven: this was a hardcoded placeholder on a page that
+// is now indexed, i.e. the contact detail a search result would show.
+const CONTACT = CONTACT_EMAIL;
 
 function P({ children }: { children: React.ReactNode }) {
   return <p className="mb-3 leading-relaxed text-txt/90">{children}</p>;

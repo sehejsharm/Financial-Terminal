@@ -6,6 +6,14 @@ import type { Metadata } from "next";
 // resolved against metadataBase, so social shares point at the real page.
 export const metadata: Metadata = {
   title: "Sign in",
+  // Its own description, canonical and index opt-in. Four of the five public
+  // URLs were serving the SAME root product pitch as their search snippet, so
+  // they competed with each other on duplicate text and all three described a
+  // product none of them shows.
+  description:
+    "Sign in to Motherboard Terminal with a passkey or a password.",
+  alternates: { canonical: "/login" },
+  robots: { index: true, follow: true },
   openGraph: { url: "/login" },
 };
 

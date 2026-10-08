@@ -3,10 +3,19 @@ import "@/styles/globals.css";
 import { ServiceWorker } from "@/components/ServiceWorker";
 
 const SITE_URL = "https://financial-terminal-peach.vercel.app";
+// This is the text that shows under the title in search results, so it is
+// marketing copy and has to be as true as anything on a page.
+//
+// It previously said "live NSE quotes ... free and in your browser". Both
+// claims had stopped being true: prices come from public sources whose lag we
+// do not control, which is exactly why the app labels them "Public data"
+// rather than "live" (see backend/dataplane.py), and there is now a paid tier.
+// Shipped meta descriptions are easy to forget precisely because nobody on the
+// team ever reads them.
 const DESCRIPTION =
-  "Bloomberg-style markets terminal for Indian + global equities: live NSE quotes, " +
-  "fundamental screeners, AI value-chain maps, portfolio P&L, price alerts, and " +
-  "quant analytics — free and in your browser.";
+  "A markets research terminal for Indian and global equities: fundamentals " +
+  "parsed from filings, screeners, portfolio tracking, options analysis and " +
+  "backtesting, with every figure labelled by where it came from.";
 
 export const metadata: Metadata = {
   metadataBase: new URL(SITE_URL),
@@ -15,6 +24,20 @@ export const metadata: Metadata = {
     template: "%s · Motherboard Terminal",
   },
   description: DESCRIPTION,
+  // Pins the preferred URL. This host also answers on per-deployment preview
+  // URLs, and nothing was telling a crawler which one is canonical.
+  alternates: { canonical: "/" },
+  // DEFAULT DENY. Every route in this app is "use client" behind an auth gate,
+  // so the HTML a crawler gets is the app's chrome — nav labels and a tooltip.
+  // Public pages opt back IN explicitly (/login, /privacy, /terms,
+  // /disclosures, /product all set robots:{index:true}).
+  //
+  // This is the right instrument, and robots.txt Disallow is not: Disallow
+  // blocks CRAWLING, not indexing. Any of these URLs already in the index —
+  // they were crawlable and sitemapped until recently — could then never be
+  // re-fetched, so Google would never see a removal signal and they would
+  // linger as title-only results. A noindex has to be crawlable to be read.
+  robots: { index: false, follow: false },
   applicationName: "Motherboard Terminal",
   manifest: "/manifest.json",
   // Standalone-mode hints. `mobile-web-app-capable` is the current standard

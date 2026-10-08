@@ -1,9 +1,14 @@
 import type { Metadata } from "next";
 import Link from "next/link";
+import { CONTACT_EMAIL } from "@/lib/compliance";
 
 export const metadata: Metadata = {
   title: "Privacy Policy",
   openGraph: { url: "/privacy" },
+  // Its own snippet rather than the root product pitch, which every public
+  // page was sharing.
+  description: "What Motherboard Terminal stores, why, and how to have it deleted.",
+  alternates: { canonical: "/privacy" },
   robots: { index: true, follow: true },
 };
 
@@ -14,7 +19,9 @@ export const metadata: Metadata = {
 // this is accurate but is not a substitute for that review.
 
 const UPDATED = "4 September 2026";
-const CONTACT = "privacy@your-domain.example"; // TODO: replace with a real address
+// Shared and env-driven: this was a hardcoded placeholder on a page that
+// is now indexed, i.e. the contact detail a search result would show.
+const CONTACT = CONTACT_EMAIL;
 
 function P({ children }: { children: React.ReactNode }) {
   return <p className="mb-3 leading-relaxed text-txt/90">{children}</p>;

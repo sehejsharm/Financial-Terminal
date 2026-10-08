@@ -10,6 +10,11 @@ export const metadata: Metadata = {
   description:
     "Regulatory status, data sources and their limitations, conflicts of "
     + "interest, and how to raise a complaint.",
+  alternates: { canonical: "/disclosures" },
+  // Indexable on purpose: a prospective user should be able to find our
+  // regulatory status and complaint process from a search engine without
+  // signing up. The root layout defaults to noindex, so this opts back in.
+  robots: { index: true, follow: true },
   openGraph: { url: "/disclosures" },
 };
 

@@ -39,11 +39,35 @@ or is obtained later, both of those statements must be updated** — grep for
 to re-examine first. Gating it, removing it, or restricting it to
 non-security-specific output are all cheaper than registration.
 
-### 1.2 Advertising and the marketing site (Phase 9)
+### 1.2 Advertising and the marketing site
 
-If §1.1 lands on "registered", the SEBI advertising code constrains what the
-marketing site may claim — performance figures, testimonials and comparative
-claims in particular. Phase 9 should not be written until §1.1 is settled.
+**Built, under the conservative intersection.** `/product` claims only what is
+safe under *either* resolution of §1.1, and that constraint is enforced by a
+test rather than by care: `frontend/src/lib/__tests__/marketingCopy.test.ts`
+scans the public copy for banned claims — advice and recommendation
+vocabulary, assured returns, anything implying registration or endorsement,
+any upgrade of the data claim ("live", "real-time", "tick-by-tick"),
+superlatives, social proof, named-competitor comparisons, any price, and any
+performance figure.
+
+Two things worth knowing about it:
+
+- It distinguishes a **claim** from a **denial**. "We make recommendations" is
+  forbidden; "we do not make recommendations" is required, and both contain the
+  word. The test only flags a banned phrase when the surrounding sentence does
+  not negate it. That is a heuristic — a lint, not a lawyer.
+- It was exercised against a deliberately bad page before being trusted, which
+  is how a gap was found: the regex for `live quotes` missed **"live NSE
+  quotes"**, the exact phrase that had shipped in the root meta description.
+
+**Still needs §1.1 before changing:** showing or screenshotting the AI panel's
+output about a named security, and publishing a price (blocked independently by
+§1.4). Neither is on the page.
+
+The root meta description, shipped on every public page, claimed "live NSE
+quotes ... free and in your browser". Both had stopped being true — prices are
+public-source with uncontrolled lag, and there is now a paid tier. Nobody
+reads their own meta description, which is why it is now in the test's scope.
 
 ### 1.3 Terms and privacy policy have not been reviewed by a lawyer
 
@@ -155,5 +179,5 @@ stops being true, that page is the first thing to change.**
 
 | Variable | Why it matters |
 |---|---|
-| `NEXT_PUBLIC_GRIEVANCE_EMAIL` | Printed on `/disclosures` as the complaint address and used in the fallback message when the form fails. It defaults to a `.invalid` address, which **must** be replaced before launch — an unreachable grievance address is worse than none, because the page claims it is monitored. |
+| `NEXT_PUBLIC_GRIEVANCE_EMAIL` | Printed on `/disclosures`, `/privacy` and `/terms`, and used in the fallback message when the complaint form fails. It defaults to a `.invalid` address, which **must** be replaced before launch — an unreachable grievance address is worse than none, because the page claims it is monitored. `/privacy` and `/terms` previously hardcoded their own `@your-domain.example` placeholders; all three now read `CONTACT_EMAIL` from `src/lib/compliance.ts`, so one value sets them. |
 | `MAIL_PROVIDER` / `RESEND_API_KEY` | Complaint acknowledgements go out through the same mailer as invites. On `console` the acknowledgement is logged and never sent; the complaint is still recorded. |
