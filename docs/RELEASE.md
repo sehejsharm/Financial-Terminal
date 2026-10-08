@@ -113,9 +113,31 @@ sudo tail -40 /var/log/mb-autodeploy.log     # expect ROLLED BACK
 curl -fsS https://<domain>/version           # expect the PREVIOUS sha
 ```
 
-Also unverified from here: the GitHub Actions jobs themselves. The YAML parses
-and every command in them has been run locally, but no workflow run has
-happened — the first push will be the first execution.
+### The Actions jobs have now run, and the first run caught a real bug
+
+Which is the best argument for the jobs existing. The `frontend` job failed on
+its first execution: it was pinned to Node 20 while this was developed on Node
+22, and three jsdom-environment test files failed to **start** — not to assert,
+to start:
+
+```
+TypeError: webidl.util.markAsUncloneable is not a function
+  at new CacheStorage (undici/lib/web/cache/cachestorage.js)
+  at jsdom/lib/api.js
+```
+
+`jsdom` pulls in `undici`, which needs a Node 22+ internal. 48 of 51 files
+passed, so the result read as flake rather than as a version mismatch — and it
+was invisible locally by construction, because locally the Node version was
+the right one.
+
+Worth noting how long it took to find: the tests pass on a clean `npm ci` in a
+pristine worktree with exit code 0, so reproducing it locally was impossible.
+It needed the runner's own log.
+
+The Node version now comes from `frontend/.nvmrc`, read by every job via
+`node-version-file`. It had been a literal in three places, which is a thing
+that drifts; a file both sides read is not.
 
 ## Things this does not have
 

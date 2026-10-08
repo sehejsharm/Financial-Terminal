@@ -48,6 +48,21 @@ jobs:
   # behavioural guarantee added on the client — the session model, the
   # coalescing that keeps the dashboard to one request, the accessibility
   # gates, the banned-claim check on public copy — was unguarded.
+  # NODE VERSION: taken from frontend/.nvmrc, not pinned inline.
+  #
+  # The first CI run of this job failed for exactly this reason, which is the
+  # best argument for the job existing. It was pinned to Node 20 while this was
+  # developed on Node 22, and three jsdom-environment test files failed to
+  # START — not to assert, to start:
+  #
+  #   TypeError: webidl.util.markAsUncloneable is not a function
+  #     at new CacheStorage (undici/lib/web/cache/cachestorage.js)
+  #     at jsdom/lib/api.js
+  #
+  # jsdom pulls in undici, which needs a Node 22+ internal. 48 of 51 files
+  # passed, so the failure looked like flake rather than a version mismatch.
+  # A literal in three places is a thing that drifts; a file both sides read
+  # is not.
   frontend:
     runs-on: ubuntu-latest
     defaults:
@@ -58,7 +73,9 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: "20"
+          # Read from frontend/.nvmrc rather than pinned here, in three
+          # places, where it had already drifted. See the note below.
+          node-version-file: frontend/.nvmrc
           cache: npm
           cache-dependency-path: frontend/package-lock.json
 
@@ -100,7 +117,9 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: "20"
+          # Read from frontend/.nvmrc rather than pinned here, in three
+          # places, where it had already drifted. See the note below.
+          node-version-file: frontend/.nvmrc
           cache: npm
           cache-dependency-path: frontend/package-lock.json
 
@@ -166,7 +185,9 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: "20"
+          # Read from frontend/.nvmrc rather than pinned here, in three
+          # places, where it had already drifted. See the note below.
+          node-version-file: frontend/.nvmrc
           cache: npm
           cache-dependency-path: frontend/package-lock.json
 
