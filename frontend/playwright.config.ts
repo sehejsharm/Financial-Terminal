@@ -31,7 +31,11 @@ export default defineConfig({
   projects: [{ name: "chromium", use: { browserName: "chromium" } }],
   webServer: [
     {
-      command: ".venv/bin/python -m uvicorn backend.app:app --port 8000",
+      // The interpreter is overridable because CI has no .venv — it pip
+      // installs into the runner's own Python. Hardcoding the venv path made
+      // this config work only on a developer machine, which is the sort of
+      // thing that is invisible until the day you add CI.
+      command: "${PYTHON:-.venv/bin/python} -m uvicorn backend.app:app --port 8000",
       cwd: "..",
       url: "http://localhost:8000/healthz",
       reuseExistingServer: !process.env.CI,

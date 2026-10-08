@@ -42,6 +42,102 @@ jobs:
       - name: Run tests
         run: pytest --ignore=tests/invariants -m "not live"
 
+  # The frontend tests. These had NEVER run in CI: the pipeline ran ruff and
+  # pytest only, so 1267 vitest tests and the whole Playwright suite were
+  # enforced solely by whoever remembered to run them locally. Every
+  # behavioural guarantee added on the client — the session model, the
+  # coalescing that keeps the dashboard to one request, the accessibility
+  # gates, the banned-claim check on public copy — was unguarded.
+  frontend:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install
+        run: npm ci
+
+      - name: Typecheck
+        run: npx tsc --noEmit
+
+      - name: Unit tests (vitest)
+        run: npx vitest run
+
+      # A broken production build is the one failure that cannot be caught by
+      # unit tests and takes the site down on the next push, since Vercel
+      # deploys this branch.
+      - name: Production build
+        run: npm run build
+
+  # The browser suite, in its own job because it needs both servers and a
+  # browser and takes ~10 minutes — long enough that bundling it with the
+  # fast checks would make every push wait on it.
+  #
+  # NOT a required check yet, and the reason is honest rather than lazy: three
+  # specs depend on live market-data providers and fail when those are
+  # unreachable, which in CI they always are. They pass in isolation and fail
+  # in sequence against a shared data dir. Making this blocking before that
+  # coupling is fixed would train people to ignore a red build, which is worse
+  # than not having it. It runs, it reports, and the flakes are named below.
+  e2e:
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install backend
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install -r requirements-backend.txt
+
+      - name: Install frontend
+        working-directory: frontend
+        run: npm ci
+
+      - name: Install Chromium
+        working-directory: frontend
+        run: npx playwright install --with-deps chromium
+
+      # playwright.config.ts starts the FastAPI backend and the Next dev
+      # server itself via its webServer block, so there is nothing to launch
+      # here. It also raises the login rate limit, which the suite needs
+      # because it signs in once per test.
+      - name: Playwright
+        working-directory: frontend
+        env:
+          # playwright.config.ts defaults to .venv/bin/python, which does not
+          # exist on a runner.
+          PYTHON: python
+        run: npx playwright test --reporter=line
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: playwright-results
+          path: frontend/test-results/
+          retention-days: 7
+          if-no-files-found: ignore
+
   # Dependency CVEs, as a separate job so it runs in parallel with the tests
   # and a vulnerable transitive package cannot hide behind a green test run.
   #

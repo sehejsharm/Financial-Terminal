@@ -20,10 +20,43 @@ jobs:
       ADMIN_PASSWORD: ${{ secrets.ADMIN_PASSWORD }}
       API: https://sehejmotherboard.duckdns.org
     steps:
+      # Needed by the version comparison below, which has to know what the
+      # branch is at.
+      - uses: actions/checkout@v4
+
       - name: Backend /healthz
         run: |
-          curl -fsS --max-time 20 https://sehejmotherboard.duckdns.org/healthz
+          curl -fsS --max-time 20 "$API/healthz"
           echo
+
+      # Which commit is actually live.
+      #
+      # APP_VERSION was hardcoded to "oracle-1", so /version reported the same
+      # string whatever was deployed — on a service that redeploys every four
+      # minutes. deploy/autodeploy.sh now stamps the short commit SHA, and
+      # printing it here puts "what is running right now" in a log anyone can
+      # read without SSH, which is exactly what you want to know first when
+      # something looks wrong.
+      - name: Deployed version
+        run: |
+          curl -fsS --max-time 20 "$API/version" \
+            | python3 -c 'import json,sys; v=json.load(sys.stdin); print("live:", v.get("version"), "| cache:", (v.get("cache") or {}).get("backend"))'
+
+      # A deploy that rolled back leaves the branch ahead of what is running.
+      # That is the state most worth noticing and the one nothing reports: the
+      # push looked fine, CI was green, and the VM quietly went back.
+      - name: Warn if the branch is ahead of what is deployed
+        run: |
+          LIVE=$(curl -fsS --max-time 20 "$API/version" \
+            | python3 -c 'import json,sys; print(json.load(sys.stdin).get("version",""))')
+          HEAD=$(git rev-parse --short HEAD)
+          if [ "$LIVE" = "unstamped" ]; then
+            echo "::notice::backend reports an unstamped version — deployed by hand rather than by autodeploy"
+          elif [ -n "$LIVE" ] && [ "$LIVE" != "$HEAD" ]; then
+            echo "::warning::branch is at $HEAD but $LIVE is live. Either a deploy is still in flight, or autodeploy rolled back — check /var/log/mb-autodeploy.log on the VM."
+          else
+            echo "deployed commit matches the branch ($HEAD)"
+          fi
 
       # /diag now requires a master-admin token (it disclosed which provider
       # keys are configured plus raw upstream error text to anyone who asked,

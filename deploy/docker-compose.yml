@@ -17,7 +17,10 @@ services:
     restart: unless-stopped
     env_file: .env
     environment:
-      - APP_VERSION=oracle-1
+      # Set by deploy/autodeploy.sh to the short commit SHA, so /version
+      # reports what is actually running. The fallback is for a hand-run
+      # `docker compose up`, where there is no deploy script to stamp it.
+      - APP_VERSION=${APP_VERSION:-unstamped}
       - REDIS_URL=redis://redis:6379/0   # shared cache; survives backend restarts
       # Exactly one reverse proxy (the caddy service below) sits in front of
       # this container, and nothing else can reach it — port 8000 is `expose`,
