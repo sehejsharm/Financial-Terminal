@@ -219,6 +219,14 @@ export function NewsFeed({
         )}
         {sources.length > 1 && (
           <select value={source} onChange={(e) => setSource(e.target.value)}
+                  // No visible <label>: the chosen option ("All sources", or a
+                  // publisher name) is the only text, so a sighted user reads
+                  // the control's purpose off its value. A screen reader got
+                  // "combo box, All sources" with nothing saying what it
+                  // filters. axe rates an unnamed select CRITICAL, and it was
+                  // invisible to the gate until data loaded, because this
+                  // renders only when `sources.length > 1`.
+                  aria-label="Filter headlines by source"
                   className="input-bare !py-1.5 text-xs cursor-pointer max-w-[220px]">
             <option value="all">All sources</option>
             {sources.map((s) => (

@@ -39,7 +39,24 @@ export function FrameTable({ frame, humanise = false, empty = "No data." }: {
     frame.rows.some((r) => typeof r[c] === "number"));
 
   return (
-    <div className="panel overflow-x-auto">
+    // tabIndex + role + name, because this scrolls horizontally.
+    //
+    // A div with overflow-x-auto can only be scrolled with a pointer or a
+    // trackpad unless it can take focus — arrow keys scroll the element that
+    // HAS focus, so a keyboard user simply cannot reach the clipped columns.
+    // These frames are financial statements, so the clipped columns are the
+    // earlier periods: the comparison the table exists for.
+    //
+    // axe reports it as `scrollable-region-focusable`, and it was a live CI
+    // failure on /workspace's financials widget. It could not appear locally,
+    // because an empty frame returns the panel above and never renders a
+    // scroll container at all.
+    //
+    // role + aria-label rather than a bare tabIndex: a focusable div with no
+    // role is a tab stop that announces nothing, which trades one defect for
+    // a more confusing one.
+    <div className="panel overflow-x-auto" tabIndex={0}
+         role="region" aria-label="Financial data table, scrolls horizontally">
       <table className="w-full text-xs">
         <thead className="text-mut uppercase tracking-wider sticky top-0 bg-panel z-10">
           <tr className="border-b border-line">

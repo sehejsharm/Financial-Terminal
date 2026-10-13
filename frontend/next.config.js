@@ -44,8 +44,51 @@ const THEME_BOOT_SHA = "'sha256-EqHEssTVVFSJ6AXVPC/9kplpseZ6fscvaQfoHu0if/s='";
 // CSP_ENFORCE=1 WILL break hydration — do not set it without re-running the
 // violation check.
 //
+// A FOURTH OPTION WAS PROPOSED AND IS NOW RULED OUT, MEASURED.
+//
+// docs/OPEN-ITEMS.md §G claimed enforcement did not need Next 16: "the pages
+// are statically prerendered, so the `__next_f` inline scripts are fixed at
+// build time and CAN be hashed by a post-build step (~46 hashes)". It sounds
+// right. It is wrong, and scripts/csp-hashes.mjs is the measurement.
+//
+// Two CLEAN BUILDS OF IDENTICAL SOURCE each produced 23 prerendered HTML files
+// with 68 distinct inline scripts — and the two hash sets largely DO NOT
+// MATCH. Roughly half the hashes changed between builds with not a line of
+// source edited. The flight-data payloads embed per-build chunk identifiers,
+// so "fixed at build time" is true only of the build that produced them.
+//
+// That kills the approach rather than complicating it: a hash list is valid
+// for exactly one build, and every deploy is a fresh build. Shipping it would
+// mean a policy that is correct the day it is generated and silently blocks
+// the app's own hydration on the next deploy — the worst failure shape
+// available, because it looks like it is working.
+//
+// Re-check it in one command after the Next 16 upgrade:
+//     npm run build && node scripts/csp-hashes.mjs --json > /tmp/a.json
+//     rm -rf .next && npm run build && node scripts/csp-hashes.mjs --json > /tmp/b.json
+//     diff /tmp/a.json /tmp/b.json
+//
+// AND THE REPORT-ONLY POSTURE NOW ACTUALLY REPORTS.
+//
+// It did not. There was no `report-uri` and no `report-to` anywhere, so every
+// violation went to the console of whoever had devtools open and nowhere else.
+// Report-only with no collector is not a weaker control than enforcement — it
+// is not a control, while still looking like one. backend/routes/csp.py
+// aggregates them, and GET /api/v1/csp-report/summary (master-admin) is the
+// list that decides when CSP_ENFORCE is safe: flip it when every signature
+// there is one that has since been hashed or allowed.
+//
 // There is no CDN, no Google Fonts, no TradingView and no next/font in this
 // app — every asset is self-hosted — so the rest of the policy is tight.
+
+// Where violations are posted. On the API origin, not this one: `report-uri`
+// is exempt from CORS by design (the browser fires it and ignores the
+// response), so a cross-origin collector needs no preflight and no rewrite —
+// and routing it through Vercel would bill a function invocation per
+// violation, which is precisely backwards for something that spikes when
+// something is broken.
+const CSP_REPORT_URI = `${API}/api/v1/csp-report`;
+
 const csp = [
   "default-src 'self'",
   `script-src 'self' ${THEME_BOOT_SHA}`,
@@ -64,9 +107,20 @@ const csp = [
   // and the only one that accepts a source list.
   "frame-ancestors 'none'",
   "upgrade-insecure-requests",
+  // BOTH spellings, deliberately. `report-uri` is deprecated and is also the
+  // only one Safari honours and the only one older Chrome honours; `report-to`
+  // is the replacement and is what current Chrome prefers. Sending one would
+  // silently collect from some browsers and not others, and "no reports" would
+  // then be indistinguishable from "no violations" — which is the exact
+  // failure this is fixing.
+  `report-uri ${CSP_REPORT_URI}`,
+  "report-to csp",
 ].join("; ");
 
 const securityHeaders = [
+  // Names the group `report-to csp` refers to. Required for report-to to do
+  // anything at all; without it that directive is inert.
+  { key: "Reporting-Endpoints", value: `csp="${CSP_REPORT_URI}"` },
   {
     key: process.env.CSP_ENFORCE === "1"
       ? "Content-Security-Policy"

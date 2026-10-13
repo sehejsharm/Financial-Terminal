@@ -62,4 +62,40 @@ describe("CSP inline-script hash", () => {
     expect(cfg).toMatch(/Content-Security-Policy-Report-Only/);
     expect(cfg).toMatch(/CSP_ENFORCE/);
   });
+
+  it("report-only actually REPORTS somewhere", () => {
+    // The point of the test. Report-only with no collector is not a weaker
+    // control than enforcement — it is not a control at all, while still
+    // reading as one on an audit checklist. That is what shipped: neither
+    // report-uri nor report-to was present, so every violation went to the
+    // console of whoever had devtools open and nowhere else, and "no
+    // violations seen" was indistinguishable from "nobody was looking".
+    const cfg = readFileSync(join(ROOT, "next.config.js"), "utf8");
+    expect(cfg).toMatch(/report-uri \$\{CSP_REPORT_URI\}/);
+    expect(cfg).toMatch(/"report-to csp"/);
+    // report-to is inert without the group definition, so the two must ship
+    // together or the modern half silently collects nothing.
+    expect(cfg).toMatch(/Reporting-Endpoints/);
+    expect(cfg).toMatch(/csp="\$\{CSP_REPORT_URI\}"/);
+  });
+
+  it("both report spellings are present, because browsers disagree", () => {
+    // report-uri is deprecated AND is the only one Safari honours; report-to
+    // is the replacement and is what current Chrome prefers. Dropping either
+    // means collecting from some browsers and not others, which would make
+    // the collector's silence impossible to interpret.
+    const cfg = readFileSync(join(ROOT, "next.config.js"), "utf8");
+    expect(cfg).toMatch(/report-uri/);
+    expect(cfg).toMatch(/report-to/);
+  });
+
+  it("the report collector is on the API origin, not proxied", () => {
+    // report-uri is exempt from CORS by design — the browser fires it and
+    // ignores the response — so a cross-origin collector needs no preflight
+    // and no Vercel rewrite. Routing it through Vercel would bill a function
+    // invocation per violation, which is exactly backwards for something that
+    // spikes when something is broken.
+    const cfg = readFileSync(join(ROOT, "next.config.js"), "utf8");
+    expect(cfg).toMatch(/const CSP_REPORT_URI = `\$\{API\}\/api\/v1\/csp-report`/);
+  });
 });

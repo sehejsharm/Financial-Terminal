@@ -179,7 +179,7 @@ function FlowTable() {
                       transfer between holders, not accumulation. */}
                   <td className={`px-3 py-2 num text-right ${
                     read.netSkewPct == null ? "text-mut"
-                      : Math.abs(read.netSkewPct) < 20 ? "text-mut/60"
+                      : Math.abs(read.netSkewPct) < 20 ? "text-mut"
                       : read.netSkewPct > 0 ? "text-green" : "text-red"}`}>
                     {read.netSkewPct == null ? "—" : `${fmtNum(read.netSkewPct, 0)}%`}
                   </td>

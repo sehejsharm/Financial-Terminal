@@ -31,8 +31,18 @@ from fastapi.testclient import TestClient
 #               to need it are the ones who cannot sign in, so requiring a
 #               login would exclude exactly the complaints it exists for.
 #               Rate-limited tightly instead (it writes to disk and sends mail).
+#   /api/v1/csp-report — the CSP violation collector. Public because it HAS to
+#               be: browsers send violation reports without credentials by
+#               design, and the violation that matters most is the one on the
+#               sign-in page, before any session exists. It is POST-only,
+#               accepts nothing but a JSON body it never trusts, stores a
+#               bounded aggregate (backend/routes/csp.py caps the signature
+#               map), returns an empty 204 so it discloses nothing, and is
+#               absent from the OpenAPI schema. The READ side of it,
+#               /csp-report/summary, is master-admin — that is where the
+#               script-surface detail lives.
 INTENTIONALLY_PUBLIC = ["/healthz", "/version", "/api/v1/billing/plans",
-                        "/api/v1/support/grievance"]
+                        "/api/v1/support/grievance", "/api/v1/csp-report"]
 
 # The subset of the above that answers a GET. Split out because the list above
 # is the REVIEWED-PUBLIC allowlist for the route audit, and not every reviewed

@@ -311,8 +311,22 @@ export default function QuantPage() {
                               // Dimmed rather than dropped: an absent number
                               // reads as missing data, which is a different
                               // and worse claim than "too small to call".
+                              //
+                              // The FULL mut token, not a 50% opacity of it.
+                              // Measured on the dark palette: mut at half
+                              // opacity over the panel is 2.39:1, where AA
+                              // asks 4.5:1 for text this
+                              // size — so the correlation a user is told is
+                              // "too small to call" was itself close to
+                              // unreadable, and axe reported it `serious
+                              // color-contrast` on /quant in CI. Full mut is
+                              // 6.00:1 against text-txt's 14.57:1, so the
+                              // dim-versus-bright distinction that carries the
+                              // meaning is still obvious; it is just legible
+                              // now. Anything under /85 fails, so there is no
+                              // dimmer value available to use here.
                               className={`px-2 py-1.5 num text-center ${
-                                weak ? "text-mut/50" : "text-txt"}`}
+                                weak ? "text-mut" : "text-txt"}`}
                               // Theme variables, not hardcoded rgba — the app
                               // has light and colourblind palettes.
                               style={{ background: i === j ? undefined
@@ -359,7 +373,7 @@ export default function QuantPage() {
                           {/* Greyed when the fit is too weak to support the
                               slope — the number is real and means nothing. */}
                           <td className={`px-3 py-2 num text-right ${
-                            weak ? "text-mut/60" : "text-txt"}`}>
+                            weak ? "text-mut" : "text-txt"}`}>
                             {full.beta == null ? "—" : fmtNum(full.beta, 2)}
                           </td>
                           <td className={`px-3 py-2 num text-right ${

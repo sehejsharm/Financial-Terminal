@@ -84,7 +84,7 @@ export function CommandPalette({
             onValueChange={setQ}
             autoFocus
             placeholder="Ticker (RELIANCE.NS), page (Screeners), or ask a question…"
-            className="w-full bg-transparent border-0 border-b border-line px-4 py-3.5 text-txt placeholder:text-mut/70 focus:outline-none"
+            className="w-full bg-transparent border-0 border-b border-line px-4 py-3.5 text-txt placeholder:text-mut/85 focus:outline-none"
           />
           <Command.List className="max-h-[60vh] overflow-y-auto py-1">
             {/* Ask Motherboard, ranked first when the input reads as a

@@ -54,6 +54,7 @@ from backend.routes import (
     ai,
     alerts,
     auth,
+    csp,
     data_api,
     deals,
     fundamentals,
@@ -160,7 +161,7 @@ for r in (auth.router, market.router, fundamentals.router, screens.router,
           macro.router, deals.router, admin.router, portfolio.router,
           billing.router, passkeys.router, support.router,
           alerts.router, notes.router, workspaces.router, stream.router,
-          data_api.router):
+          csp.router, data_api.router):
     app.include_router(r, prefix=_V1)
 
 

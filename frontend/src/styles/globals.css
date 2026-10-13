@@ -95,7 +95,7 @@ html.light.cb {
                     border-l-2 border-amber pl-2.5; }
   .input-bare {
     @apply bg-panel border border-line rounded px-3 py-2 text-sm font-mono
-           text-txt placeholder:text-mut/70
+           text-txt placeholder:text-mut/85
            focus:border-amber focus:outline-none focus:ring-0;
   }
   .btn {

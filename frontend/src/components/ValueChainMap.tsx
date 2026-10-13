@@ -530,11 +530,11 @@ function NodeDetail({ node, parentTicker, chainTicker, onClose, onRecenter, onRe
                className="block text-[11px] text-mut hover:text-amber line-clamp-2 mb-0.5">
               › {e.title}
               {e.published && (
-                <span className="text-mut/70"> · {new Date(e.published).toLocaleDateString()}</span>
+                <span className="text-mut"> · {new Date(e.published).toLocaleDateString()}</span>
               )}
             </a>
           ))}
-          <div className="text-[9.5px] text-mut/70 mt-1">
+          <div className="text-[9.5px] text-mut mt-1">
             Co-mention only: these name both companies together — they don&apos;t
             confirm the specific supplier/customer claim.
           </div>
@@ -1277,7 +1277,7 @@ export function ValueChainMap({ ticker }: { ticker: string }) {
             <button onClick={() => { setPlaying(false); setPlayIdx(0); framedRef.current = null; load(current); }}
                     className="underline hover:text-amber">back to live</button>
           )}
-          <span className="text-mut/70">
+          <span className="text-mut">
             Frames are past AI generations, not quarterly filings — drift here is the
             model changing its mind as much as the chain changing.
           </span>
@@ -1696,7 +1696,7 @@ export function ValueChainMap({ ticker }: { ticker: string }) {
                 </div>
               );
             })()}
-            <div className="text-[9.5px] text-mut/70 mt-1.5">Click for drill-down</div>
+            <div className="text-[9.5px] text-mut mt-1.5">Click for drill-down</div>
           </div>
         )}
 
