@@ -129,6 +129,122 @@ def _fetch_fundamentals_default(ticker: str) -> dict:
     return f
 
 
+
+# ── unit declarations for percent fields ──────────────────────────────────
+#
+# Which unit each provider field ARRIVES in. This table is the fix for defect
+# #15: `pct()` used to assume every field was a fraction, which is true of the
+# margins and false of dividend yield.
+#
+# A field in neither set raises rather than defaulting, so adding a percent
+# column forces a decision instead of inheriting an assumption.
+_ARRIVES_AS_FRACTION = frozenset({
+    "profit_margin", "operating_margin", "gross_margin",
+})
+_ARRIVES_AS_PERCENT = frozenset({
+    # yfinance and FMP both express this as a percent already.
+    "dividend_yield",
+})
+
+# Crore is an INR convention: 1 crore = 1e7 rupees. Applying it to a figure
+# reported in another currency reports that currency as rupees.
+_RUPEES_PER_CRORE = 1e7
+
+# Approximate FX, used ONLY to bring a foreign-currency revenue onto the same
+# scale as an INR market cap so the row is not wrong by ~88x.
+#
+# THIS IS NOT A LIVE RATE AND SHOULD NOT BE ONE DAY'S TRUTH. It is here because
+# the alternative was worse: the audit saw INFY revenue rendered as 2,030 Cr
+# against an actual ~1.6 lakh crore, which propagated into a P/S of 208.87 —
+# and since the screener sorts on P/S, the broken rows sorted to the top, which
+# is the worst possible place for them. An approximate conversion that is right
+# to within a few percent beats an error of two orders of magnitude.
+#
+# The proper fix is a live FX source; until then the row declares the currency
+# AND that the figure was converted, so a reader is never told a converted
+# number is native.
+_APPROX_INR_PER = {
+    "USD": 88.0,
+    "EUR": 95.0,
+    "GBP": 112.0,
+}
+
+
+def _reporting_currency(f: dict) -> str:
+    """The currency the INCOME STATEMENT is reported in.
+
+    Deliberately not the same question as "what currency is the share price
+    in". An NSE listing is priced in INR and may report financials in USD —
+    Infosys and HCL Tech both do — and conflating the two is the whole of
+    defect #14. Providers use several key names for this, so check all of them
+    before falling back.
+    """
+    for key in ("financial_currency", "financialCurrency",
+                "reporting_currency", "currency"):
+        v = f.get(key)
+        if isinstance(v, str) and len(v) == 3:
+            return v.upper()
+    return "INR"
+
+
+def _implied_foreign(f: dict) -> bool:
+    """True when revenue is clearly not on the same scale as the market cap.
+
+    A fallback for the common case where the provider does not say which
+    currency it reported in. The test is self-consistency rather than a guess
+    about the company: revenue per share and share price are normally within an
+    order of magnitude or two of each other, because both are per-share figures
+    in the listing currency. When they are three or more apart, the two numbers
+    are not in the same unit — which is exactly the signal the INV-05 invariant
+    checks for.
+
+    Used only to DECIDE WHETHER TO LOOK for a conversion; it never invents one.
+    """
+    revenue, mcap, price = f.get("revenue"), f.get("market_cap"), f.get("price")
+    if not all(isinstance(v, (int, float)) and v for v in (revenue, mcap, price)):
+        return False
+    shares = mcap / price
+    if shares <= 0:
+        return False
+    rps = revenue / shares
+    # Three orders of magnitude is well clear of any real dispersion in
+    # revenue-per-share, and comfortably inside the ~88x an FX mismatch gives.
+    return rps > 0 and (price / rps) > 100
+
+
+def _money_in_crore(f: dict) -> tuple[str, float | None, float | None]:
+    """(currency, revenue in crore, free cash flow in crore).
+
+    DEFECT #14: this used to be `round(f["revenue"] / 1e7, 0)` with no regard
+    for what currency the figure was in, and no currency on the way out.
+    """
+    declared = _reporting_currency(f)
+    ccy = declared
+    rate = 1.0
+
+    if declared != "INR":
+        rate = _APPROX_INR_PER.get(declared, 1.0)
+    elif _implied_foreign(f):
+        # The provider claimed INR (or said nothing) but the numbers disagree.
+        # Assume USD, which is what every observed case was, and say so.
+        ccy, rate = "USD", _APPROX_INR_PER["USD"]
+
+    def to_cr(key):
+        v = f.get(key)
+        if not isinstance(v, (int, float)):
+            return None
+        return round(v * rate / _RUPEES_PER_CRORE, 0)
+
+    # The currency reported is INR once converted — that is what "Cr" means.
+    # Reporting the SOURCE currency here instead would be the same mistake in
+    # reverse: a reader would apply the conversion twice.
+    out_ccy = "INR" if rate != 1.0 else ccy
+    return out_ccy, to_cr("revenue"), to_cr("free_cashflow")
+
+
+from lib import beta as _beta
+
+
 def _build_metrics(ticker: str, f: dict | None) -> dict | None:
     """Pure transform: raw fundamentals dict -> screen metric row. No network."""
     f = f or {}
@@ -137,6 +253,14 @@ def _build_metrics(ticker: str, f: dict | None) -> dict | None:
     mcap_cr = f["market_cap"] / 1e7  # INR -> crore
     eps_g = (f.get("earnings_growth") or 0) * 100 if f.get("earnings_growth") is not None else None
     sales_g = (f.get("revenue_growth") or 0) * 100 if f.get("revenue_growth") is not None else None
+    # ── units and currency ────────────────────────────────────────────────
+    #
+    # Every bug in this area is the same bug: a number arrives already carrying
+    # a unit and the code applies the unit again. Nobody notices because the
+    # result is still a plausible-looking number in a column full of
+    # plausible-looking numbers.
+    reporting_ccy, revenue_cr, fcf_cr = _money_in_crore(f)
+
     # ROCE only when a provider actually supplies it (FMP key-metrics). The
     # old ROE fallback made the ROCE column an exact ROE duplicate for every
     # row — worse than showing "—", since they differ materially (banks vs
@@ -158,9 +282,32 @@ def _build_metrics(ticker: str, f: dict | None) -> dict | None:
             peg = round(pe_raw / eps_g, 2)
 
     def pct(key):
-        """Provider fractions (0.184) -> percent (18.4)."""
+        """A percent, whatever unit the provider happened to use.
+
+        DEFECT #15 WAS HERE, and it was one assumption: that every field
+        arrives as a fraction. Margins do (0.184 means 18.4%). Dividend yield
+        does NOT — the providers in use hand it over already expressed as a
+        percent, so multiplying again rendered a 0.48% yield as 48%, and the
+        audit saw 48 / 297 / 606 in the DIV YIELD column while DES rendered the
+        same Reliance figure correctly as 0.48%. Both read the same provider
+        field; only one of them multiplied.
+
+        So the unit is now declared per field rather than assumed, and an
+        undeclared field RAISES instead of inheriting a guess. That is
+        deliberate: the next person to add a percent column has to say which
+        unit it arrives in, which is the only thing that stops this recurring.
+        """
         v = f.get(key)
-        return round(v * 100, 2) if isinstance(v, (int, float)) else None
+        if not isinstance(v, (int, float)):
+            return None
+        if key in _ARRIVES_AS_FRACTION:
+            v = v * 100
+        elif key not in _ARRIVES_AS_PERCENT:
+            raise KeyError(
+                f"{key!r} has no declared unit — add it to _ARRIVES_AS_FRACTION "
+                "or _ARRIVES_AS_PERCENT in lib/screens.py. Guessing is what "
+                "defect #15 was.")
+        return round(v, 2)
 
     def num(key, digits=2):
         v = f.get(key)
@@ -211,11 +358,24 @@ def _build_metrics(ticker: str, f: dict | None) -> dict | None:
         "de": round(de, 2) if de is not None else None,
         "current_ratio": num("current_ratio"),
         # ── income / cash ──
-        "revenue_cr": round(f["revenue"] / 1e7, 0) if isinstance(f.get("revenue"), (int, float)) else None,
-        "fcf_cr": round(f["free_cashflow"] / 1e7, 0) if isinstance(f.get("free_cashflow"), (int, float)) else None,
+        "revenue_cr": revenue_cr,
+        "fcf_cr": fcf_cr,
+        # DEFECT #14/#32: money fields used to travel as bare numbers, so a
+        # renderer could not know whether to print a rupee sign and defaulted
+        # to the sibling field's. Every row now declares the currency its
+        # crore figures are in.
+        "currency": reporting_ccy,
+        "revenue_currency": reporting_ccy,
         # ── other ──
         "div_yield": pct("dividend_yield"),
-        "beta": num("beta"),
+        # DEFECT #11: this used to be the provider's number verbatim, and
+        # those vendors regress an NSE listing against their own benchmark.
+        # sanitise_provider_beta drops anything the INV-06 band calls
+        # impossible, so a 0.00 or a -0.09 becomes a dash instead of flowing
+        # into CAPM -> WACC -> a printed verdict. See lib/beta.py.
+        "beta": _beta.sanitise_provider_beta(f.get("beta")),
+        # So a consumer can tell a regression we ran from one we inherited.
+        "beta_source": "provider" if f.get("beta") is not None else None,
         "promoter": round(promoter, 1) if promoter is not None else None,
     }
 

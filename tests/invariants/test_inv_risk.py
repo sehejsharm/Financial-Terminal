@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import pytest
 
+from lib import beta as beta_mod
 from lib.institutional import capm_cost_of_equity
 
 # What the audit actually observed in the screener. Frozen here so the fix has
@@ -39,15 +40,66 @@ class TestBetaRange:
     """INV-06: beta for a >$1B index constituent is in [0.2, 3.0] or null.
     Never 0.00, never negative."""
 
-    @pytest.mark.xfail(strict=True, reason="defect #11: beta is a provider "
-                       "passthrough regressed against the wrong index")
     @pytest.mark.parametrize("symbol,beta", sorted(OBSERVED_BETAS.items()))
-    def test_observed_betas_are_implausible(self, symbol, beta):
-        # Every one of these is outside the plausible band for a liquid large
-        # cap. A NIFTY constituent that genuinely moved independently of the
-        # index would be a remarkable finding, not six of them at once.
-        assert beta is None or BETA_FLOOR <= beta <= BETA_CEIL, (
-            f"{symbol} beta {beta} is outside [{BETA_FLOOR}, {BETA_CEIL}]")
+    def test_the_recorded_production_betas_were_all_implausible(self, symbol, beta):
+        """The historical record, kept deliberately.
+
+        These are FROZEN CONSTANTS — production outputs from the audit, not a
+        call into the code — so this test can never change colour no matter
+        what we fix. It used to carry a strict xfail, which was the wrong
+        instrument: an xfail says "the code is broken and this test proves it",
+        and this test cannot observe the code at all.
+
+        What it is good for is stating the evidence that motivated the fix, so
+        the next person reading lib/beta.py can see what the old numbers looked
+        like. The assertions that actually guard the fix are below.
+        """
+        assert beta is not None and not (BETA_FLOOR <= beta <= BETA_CEIL), (
+            f"{symbol} recorded beta {beta} is inside the plausible band — "
+            "fixture drift; the audit recorded implausible values")
+
+    def test_an_nse_name_is_regressed_against_an_indian_index(self):
+        # The mechanism of defect #11: the vendor used ITS benchmark. An NSE
+        # listing must go against the NIFTY, never the S&P.
+        assert beta_mod.benchmark_for("RELIANCE.NS") == "^NSEI"
+        assert beta_mod.benchmark_for("TCS.NS") == "^NSEI"
+        assert beta_mod.benchmark_for("500325.BO") == "^BSESN"
+
+    def test_an_unknown_venue_gets_no_beta_rather_than_the_wrong_one(self):
+        # Refusing is the point. A beta against whichever index happened to be
+        # available looks like an answer, which is worse than a dash.
+        assert beta_mod.benchmark_for("SOMETHING.XX") is None
+        assert beta_mod.compute_beta("SOMETHING.XX", [1.0] * 300, [1.0] * 300) is None
+
+    def test_the_regression_recovers_a_known_beta(self):
+        # Synthetic series with a beta of exactly 1.5 by construction:
+        # providers are unreachable here, and a regression is arithmetic that
+        # does not need them.
+        import random
+        rng = random.Random(7)
+        bench = [rng.gauss(0.0, 0.01) for _ in range(300)]
+        asset = [1.5 * r for r in bench]
+        got = beta_mod.beta_from_returns(asset, bench)
+        assert got == pytest.approx(1.5, abs=0.01)
+
+    def test_a_flat_benchmark_yields_no_beta_rather_than_a_crash(self):
+        # var(benchmark) == 0 is a division by zero, and in practice means the
+        # index series came back constant because something upstream failed.
+        assert beta_mod.beta_from_returns([0.01] * 300, [0.0] * 300) is None
+
+    def test_too_few_observations_yields_no_beta(self):
+        # An estimate from a handful of days is not a weaker answer than one
+        # from a year, it is a different kind of object. The failure mode this
+        # prevents is exactly defect #11's: a confident number near zero.
+        bench = [0.01, -0.01] * 10
+        assert beta_mod.beta_from_returns([0.015, -0.015] * 10, bench) is None
+
+    def test_a_corporate_action_does_not_set_the_slope(self):
+        # A zero previous close would otherwise contribute one enormous return
+        # that dominates the covariance on its own.
+        closes = [100.0, 101.0, 0.0, 102.0, 103.0]
+        rets = beta_mod.returns_from_closes(closes)
+        assert all(abs(r) < 1.0 for r in rets), rets
 
     def test_a_negative_beta_is_never_acceptable_for_these_names(self):
         # Kept separate and NOT xfailed: whatever else changes, a large-cap
@@ -68,8 +120,6 @@ class TestCostOfEquity:
         rf, erp = 6.5, 6.0
         assert capm_cost_of_equity(rf, beta, erp) >= rf
 
-    @pytest.mark.xfail(strict=True, reason="defect #12: `beta or 1.0` coerces a "
-                       "beta of exactly 0.0 into 1.0")
     def test_a_beta_of_zero_is_not_silently_replaced_by_one(self):
         # capm_cost_of_equity is `rf_pct + (beta or 1.0) * erp_pct`. In Python
         # 0.0 is falsy, so a genuine zero beta becomes a market beta — the

@@ -74,9 +74,27 @@ def get_earnings_history(ticker: str) -> pd.DataFrame:
     return pd.DataFrame()
 
 
-def capm_cost_of_equity(rf_pct: float, beta: float, erp_pct: float) -> float:
-    """CAPM: Re = Rf + beta x equity risk premium (all in %)."""
-    return rf_pct + (beta or 1.0) * erp_pct
+def capm_cost_of_equity(rf_pct: float, beta: float | None,
+                        erp_pct: float) -> float:
+    """CAPM: Re = Rf + beta x equity risk premium (all in %).
+
+    DEFECT #12 WAS THE `or`. `beta or 1.0` is a falsy test, not a None test, so
+    it caught three values and not one: None (intended), 0.0 and -0.0 (not).
+    A beta of exactly zero is the one case where the market beta is most
+    obviously wrong to substitute, and it was substituted silently.
+
+    That mattered because of what consumes this. Re feeds WACC, WACC feeds the
+    page's value-creation verdict, and the verdict flips sign across the range
+    of betas the provider was handing over. A beta the code quietly replaced
+    produced a confident sentence about whether growth is worth paying for.
+
+    None still falls back to the market beta of 1.0, because a missing beta has
+    to be filled with something to compute anything at all — but it is now
+    distinguishable from a measured zero, which is a different statement about
+    a company and should not be rounded into the same answer.
+    """
+    effective = 1.0 if beta is None else beta
+    return rf_pct + effective * erp_pct
 
 
 def wacc(equity_value: float, debt_value: float, cost_equity_pct: float,

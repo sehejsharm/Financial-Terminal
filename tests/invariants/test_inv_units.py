@@ -44,8 +44,6 @@ class TestPercentUnits:
     """INV-13: a percentage field is in [0,1] xor [0,100] per field, declared,
     never both."""
 
-    @pytest.mark.xfail(strict=True, reason="defect #15: pct() multiplies a "
-                       "value that is already a percentage by 100")
     def test_dividend_yield_is_not_scaled_twice(self):
         # The audit saw 48 / 297 / 606 in the screener's DIV YIELD column while
         # DES rendered the same Reliance value as 0.48%. Both read the same
@@ -62,8 +60,6 @@ class TestPercentUnits:
             y = m["div_yield"]
             if y is None:
                 continue
-            pytest.xfail("defect #15 — currently 48.0; remove this xfail with the fix") \
-                if y > 50 else None
             assert y <= 50, f"{symbol} dividend yield {y}% is not a real yield"
 
 
@@ -78,8 +74,6 @@ class TestCurrencyScale:
         rps = (m["revenue_cr"] * 1e7) / shares
         assert orders_of_magnitude(rps, m["price"]) <= 2
 
-    @pytest.mark.xfail(strict=True, reason="defect #14: USD revenue divided by "
-                       "1e7 and labelled Cr")
     def test_a_usd_reporter_does_not_report_dollars_as_crores(self):
         m = _build_metrics("INFY.NS", dict(INFY_USD))
         shares = INFY_USD["market_cap"] / INFY_USD["price"]
@@ -88,8 +82,6 @@ class TestCurrencyScale:
             f"revenue-per-share {rps:.2f} vs price {m['price']} — "
             f"revenue_cr={m['revenue_cr']} is a USD figure labelled as crores")
 
-    @pytest.mark.xfail(strict=True, reason="defect #14: no currency is carried "
-                       "alongside the converted figure")
     def test_a_converted_figure_declares_its_currency(self):
         # INV-08's precondition. Today _build_metrics emits `revenue_cr` with no
         # currency anywhere in the row, so a renderer cannot know whether to
@@ -107,6 +99,6 @@ class TestNoBareInheritedSymbol:
         m = _build_metrics("RELIANCE.NS", dict(RELIANCE_INR))
         present = {k for k in money_fields if m.get(k) is not None}
         assert present, "fixture produced no money fields at all"
-        if "currency" not in m:
-            pytest.xfail("defect #14/#32 — metric rows carry no currency field; "
-                         "remove this xfail when Phase 1.3 lands")
+        # Phase 1.3 landed: _money_in_crore returns the currency and
+        # _build_metrics puts it on every row. Asserted rather than xfailed.
+        assert "currency" in m, "metric rows must declare their currency"

@@ -36,6 +36,7 @@ from backend.reliability import DeadlineMiddleware, configure_thread_pool
 from backend import invites, plans, sessions, usage
 from backend.routes import support as support_store
 from backend.config import CORS_ORIGINS, DATA_DIR
+from backend.serialize import SafeJSONResponse
 
 # Point the session store at the data volume. Done at import rather than in a
 # startup hook so that anything touching sessions during app construction —
@@ -71,6 +72,12 @@ from backend.routes import (
 
 app = FastAPI(
     title="Motherboard API",
+    # Every route renders through this, so a NaN cannot reach json.dumps and
+    # 500 the request. A provider gap used to do exactly that — see the long
+    # note in backend/serialize.py for why this is central rather than a call
+    # added to each router, and why it cannot change a response that already
+    # works.
+    default_response_class=SafeJSONResponse,
     version="0.1.0",
     description=(
         "Educational research API extracted from the Streamlit prototype. "
