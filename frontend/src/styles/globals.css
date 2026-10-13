@@ -33,19 +33,33 @@ html.light {
   --c-line2:   194 200 210;
   --c-txt:     26 30 38;
   --c-mut:     92 100 112;
-  --c-amber:   154 107 0;   /* darkened for contrast on white */
-  --c-green:   13 138 95;
-  --c-red:     205 32 40;
+  /* All three measured against BOTH panel surfaces, because nothing had ever
+     measured them: the e2e axe gate only ever renders the default dark theme,
+     so this palette shipped without a single contrast check. green was
+     13/138/95 (3.92:1 on panel2) and amber was 154/107/0 (4.22:1) — both
+     under AA's 4.5:1, on the two colours that carry gain/loss and warning
+     meaning on a financial screen. Darkened by the minimum that clears it,
+     hue and saturation held fixed, so these are the same colours and not new
+     ones. Same correction --c-mut got above, for the same reason. */
+  --c-amber:   146 101 0;   /* was 154 107 0 — 4.22:1, now 4.63:1 */
+  --c-green:   12 125 86;   /* was 13 138 95  — 3.92:1, now 4.63:1 */
+  --c-red:     205 32 40;   /* 4.93:1, already passing */
 }
 
 /* Colorblind-safe gain/loss: blue = up, orange = down (Okabe-Ito pair). */
 html.cb {
-  --c-green:   47 126 216;
-  --c-red:     230 159 0;
+  /* Lightened from 47/126/216, which measured 4.40:1 on panel2 — just under
+     AA. The colourblind palette is the one a user switches TO in order to read
+     the screen more easily, so shipping it below the threshold the default
+     theme meets is backwards. */
+  --c-green:   53 130 217;  /* was 47 126 216 — 4.40:1, now 4.62:1 */
+  --c-red:     230 159 0;   /* 9.90:1 on dark */
 }
 html.light.cb {
-  --c-green:   21 96 189;
-  --c-red:     176 116 0;
+  --c-green:   21 96 189;   /* 5.50:1 */
+  /* Darkened from 176/116/0, which measured 3.54:1 — the worst of any token
+     on any theme, and it is the LOSS colour. */
+  --c-red:     150 99 0;    /* was 176 116 0 — 3.54:1, now 4.63:1 */
 }
 
 @layer base {
@@ -95,7 +109,7 @@ html.light.cb {
                     border-l-2 border-amber pl-2.5; }
   .input-bare {
     @apply bg-panel border border-line rounded px-3 py-2 text-sm font-mono
-           text-txt placeholder:text-mut/85
+           text-txt placeholder:text-mut
            focus:border-amber focus:outline-none focus:ring-0;
   }
   .btn {

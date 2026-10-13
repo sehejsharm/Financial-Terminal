@@ -180,7 +180,7 @@ possibly wrong — verify against the company's filing before acting on it.`;
               actions={
                 <div className="flex flex-wrap items-center gap-2">
                   {missing.length > 0 && (
-                    <span className="text-[10.5px] text-amber/90 whitespace-nowrap">
+                    <span className="text-[10.5px] text-amber whitespace-nowrap">
                       {missing.length} expected figure{missing.length === 1 ? "" : "s"} missing
                     </span>
                   )}

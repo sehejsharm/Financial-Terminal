@@ -153,7 +153,7 @@ function SectorCard({ row, labels, weights }: {
           </span>
         </div>
         {row.reason && (
-          <div className="text-[10px] text-amber/90 mt-1.5 pl-[21px]">{row.reason}</div>
+          <div className="text-[10px] text-amber mt-1.5 pl-[21px]">{row.reason}</div>
         )}
       </button>
 

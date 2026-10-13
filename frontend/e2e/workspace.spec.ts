@@ -169,32 +169,54 @@ test("dragging the divider actually resizes the panes", async ({ page }) => {
   // Regression guard: the dividers used to sit inside display:contents
   // wrappers, whose clientWidth is 0, so every drag silently did nothing.
   //
-  // RETRIED, because this was flaky in CI and the failure was specific: the
-  // pane measured 492px before the drag and 492px after it — the drag landed
-  // before the handle's pointer listener was wired, so it did nothing at all,
-  // and it then passed on Playwright's retry. A single-shot drag depends on
-  // the page having finished hydrating at the instant the mouse goes down,
-  // which on a slower runner it has not.
+  // ASSERTS THE DIRECTION, NOT A MAGNITUDE, and drags both ways.
   //
-  // toPass re-measures and re-drags rather than loosening the assertion: a
-  // 160px drag must still grow the pane by more than 60px, which is the
-  // property the display:contents bug broke. The one thing it gives up is
-  // "the FIRST drag works", and that is not what this test is for — a
-  // cold-start drag is covered by the hydration waits in the beforeEach.
+  // It used to drag right 160px and require the pane to grow by more than 60.
+  // That failed in CI twice with different numbers — 492px before and 492px
+  // after on one run, then 582 before and 594.9 after on another. The second
+  // is the informative one: the drag DID work, it just moved 13px instead of
+  // 60, because how far a divider can travel depends on the layout. The
+  // neighbouring pane can only shrink to its own minimum, so a 160px pull is
+  // clamped — and the pane widths differ between runs now that each spec file
+  // gets a fresh account and therefore the default desk.
+  //
+  // So 60 was never a property of the code, it was a property of one layout on
+  // one machine. The property that matters is the one the display:contents bug
+  // actually broke: the dividers sat inside wrappers whose clientWidth was 0,
+  // so every drag silently did NOTHING. A 13px move disproves that; a 0px move
+  // is the regression.
+  //
+  // Dragging back as well makes this stronger than the version it replaces,
+  // not weaker: a stuck divider, a one-way-only divider, and a divider that
+  // reports movement it did not make all fail here, and none of those is
+  // caught by a single rightward drag with a bigger threshold.
+  const MIN_MOVE = 8;   // well clear of sub-pixel rounding on boundingBox
   const first = panes(page).first();
   const handle = page.getByTitle("Drag to resize").first();
   await expect(handle).toBeVisible();
 
-  await expect(async () => {
-    const before = (await first.boundingBox())!.width;
+  async function drag(dx: number) {
     const box = (await handle.boundingBox())!;
     await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
     await page.mouse.down();
-    await page.mouse.move(box.x + box.width / 2 + 160, box.y + box.height / 2,
+    await page.mouse.move(box.x + box.width / 2 + dx, box.y + box.height / 2,
       { steps: 12 });
     await page.mouse.up();
-    const after = (await first.boundingBox())!.width;
-    expect(after).toBeGreaterThan(before + 60);
+  }
+
+  // Retried, because the first drag can also land before the handle's pointer
+  // listener is wired on a slow runner — which is what the 492/492 run was.
+  await expect(async () => {
+    const before = (await first.boundingBox())!.width;
+    await drag(160);
+    const wider = (await first.boundingBox())!.width;
+    expect(wider, "a rightward drag did not widen the pane")
+      .toBeGreaterThan(before + MIN_MOVE);
+
+    await drag(-160);
+    const narrower = (await first.boundingBox())!.width;
+    expect(narrower, "a leftward drag did not narrow the pane again")
+      .toBeLessThan(wider - MIN_MOVE);
   }).toPass({ timeout: 20_000, intervals: [500, 1000, 2000] });
 });
 

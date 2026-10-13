@@ -28,7 +28,7 @@ export function Markdown({ children }: { children: string }) {
         components={{
           h1: (p) => <h2 className="heading mt-4 mb-1" {...p} />,
           h2: (p) => <h3 className="text-amber font-bold uppercase tracking-wide text-xs mt-4 mb-1" {...p} />,
-          h3: (p) => <h4 className="text-amber/90 font-bold text-xs mt-3 mb-1" {...p} />,
+          h3: (p) => <h4 className="text-amber font-bold text-xs mt-3 mb-1" {...p} />,
           ul: (p) => <ul className="list-disc pl-5 my-2 space-y-1 marker:text-amber" {...p} />,
           ol: (p) => <ol className="list-decimal pl-5 my-2 space-y-1 marker:text-amber" {...p} />,
           strong: (p) => <strong className="text-white font-bold" {...p} />,

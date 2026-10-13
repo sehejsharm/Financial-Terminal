@@ -174,7 +174,7 @@ export default function ScreenersPage() {
         <div className="mb-3 flex flex-col gap-1.5">
           <Note>{coverageNote(cov)}</Note>
           {columnNote(sparse) && (
-            <div className="text-[10.5px] text-amber/90 leading-relaxed max-w-4xl">
+            <div className="text-[10.5px] text-amber leading-relaxed max-w-4xl">
               {columnNote(sparse)}
             </div>
           )}

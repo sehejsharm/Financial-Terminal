@@ -91,7 +91,7 @@ function FlowTable() {
         )}
       </div>
       {data?.from && data.from === data.to && (
-        <div className="text-[10.5px] text-amber/90 mb-3">
+        <div className="text-[10.5px] text-amber mb-3">
           Only the latest available end-of-day file ({data.to}) is covered right
           now regardless of the trailing-window selected — NSE publishes
           bulk/block deals end-of-day and older archive days aren&apos;t always

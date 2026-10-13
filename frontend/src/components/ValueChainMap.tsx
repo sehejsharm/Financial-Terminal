@@ -1368,7 +1368,7 @@ export function ValueChainMap({ ticker }: { ticker: string }) {
           ))}
         </span>
         {missingMetric > 0 && (
-          <span className="text-amber/90 whitespace-nowrap" title="These edges are drawn from another measure (or at base weight) because the AI didn't return the selected one — they are NOT necessarily small.">
+          <span className="text-amber whitespace-nowrap" title="These edges are drawn from another measure (or at base weight) because the AI didn't return the selected one — they are NOT necessarily small.">
             {missingMetric} edge{missingMetric > 1 ? "s" : ""} lack this measure
           </span>
         )}

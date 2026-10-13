@@ -114,7 +114,7 @@ export function BoardSummary({ groups, volSyms }: {
             <span className="text-mut">/</span>
             <span className="num text-red">{g.breadth.down}</span>
             {g.breadth.unpriced > 0 && (
-              <span className="num text-amber/80"> ·{g.breadth.unpriced} unpriced</span>
+              <span className="num text-amber"> ·{g.breadth.unpriced} unpriced</span>
             )}
           </span>
         ))}

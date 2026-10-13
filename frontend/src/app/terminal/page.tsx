@@ -394,7 +394,7 @@ function TerminalInner() {
           {snap && [snap.dividend_yield, snap.roe, snap.profit_margin,
                     snap.debt_to_equity, snap.trailing_pe, snap.beta]
             .filter((v) => v == null).length >= 2 && (
-            <div className="text-[10.5px] text-amber/90 mb-4">
+            <div className="text-[10.5px] text-amber mb-4">
               Some fields show “—” because free data providers don&apos;t cover them
               for this listing (coverage varies by exchange; FMP fills most US
               names, NSE covers Indian price/valuation but not every ratio).

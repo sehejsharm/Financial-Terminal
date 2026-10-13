@@ -93,7 +93,7 @@ function Story({ cluster, now, compact, badge, lead }: {
           {others.length > 0 && (
             <>
               <span aria-hidden className="text-line2">·</span>
-              <span className="text-amber/90 whitespace-nowrap shrink-0">
+              <span className="text-amber whitespace-nowrap shrink-0">
                 {outlets.length} outlets
               </span>
             </>
@@ -260,7 +260,7 @@ export function NewsFeed({
                 through a long scroll — the whole point of bucketing. */}
             <div className="sticky top-0 z-10 flex items-center gap-2.5 py-1.5 mb-1
                             bg-bg/95 backdrop-blur-sm">
-              <span className="text-[11px] uppercase tracking-[0.14em] text-amber/90">
+              <span className="text-[11px] uppercase tracking-[0.14em] text-amber">
                 {bucket}
               </span>
               <span className="text-[10px] text-mut num">{list.length}</span>

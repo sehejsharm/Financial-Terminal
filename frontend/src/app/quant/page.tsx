@@ -376,8 +376,16 @@ export default function QuantPage() {
                             weak ? "text-mut" : "text-txt"}`}>
                             {full.beta == null ? "—" : fmtNum(full.beta, 2)}
                           </td>
+                          {/* Full `text-red`, not an 80% opacity of it.
+                              Measured on the dark palette: red at 80% over
+                              the panel is 4.02:1 against a 4.5:1
+                              requirement, and this is the cell WARNING that
+                              the benchmark explains almost none of the
+                              ticker's movement — the one number on the row a
+                              reader most needs to be able to see. Full red is
+                              5.74:1. Nothing below 90% passes for this token. */}
                           <td className={`px-3 py-2 num text-right ${
-                            weak ? "text-red/80" : "text-mut"}`}
+                            weak ? "text-red" : "text-mut"}`}
                               title={weak
                                 ? `${bench} explains almost none of this ticker's movement`
                                 : undefined}>

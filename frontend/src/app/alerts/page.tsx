@@ -404,7 +404,7 @@ export default function AlertsPage() {
             <div key={p.text}
                  className={`text-[10.5px] leading-relaxed ${
                    p.severity === "error" ? "text-red"
-                     : p.severity === "warn" ? "text-amber/90" : "text-mut"}`}>
+                     : p.severity === "warn" ? "text-amber" : "text-mut"}`}>
               {p.text}
             </div>
           ))}

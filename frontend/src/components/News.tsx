@@ -22,7 +22,7 @@ const SENT_STYLE: Record<string, string> = {
 const MATCH_STYLE: Record<string, string> = {
   symbol: "border-amber/50 text-amber",
   name: "border-line2 text-mut",
-  loose: "border-red/40 text-red/80",
+  loose: "border-red/40 text-red",
 };
 
 /** Tiny inline sentiment-trend sparkline from the rollup history. */
@@ -114,7 +114,7 @@ export function News({ ticker }: { ticker: string }) {
         actions={
           <div className="flex flex-wrap items-center gap-2">
             {outcome.dropped != null && outcome.dropped > 0 && outcome.strict && (
-              <span className="text-[10.5px] text-amber/90 whitespace-nowrap">
+              <span className="text-[10.5px] text-amber whitespace-nowrap">
                 {outcome.dropped} namesake{outcome.dropped === 1 ? "" : "s"} filtered out
               </span>
             )}

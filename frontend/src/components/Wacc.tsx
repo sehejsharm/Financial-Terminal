@@ -244,7 +244,7 @@ export function Wacc({ ticker, snap }: { ticker: string; snap: Snapshot | null }
           {flags.map((f) => (
             <div key={f.text}
                  className={`flex items-start gap-2 text-[10.5px] leading-relaxed ${
-                   f.severity === "warn" ? "text-red" : "text-amber/90"}`}>
+                   f.severity === "warn" ? "text-red" : "text-amber"}`}>
               <AlertTriangle size={12} className="shrink-0 mt-[1px]" />
               <span>{f.text}</span>
             </div>

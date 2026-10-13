@@ -438,7 +438,7 @@ export default function PortfolioPage() {
           <LiveTotals positions={data.positions} cur={cur} fallback={t}
                       realizedTotal={data.realized ? data.realized.total : null} factors={f ?? null} />
           {mixedCcy && (
-            <div className="text-[10.5px] text-amber/90 -mt-4 mb-6">
+            <div className="text-[10.5px] text-amber -mt-4 mb-6">
               This book holds multiple currencies ({posCcys.join(", ")}) — the totals
               above are un-converted sums shown without a symbol. Each holding&apos;s own
               currency is used in the rows below.
