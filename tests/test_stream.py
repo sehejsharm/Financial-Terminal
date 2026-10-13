@@ -3,6 +3,7 @@ WebSocket contract (auth, subscribe → snapshot, published tick → delta)."""
 from __future__ import annotations
 
 import importlib
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -133,6 +134,31 @@ def test_stream_ws_subscribe_and_delta(client):
     with client.websocket_connect(f"/api/v1/stream?token={tok}") as ws:
         assert ws.receive_json()["t"] == "stat"       # first frame
         ws.send_json({"op": "sub", "symbols": ["RELIANCE.NS"]})
+
+        # WAIT FOR THE SUBSCRIPTION TO BE REGISTERED BEFORE PUBLISHING.
+        #
+        # `send_json` only hands the frame to the transport; the server
+        # processes it on another thread. This test used to publish on the very
+        # next line, so when the receive loop had not yet reached the `sub` the
+        # tick went to a hub with no subscriber for that symbol, `publish` was
+        # a no-op, and no "px" frame was ever enqueued — the test then read six
+        # heartbeats and asserted on `got is None`.
+        #
+        # It is a narrow window, which is why this passed for months and failed
+        # once in CI (920 passed, 1 failed) on a commit that changed only a
+        # markdown file. Under load, or with the suite's randomised ordering
+        # putting slow modules first, the server thread loses the race.
+        #
+        # hub.active_symbols() is the server's own view of what is subscribed,
+        # so polling it removes the guess entirely rather than making the
+        # window wider with a sleep.
+        for _ in range(200):                           # ≤2s, normally one pass
+            if "RELIANCE.NS" in hub.active_symbols():
+                break
+            time.sleep(0.01)
+        assert "RELIANCE.NS" in hub.active_symbols(), \
+            "the server never registered the subscription"
+
         hub.publish("RELIANCE.NS", {"ltp": 2945.5, "chgPct": 0.42, "ts": 99})
         got = None
         for _ in range(6):
@@ -140,7 +166,8 @@ def test_stream_ws_subscribe_and_delta(client):
             if m["t"] == "px":
                 got = m
                 break
-        assert got and got["d"][0]["s"] == "RELIANCE.NS"
+        assert got, "subscribed and published, but no px frame arrived"
+        assert got["d"][0]["s"] == "RELIANCE.NS"
         assert got["d"][0]["ltp"] == 2945.5
 
 
