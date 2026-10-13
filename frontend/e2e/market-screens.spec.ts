@@ -58,7 +58,21 @@ const OWNERSHIP = {
 
 const DAY = 86_400_000;
 function history() {
-  const end = Date.UTC(2026, 5, 30);
+  // Ends TODAY, not on a fixed date. It used to be Date.UTC(2026, 5, 30),
+  // which was "roughly now" when this spec was written and is steadily
+  // receding into the past. The spec asserts on performance over real
+  // CALENDAR windows — "1 week", "1 month", "Year to date" — so a stub whose
+  // newest session is months old is being asked what happened in the last
+  // week using data that stops long before it. That passes only for as long
+  // as the component stays tolerant of a window with nothing in it, which is
+  // not a property this spec is testing or pinning.
+  //
+  // Anchored to the UTC day rather than to Date.now() so the series is
+  // identical for every test in a run and does not shift by milliseconds
+  // between them.
+  const today = new Date();
+  const end = Date.UTC(today.getUTCFullYear(), today.getUTCMonth(),
+                       today.getUTCDate());
   // 420 sessions, rising with a visible mid-window drawdown.
   return Array.from({ length: 420 }, (_, i) => {
     const drift = 100 * 1.0012 ** i;
