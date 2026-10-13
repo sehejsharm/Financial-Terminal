@@ -252,7 +252,66 @@ APP_BASE_URL=https://<your-frontend-origin>
 
 Then `sudo docker compose up -d` and check `/healthz`.
 
-### B4. Rotate the admin password
+### B4. Set the off-host backup destination (NEW — and it is the point of backups)
+
+There were no backups at all; there are now. `deploy/backup.sh` runs daily,
+verifies every archive by extracting it and diffing, proves a quiet window, and
+restores correctly — `install-autodeploy.sh` runs a full snapshot → destroy →
+restore round trip at install time so you end the install with a *demonstrated*
+restore rather than a believed one.
+
+**But every snapshot is on the same volume as the data it protects.** That
+survives `rm -rf data/`, a corrupt write and a bad deploy. It does not survive
+losing the instance or its boot volume, which is the failure a backup is
+actually for.
+
+One line fixes it. The file is created for you at mode 0600, with examples in
+it:
+
+```bash
+ssh <your-vm>
+sudo nano /etc/motherboard-backup.env
+```
+
+Uncomment and fill in ONE of these (keep the single quotes — `$1` must reach
+the command, not be expanded by the editor):
+
+```
+MB_BACKUP_OFFHOST_CMD='for f in "$1" "$2" "$3"; do rclone copy "$f" remote:motherboard/; done'
+# or
+MB_BACKUP_OFFHOST_CMD='scp "$1" "$2" "$3" backup@HOST:/srv/motherboard/'
+```
+
+Send **all three** files, not just the archive. `restore.sh` refuses an archive
+it cannot verify, and an archive fetched back without its `.sha256` is exactly
+that — I measured this, and it matters: with the checksum gate removed,
+restoring a *truncated* archive exits 0 and replaces your live data with a
+partial payload. The checksum is not a second line of defence, it is the only
+one.
+
+Then:
+
+```bash
+sudo systemctl restart mb-backup.service
+sudo tail -30 /var/log/mb-backup.log        # expect "off-host push OK"
+```
+
+And prove it round-trips once — fetch an archive back from wherever you sent it
+and run:
+
+```bash
+bash ~/Financial-Terminal/deploy/restore.sh /path/to/fetched.tar.gz --verify-only
+```
+
+Until this is set, `backup.sh` warns on every single run and the installer
+warns at the end. That noise is deliberate: a local-only backup looks exactly
+like a working backup right up to the moment the volume is gone.
+
+If you would rather not pick a provider yet, say so and I will add a step to
+`autodeploy.sh` that at least copies the newest snapshot off the boot volume —
+better than nothing, still not off-host.
+
+### B5. Rotate the admin password
 
 It appeared in chat early in this project and as far as I know has never been
 rotated.
@@ -273,14 +332,27 @@ re-synced on every boot, so a change plus a restart is the whole procedure.
 
 **Who are you selling to?** This is the fork that determines everything else.
 
-- **Individual retail users:** the gap is small. Fix the numeric defects and the
-  NaN 500 (I am doing both), set the grievance address, get the SEBI answer.
-  The security model would survive scrutiny today.
-- **Institutions:** the gap is the whole of `docs/enterprise-migration-plan.md`
-  — a real database with migrations and backups, horizontal scale, staging,
-  SSO/SAML, audit export, RBAC beyond one admin role, a DPA, an uptime SLA, and
-  someone on call. The datastore is currently JSON files on one container's
-  volume with no backup, and the user store does unlocked whole-file
-  read-modify-write across 8 call sites.
+- **Individual retail users:** the gap is now **A1 (the grievance address), B1,
+  B4 and the SEBI answer**, and nothing else I can see. The numeric defects and
+  the NaN 500 are fixed, the user store no longer loses writes, backups exist
+  and have been proven to restore, and the security model would survive
+  scrutiny today.
+- **Institutions:** the gap is still large, but two of the three things I called
+  out last time are closed. **Backups exist** (`deploy/backup.sh`, 29 tests in
+  CI, a demonstrated restore) and **the user store is no longer doing unlocked
+  read-modify-write** — that one was worth measuring: eight concurrent account
+  creations all reported success and one account survived. What is left is a
+  real database (`docs/DATASTORE-MIGRATION.md` is now a concrete design, not a
+  gesture), horizontal scale, staging, SSO/SAML, audit export, RBAC beyond one
+  admin role, a DPA, an uptime SLA, and someone on call.
 
 Answer C before spending money on A5 or A6.
+
+One correction to my earlier framing, because it changes the order: I said the
+database migration was the institutional blocker. Having now designed it
+against the actual code, the blocker is **a second process**, and the database
+is what unblocks that. Everything else still in-process — the rate limiter, the
+cache, the stream hub's connection registry — needs Redis as well before a
+second worker helps. So "move to Postgres" is one step of a larger piece of
+work, not the piece of work. §I of `docs/OPEN-ITEMS.md` says when to start it,
+and the trigger is a business event rather than a tidier diagram.
