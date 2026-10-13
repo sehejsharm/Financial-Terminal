@@ -12,6 +12,7 @@ import json
 import os
 import secrets
 import sys
+import threading
 import time
 from datetime import datetime, timezone
 from pathlib import Path
@@ -111,18 +112,62 @@ def _seed() -> dict:
     return data
 
 
+# Serializes the whole read-modify-write cycle on users.json.
+#
+# WHY: every mutator here is _load() (read the entire file) -> mutate the dict
+# -> _save() (write the entire file back). Starlette runs sync endpoints in a
+# threadpool, so two requests genuinely overlap, and without this lock they
+# interleave as A-reads, B-reads, A-writes, B-writes. B's write is a copy of the
+# file as it was BEFORE A's change, so A's change is gone — an account the admin
+# screen said was created, or a plan it said was changed, silently reverting
+# with nothing logged and nothing to retry. Same approach as backend/sessions.py.
+#
+# It is not enough to lock the write alone: create_user checks "does this name
+# exist" and then inserts, so the check and the insert have to be inside one
+# critical section or both callers pass the check.
+#
+# RLock, not Lock: _load() takes it too (it writes, on first run), so a mutator
+# that holds it and then calls _load() must be able to re-acquire. With a plain
+# Lock that is a deadlocked worker rather than a redundant acquire.
+#
+# The read-only accessors (verify_credentials, get_user, list_users,
+# find_by_email, email_for) deliberately do NOT hold it beyond their _load().
+# There is no shared in-memory cache here — every _load() re-parses the file —
+# and write_json_atomic() swaps the file with os.replace(), so a reader sees the
+# whole old file or the whole new one, never a torn one. Holding the lock across
+# verify_credentials in particular would serialize every login behind ~40ms of
+# PBKDF2. For the same reason the mutators hash OUTSIDE the lock.
+#
+# THE LIMIT, STATED PLAINLY: this is a threading lock, so it protects ONE
+# PROCESS. It is sufficient today only because the app runs a single uvicorn
+# worker — backend/Dockerfile passes no --workers — and that is the assumption
+# that makes it correct. Add a second worker, a second container, or a Streamlit
+# process writing the same MB_DATA_DIR, and two processes can still lose each
+# other's writes exactly as described above, because neither can see this lock.
+# At that point users.json needs cross-process protection (a real database, or
+# at minimum an flock held across the read-modify-write), not a bigger lock here.
+_lock = threading.RLock()
+
+
 def _load() -> dict:
-    if not USERS_PATH.exists():
-        data = _seed()
-        _save(data)
+    # Locked because this is not purely a read: on first run it seeds the master
+    # admin and writes it. Concurrent first requests would otherwise each find
+    # the file missing and each seed a different admin record over the last one
+    # — and when the password was auto-generated, the one surfaced to the
+    # operator in INITIAL_ADMIN_PASSWORD.txt need not be the record that
+    # survived, which is a lockout with no way back in.
+    with _lock:
+        if not USERS_PATH.exists():
+            data = _seed()
+            _save(data)
+            return data
+        # Falls back to the .bak copy and quarantines an unreadable primary,
+        # instead of silently returning an empty user table — that turned one bad
+        # write into "every account vanished", and the next save made it permanent.
+        data = read_json_resilient(USERS_PATH, {"users": {}})
+        if not isinstance(data, dict) or "users" not in data:
+            return {"users": {}}
         return data
-    # Falls back to the .bak copy and quarantines an unreadable primary,
-    # instead of silently returning an empty user table — that turned one bad
-    # write into "every account vanished", and the next save made it permanent.
-    data = read_json_resilient(USERS_PATH, {"users": {}})
-    if not isinstance(data, dict) or "users" not in data:
-        return {"users": {}}
-    return data
 
 
 def _save(data: dict) -> None:
@@ -131,6 +176,10 @@ def _save(data: dict) -> None:
     Never truncate-then-write: a failure part-way (a full disk is the
     realistic case) would leave users.json empty and lock everyone out, and
     freeing the disk afterwards would not bring the accounts back.
+
+    Does not take `_lock` itself: a caller that read-modify-writes must hold it
+    across the whole cycle, so that the cycle — not just this write — is the
+    atomic unit. Locking only here would still lose the update.
     """
     DATA_DIR.mkdir(parents=True, exist_ok=True)
     write_json_atomic(USERS_PATH, data)
@@ -171,26 +220,32 @@ def ensure_env_admin() -> None:
     pw = os.getenv("MOTHERBOARD_ADMIN_PASSWORD", "").strip()
     if not user or not pw:
         return
-    data = _load()
     key = user.lower()
     salt = secrets.token_hex(16)
-    rec = data["users"].get(key)
-    if rec is None:
-        data["users"][key] = {
-            "display": user, "salt": salt, "hash": _hash(pw, salt),
-            "role": ROLE_MASTER, "active": True, "created": _now(),
-        }
-    else:
-        # Skip the write when the password already matches — avoids churning
-        # the salt/hash (and file mtime) on every boot.
-        if _hash(pw, rec["salt"]) == rec["hash"] and rec.get("active", True) \
-                and rec.get("role") == ROLE_MASTER:
-            return
-        rec["salt"] = salt
-        rec["hash"] = _hash(pw, salt)
-        rec["active"] = True
-        rec["role"] = ROLE_MASTER
-    _save(data)
+    # Hashed before the lock is taken: PBKDF2 is 200k iterations of deliberate
+    # slowness and needs nothing from the file, so it must not hold up writers.
+    new_hash = _hash(pw, salt)
+    with _lock:
+        data = _load()
+        rec = data["users"].get(key)
+        if rec is None:
+            data["users"][key] = {
+                "display": user, "salt": salt, "hash": new_hash,
+                "role": ROLE_MASTER, "active": True, "created": _now(),
+            }
+        else:
+            # Skip the write when the password already matches — avoids churning
+            # the salt/hash (and file mtime) on every boot. This comparison does
+            # need the stored salt, so it stays inside the lock; it is a boot
+            # path, not a request path.
+            if _hash(pw, rec["salt"]) == rec["hash"] and rec.get("active", True) \
+                    and rec.get("role") == ROLE_MASTER:
+                return
+            rec["salt"] = salt
+            rec["hash"] = new_hash
+            rec["active"] = True
+            rec["role"] = ROLE_MASTER
+        _save(data)
 
 
 def verify_credentials(username: str, password: str) -> dict | None:
@@ -207,14 +262,15 @@ def verify_credentials(username: str, password: str) -> dict | None:
 
 def set_plan(username: str, plan: str) -> tuple[bool, str]:
     """Move an account to a plan. The only way a plan changes."""
-    data = _load()
-    rec = data["users"].get((username or "").strip().lower())
-    if not rec:
-        return False, "User not found."
-    rec["plan"] = plan
-    rec["plan_since"] = _now()
-    _save(data)
-    return True, f"{rec['display']} moved to {plan}."
+    with _lock:
+        data = _load()
+        rec = data["users"].get((username or "").strip().lower())
+        if not rec:
+            return False, "User not found."
+        rec["plan"] = plan
+        rec["plan_since"] = _now()
+        _save(data)
+        return True, f"{rec['display']} moved to {plan}."
 
 
 def backfill_plans(default_plan: str) -> int:
@@ -230,16 +286,17 @@ def backfill_plans(default_plan: str) -> int:
     Runs once at startup and is a no-op afterwards, since it only touches
     records with no `plan` key at all.
     """
-    data = _load()
-    touched = 0
-    for rec in data["users"].values():
-        if "plan" not in rec:
-            rec["plan"] = default_plan
-            rec["plan_since"] = rec.get("created") or _now()
-            touched += 1
-    if touched:
-        _save(data)
-    return touched
+    with _lock:
+        data = _load()
+        touched = 0
+        for rec in data["users"].values():
+            if "plan" not in rec:
+                rec["plan"] = default_plan
+                rec["plan_since"] = rec.get("created") or _now()
+                touched += 1
+        if touched:
+            _save(data)
+        return touched
 
 
 def find_by_email(email: str) -> dict | None:
@@ -304,53 +361,65 @@ def create_user(username: str, password: str | None = None,
         return False, "Username and password are required."
     if len(password) < 6:
         return False, "Password must be at least 6 characters."
-    data = _load()
-    if username.lower() in data["users"]:
-        return False, f"User '{username}' already exists."
     salt = secrets.token_hex(16)
-    data["users"][username.lower()] = {
-        "display": username, "salt": salt, "hash": _hash(password, salt),
-        "role": role if role in (ROLE_USER, ROLE_MASTER) else ROLE_USER,
-        "active": True, "created": _now(),
-        "plan": DEFAULT_PLAN,
-        "email": (email or "").strip(),
-        # Shown in the admin list so an account waiting on its invite is
-        # distinguishable from one whose owner simply has not logged in.
-        "pending": pending,
-    }
-    _save(data)
+    pw_hash = _hash(password, salt)  # before the lock; see ensure_env_admin
+    with _lock:
+        # The duplicate check and the insert are one critical section on
+        # purpose. Split across threads, both callers find the name absent, both
+        # are told "created", and the second record overwrites the first — so
+        # one admin hands out a password that does not work, with nothing
+        # anywhere saying why.
+        data = _load()
+        if username.lower() in data["users"]:
+            return False, f"User '{username}' already exists."
+        data["users"][username.lower()] = {
+            "display": username, "salt": salt, "hash": pw_hash,
+            "role": role if role in (ROLE_USER, ROLE_MASTER) else ROLE_USER,
+            "active": True, "created": _now(),
+            "plan": DEFAULT_PLAN,
+            "email": (email or "").strip(),
+            # Shown in the admin list so an account waiting on its invite is
+            # distinguishable from one whose owner simply has not logged in.
+            "pending": pending,
+        }
+        _save(data)
     return True, f"User '{username}' created."
 
 
 def set_active(username: str, active: bool) -> None:
-    data = _load()
-    rec = data["users"].get(username.lower())
-    if rec and rec["role"] != ROLE_MASTER:
-        rec["active"] = active
-        _save(data)
+    with _lock:
+        data = _load()
+        rec = data["users"].get(username.lower())
+        if rec and rec["role"] != ROLE_MASTER:
+            rec["active"] = active
+            _save(data)
 
 
 def delete_user(username: str) -> None:
-    data = _load()
-    rec = data["users"].get(username.lower())
-    if rec and rec["role"] != ROLE_MASTER:
-        del data["users"][username.lower()]
-        _save(data)
+    with _lock:
+        data = _load()
+        rec = data["users"].get(username.lower())
+        if rec and rec["role"] != ROLE_MASTER:
+            del data["users"][username.lower()]
+            _save(data)
 
 
 def reset_password(username: str, password: str) -> tuple[bool, str]:
     if len(password) < 6:
         return False, "Password must be at least 6 characters."
-    data = _load()
-    rec = data["users"].get(username.lower())
-    if not rec:
-        return False, "User not found."
-    rec["salt"] = secrets.token_hex(16)
-    rec["hash"] = _hash(password, rec["salt"])
-    # Setting a password is what completes an invite.
-    rec["pending"] = False
-    _save(data)
-    return True, f"Password updated for '{rec['display']}'."
+    salt = secrets.token_hex(16)
+    pw_hash = _hash(password, salt)  # before the lock; see ensure_env_admin
+    with _lock:
+        data = _load()
+        rec = data["users"].get(username.lower())
+        if not rec:
+            return False, "User not found."
+        rec["salt"] = salt
+        rec["hash"] = pw_hash
+        # Setting a password is what completes an invite.
+        rec["pending"] = False
+        _save(data)
+        return True, f"Password updated for '{rec['display']}'."
 
 
 def list_users() -> list[dict]:
