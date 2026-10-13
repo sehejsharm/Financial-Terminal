@@ -290,6 +290,32 @@ skip, which is strictly worse than an advisory one. `retries: 1` stays, so a
 genuine one-off flake reports as flaky without failing the build, while a
 reproducible failure stops a merge.
 
+It then failed on its first run as a required check, on two more test defects
+that had been misread as races for weeks — which is the argument for having
+made it one, not against.
+
+### When the e2e job fails: triage
+
+The job is blocking, so this will happen. **Do not put `continue-on-error`
+back.** In six for six cases so far the cause was the test, not the
+environment, and twice I misdiagnosed a deterministic bug as a flake and
+"fixed" it with a retry wrapper that could never have worked.
+
+Read the log before theorising. The job uploads `frontend/test-results/` as the
+`playwright-results` artifact, and **"No files were found with the provided
+path" in the upload step means a genuinely clean run** — no failures, no
+retries. The patterns actually seen here, in rough order of likelihood:
+
+| Symptom in the log | What it has meant |
+|---|---|
+| `strict mode violation … resolved to N elements` | A plain-string `getByText("…")` is a **case-insensitive substring** match. The DES test asked for `"Performance"` and matched both the heading and a note reading "…to measure performance" that appears while data is loading. Add `{ exact: true }`, or assert on something that exists only in the state you mean. ~30 short plain-string locators remain in the suite; this is the most likely thing to bite next. |
+| A measurement that does not change at all, and does not change on retry | Not a race — retrying proves that. Something is wired to a different axis, element or event than the test assumes. The divider drag read `e.clientY` on a handle the test dragged along X. |
+| A measurement that changes by less than asserted | The threshold is a property of one layout, not of the code. Assert the direction, or derive the expected magnitude. |
+| A count that is right locally and wrong in CI | Something renders only once provider data arrives. The screener's SECTOR select is the example; a global `locator("select")` count changed with the weather. |
+| An axe violation on `nextjs-portal` | Next's **development** error overlay, excluded in `a11y.spec.ts`. If it reappears, the exclusion was dropped — it is not an app defect. |
+| An axe violation only in CI | The app renders a state local runs never reach. `a11y.spec.ts` has two deterministic degraded modes for exactly this; reproduce with those before guessing. |
+| State leaking between spec FILES | Should be impossible now — each file gets its own account via `signIn`. If it recurs, check `specAccount()` in `e2e/helpers.ts` is still deriving from `test.info().file`. |
+
 ## Not verified, and worth saying so
 
 The rollback path **has not been executed**. There is no Docker in the
