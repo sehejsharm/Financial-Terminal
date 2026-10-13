@@ -30,6 +30,53 @@ Everything else was already clean. Credit where due: the skip link, the
 `aria-label`s on icon controls, the colourblind-safe gain/loss palette and the
 `prefers-reduced-motion` handling all predate this phase.
 
+### What the gate could not see, and now does (2026-10-13)
+
+"Everything else was already clean" was true of what the gate measured. It was
+measuring less than it looked, in two structural ways, and closing both found
+real defects.
+
+**1. It only ever saw the happy path.** The gate loads each route and runs axe,
+so what it measures is whatever data happened to arrive. Locally data arrives;
+in CI the market-data providers do not answer, so the same routes render error
+and empty states — and the gate had been failing there, on and off, in a way
+that reads as infrastructure flake. It was not.
+
+The suite now forces the degraded state in **two shapes**, because they render
+different things and only one of them is an error state: every data call 503s
+(error states), and market data answers 200 with nothing while the app's own
+stores still work (empty states — the shape CI actually has). Both run on every
+machine, so the result is the same everywhere.
+
+| Found by | Violation | What it was |
+|---|---|---|
+| degraded gate | `color-contrast`, ×5 routes | **Not the app.** axe was scanning `nextjs-portal`, the element Next injects *in development* for its error overlay. The suite runs `npm run dev`, so a red build was being caused by something that never ships. Now excluded — which is what makes the gate measure the application. |
+| degraded gate | `nested-interactive`, `/terminal` | The price chart's own `role="img"` container, added for accessibility in this very phase. ARIA defines `role="img"` as *children presentational*, so AT is told to ignore everything inside — and lightweight-charts **injects a licence-required link** (`#tv-attr-logo`) into that container. The markup said "one image, ignore its contents" around a real, tabbable, off-site link. Now `role="figure"`, which takes a name and is allowed to contain content. |
+| loaded state | `select-name`, **critical** | The news source filter is a `<select>` with no accessible name. It renders only when there is more than one source, so it needed real headlines to exist at all. |
+| loaded state | `color-contrast`, `/quant` `/sharks` | Figures deliberately dimmed to mean "too small to call" measured **2.39:1** and **2.92:1** against a 4.5:1 requirement. |
+| loaded state | `scrollable-region-focusable` | `ScrollX` — the shared primitive behind 16 tables — could not take focus. Arrow keys scroll the focused element, so a keyboard user could not reach the clipped columns, which on a financial statement are the earlier periods. |
+
+**2. It only ever rendered ONE OF FOUR THEMES.** The suite never switches to
+`html.light`, `html.cb` or `html.light.cb`, so three shipped palettes had never
+had a single contrast check. Measured at full strength against both panel
+surfaces, four tokens failed:
+
+    light      green 3.92:1 ✗   amber 4.22:1 ✗
+    dark+cb    green 4.40:1 ✗
+    light+cb   red   3.54:1 ✗   amber 4.22:1 ✗
+
+Those carry gain, loss and warning. `light+cb` red at 3.54:1 was the worst
+token on any theme, and it is the *loss* colour on the palette a colourblind
+user switches to in order to read the screen more easily. All four corrected by
+the minimum that clears AA, hue and saturation held fixed.
+
+This one is **not** fixed by a better axe gate, and that is the point:
+`src/lib/__tests__/contrast.test.ts` computes the real WCAG ratio from the real
+palette tokens for every `text-<token>/<NN>` usage, on all four themes, in
+vitest. axe can only judge pixels that were painted, in the theme that was
+rendered; the rule being broken is a property of the source and can be checked
+exhaustively with no browser and no data.
+
 ## What axe cannot check, and what that found
 
 | Behaviour | Test | What it found |
@@ -67,10 +114,11 @@ deliberately *not* a live region.
    been through any of them. This is the largest gap and it needs a person with
    the software, not another test.
 2. **Charts have a label, not parity.** `PriceChart` draws to a canvas, so
-   there is nothing in the DOM to read. It now has `role="img"` and a name
+   there is nothing in the DOM to read. It has `role="figure"` and a name
    saying what it is and that the figures are available as text in the
    surrounding panels — which is a floor. A proper data-table alternative would
-   be better and is not built.
+   be better and is not built. (It was `role="img"` until that turned out to be
+   an actual violation — see the table above.)
 3. **The connection badge is `hidden sm:flex`**, so on the narrowest screens it
    is not rendered and therefore not announced either.
 4. **The axe gate now runs in CI, but does not block.** The Playwright suite
