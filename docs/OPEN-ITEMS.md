@@ -9,7 +9,41 @@ ran in.
 
 ---
 
+## STATUS, 2026-10-13 — what has since been closed
+
+§A, §B and most of §G are done. The sections below are kept as written rather
+than deleted, because the reasoning in them is the record of why each thing
+mattered, and a closed item with its argument intact is more useful than a
+missing one. **Where a section is now wrong, it says so inline.**
+
+| | |
+|---|---|
+| **§A — all six numeric defects** | Fixed. `tests/invariants` is 36 passed, **zero xfails** — the whole ledger is cleared. Beta is now computed here (`lib/beta.py`, OLS against ^NSEI/^BSESN, refusing rather than guessing) instead of taken from a vendor regressing an NSE listing against the S&P. |
+| **§B1 — the NaN 500** | Fixed centrally, not per router: `SafeJSONResponse` as the app's `default_response_class`, so a route *cannot* emit NaN. The five routers that were missing the guard are why it is central. |
+| **§B2 — the a11y violation in the degraded state** | Fixed, and it was **five** violations, not one. One was Next's dev overlay being scanned by axe (a false positive causing a real red build); four were real and only appeared when data loaded — a critical unnamed `<select>` on /news, contrast failures on /quant and /sharks measured at 2.39:1 and 2.92:1 against a 4.5:1 requirement, and a horizontally-scrolling financials panel a keyboard could not scroll. |
+| **§G — the e2e suite's "three provider-dependent specs"** | **That diagnosis was wrong.** The CI log said 196 passed / 2 failed / 2 flaky, and not one of the four was a provider outage. All 28 spec files signed in as the *same* account, so they shared one user's portfolios, workspaces and alerts. Per-spec accounts now, derived from the filename, with no spec file changed. CI went to 200 passed / 0 flaky. |
+| **§G — unlocked user-store writes** | Fixed. Measured first: 8 of 8 concurrent `create_user` calls returned "created" and **1 account survived**. `tests/test_user_store_concurrency.py` fails without the lock. |
+| **§G — no backup** | `deploy/backup.sh` + `restore.sh`, 29 tests in CI, a daily timer, and an install-time self-test that proves the round trip on the host. Mutation-checked: with the checksum gate removed, restoring a *truncated* archive exits 0 and replaces live data with a partial payload. **Off-host is still one env var away — see §D.** |
+| **§G — the unthrottled WebSocket handshake** | Fixed. `BaseHTTPMiddleware` never sees a WS upgrade, so the handshake asks for its own ceiling before the token is decoded. |
+| **§G — CSP `script-src` report-only** | See §H below. The claimed enforcement path is **ruled out, measured** — and the report-only posture turned out to be reporting to nobody, which is now fixed. |
+
+Still open and unchanged: **§C in full** (the SEBI question, the grievance
+address, the legal review, GST), **§D** (one command on the VM, plus exercising
+the rollback), **§E** (vendor decisions), **§F** (claims needing a real
+deployment, a real phone or a real person with a screen reader).
+
+`docs/HANDOFF-TO-YOU.md` is the list of what needs you rather than me, with a
+Claude-in-Chrome prompt for each browser task and a shell runbook for each VM
+one.
+
+---
+
 ## A. Correctness defects in displayed financial figures
+
+> **CLOSED, 2026-10-13.** All six are fixed and every `xfail` is gone. Kept
+> below because the mechanisms are worth remembering — particularly #11, where
+> six NIFTY constituents reading as uncorrelated with their own market was the
+> tell that the regression was against the wrong index.
 
 **These were the surprise.** They live in the `xfail` ledger in
 `tests/invariants/` — strict markers, so each one is a test that documents a
@@ -39,6 +73,11 @@ which feed valuation.
 ---
 
 ## B. Real bugs found by CI, not yet fixed
+
+> **CLOSED, 2026-10-13.** Both fixed. §B2 turned out to be five violations
+> rather than one, and one of those five was axe scanning Next's own
+> development error overlay — a false positive that had been producing a real
+> red build and was indistinguishable at a glance from an app defect.
 
 Both surfaced on the first e2e run in CI (`197 passed, 3 failed`) and both pass
 locally, which is why they had not been seen.
@@ -146,7 +185,69 @@ been executed, because there is no Docker in the environment it was written in.
 
 ---
 
+## H. CSP: the enforcement path, ruled out with evidence
+
+Added 2026-10-13, replacing §G's claim that this did not need Next 16.
+
+**The claim was: "the pages are statically prerendered, so the `__next_f`
+inline scripts are fixed at build time and can be hashed by a post-build step
+(~46 hashes)."** It sounds right. `frontend/scripts/csp-hashes.mjs` is now in
+the repo and measures it:
+
+> Two **clean builds of identical source** each produced 23 prerendered HTML
+> files containing 68 distinct inline scripts — and roughly half the hashes
+> differ between the two builds, with not a line of source edited. The
+> flight-data payloads embed per-build identifiers.
+
+So a hash list is valid for exactly one build, and every deploy is a fresh
+build. Shipping it would give a policy that is correct the day it is generated
+and silently blocks the app's own hydration on the next deploy — which is the
+worst available failure shape, because it looks like it is working. The
+re-check after the Next 16 upgrade is three commands, in `next.config.js`.
+
+**Separately, and worse: report-only was reporting to nobody.** There was no
+`report-uri`, no `report-to` and no endpoint anywhere in the repo, so every
+violation went to the console of whoever had devtools open. A report-only
+policy with no collector is not a weaker control than an enforced one — it is
+not a control at all, while still reading as one on an audit checklist.
+
+`backend/routes/csp.py` collects them now (aggregated, capped, query strings
+stripped, always 204), and `GET /api/v1/csp-report/summary` (master-admin) is
+the list that decides when `CSP_ENFORCE=1` is safe: flip it when every
+signature there has been hashed or allowed. That replaces the current
+prerequisite, which was a hand-count of 42 violations taken in a browser on one
+day against six routes.
+
+---
+
+## I. Getting off JSON files
+
+`docs/DATASTORE-MIGRATION.md`, added 2026-10-13: a concrete Postgres schema,
+the cutover, and the hosting trap, written against the stores that actually
+exist.
+
+The finding worth repeating here: **`backend/storage/__init__.py` already
+defines a `Storage` interface**, so eight of the thirteen stores can move
+behind a `PostgresStore` with no caller changes. **Five bypass it** — users,
+sessions, invites, usage and grievances — and those five hold authentication,
+authorisation and the billing meter. The work is to move those onto the
+interface *while they are still JSON*, so the cutover is one implementation
+swap rather than six simultaneous rewrites.
+
+Also found while writing it, and not previously recorded:
+`entitlements.meter()` reads the counter, decides, and then charges, with no
+lock across the pair — so two concurrent requests at the limit boundary are
+both allowed. A rounding error at today's limits on a single worker, but it is
+the paid-plan meter, and `INSERT … ON CONFLICT … RETURNING n` makes it exact
+for free.
+
+---
+
 ## G. Smaller, real, and recorded
+
+> **PARTLY CLOSED, 2026-10-13.** The e2e isolation, the unlocked user-store
+> writes, the missing backup and the unthrottled WebSocket handshake are all
+> done — see the status table at the top. The rest of this list stands.
 
 - **The e2e suite is not blocking in CI.** Three specs depend on live providers
   and fail in CI; they pass in isolation and fail in sequence against a shared
@@ -177,10 +278,31 @@ been executed, because there is no Docker in the environment it was written in.
 
 ## What I would do next, in order
 
-1. **§A — the numeric defects.** Six documented bugs in figures users read.
-2. **§B1 — apply the NaN guard** to the five routers missing it. Small, and it
-   removes a live 500.
-3. **§D — reinstall autodeploy** and exercise the rollback once.
-4. **§C2 — set the grievance address.** One env var, three indexed pages.
-5. **§B2 — extend the axe gate** to cover degraded states properly.
-6. Then the vendor decisions in §E, which are yours rather than work.
+Rewritten 2026-10-13. Items 1, 2 and 5 of the original list are done; what is
+left is almost entirely yours rather than mine, which is the actual headline.
+
+1. **§C2 — set the grievance address.** One env var, two minutes, and it
+   governs three *indexed* pages that currently print a `.invalid` address
+   while telling the reader it is monitored. Highest value per unit of effort
+   on this list by a wide margin. Prompt A1 in `docs/HANDOFF-TO-YOU.md`.
+2. **§D — run one command on the VM**, then exercise the rollback once. The
+   health gate, the rollback and the version stamping are all written and all
+   inert until `install-autodeploy.sh` is re-run, and the first real test of a
+   rollback should not be your first genuinely broken deploy. Runbooks B1/B2.
+3. **§G — set the off-host backup destination.** One line in
+   `/etc/motherboard-backup.env`. Until it is set, every snapshot lives on the
+   same volume as the data it protects, so it survives `rm -rf data/` and a bad
+   deploy but not losing the instance — which is the failure a backup is for.
+4. **§C1 — get the SEBI question answered.** Blocking for launch, and a
+   lawyer's call rather than mine. Prompt A3.
+5. **§E — the two vendor decisions** (market data, payments). Both are built up
+   to the vendor boundary and waiting on a name.
+6. **§F — the screen-reader gap.** Everything in `docs/ACCESSIBILITY.md` is
+   Chromium plus axe. NVDA, JAWS and VoiceOver each behave differently and none
+   has seen this app. It needs a person, not another test — and it is the
+   largest remaining accessibility gap.
+
+Then, and only when a business event calls for it rather than because the
+diagram looks nicer: **§I**, getting off JSON files. The trigger is the first
+of a second process, a customer asking about recovery objectives, or a query
+nobody can answer — not a code smell.
