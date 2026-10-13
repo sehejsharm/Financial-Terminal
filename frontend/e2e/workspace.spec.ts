@@ -191,9 +191,32 @@ test("dragging the divider actually resizes the panes", async ({ page }) => {
   // reports movement it did not make all fail here, and none of those is
   // caught by a single rightward drag with a bigger threshold.
   const MIN_MOVE = 8;   // well clear of sub-pixel rounding on boundingBox
-  const first = panes(page).first();
-  const handle = page.getByTitle("Drag to resize").first();
+
+  // THE COLUMN DIVIDER, BY NAME, AND THE COLUMN IT ACTUALLY RESIZES.
+  //
+  // Two separate mistakes lived in the old two lines, and together they are
+  // the whole of this test's CI history.
+  //
+  // 1. It asked for `getByTitle("Drag to resize").first()`, and BOTH axes
+  //    carried that title. On a layout whose first row holds a single pane
+  //    there is no column divider in that row, so the first handle on the page
+  //    is a ROW divider — which reads e.clientY (see Divider.move), while this
+  //    drag only moves X. Zero reported movement, pane unchanged, through all
+  //    four retries. That is the 492 -> 492 in CI, and it is why retrying could
+  //    never help: nothing was racing, the test was dragging the wrong control.
+  //
+  // 2. It measured `panes().first()` — row one's pane — which is not
+  //    necessarily the pane the chosen divider moves. Picking the handle and
+  //    the measured element independently is how a test ends up asserting
+  //    about two unrelated things.
+  //
+  // Both fixed by deriving one from the other: take the first column divider,
+  // then measure its immediately-preceding sibling, which is by construction
+  // the flex column that divider resizes.
+  const handle = page.getByTitle("Drag to resize columns").first();
   await expect(handle).toBeVisible();
+  const first = handle.locator("xpath=preceding-sibling::div[1]");
+  await expect(first).toBeVisible();
 
   async function drag(dx: number) {
     const box = (await handle.boundingBox())!;
@@ -217,6 +240,67 @@ test("dragging the divider actually resizes the panes", async ({ page }) => {
     const narrower = (await first.boundingBox())!.width;
     expect(narrower, "a leftward drag did not narrow the pane again")
       .toBeLessThan(wider - MIN_MOVE);
+  }).toPass({ timeout: 20_000, intervals: [500, 1000, 2000] });
+});
+
+test("the column divider resizes columns even when row 1 has a single pane",
+  async ({ page }) => {
+  // THE REGRESSION TEST FOR THE TEST ABOVE, and it is here because the bug was
+  // only ever reproducible in CI, which is an unacceptable place for the only
+  // reproduction to live.
+  //
+  // The failure needed a layout whose FIRST ROW holds one pane. Then row 1 has
+  // no column divider, and the first resize handle in DOM order is the ROW
+  // divider — which both axes used to call "Drag to resize". Seeding that
+  // layout explicitly makes the state deterministic on every machine instead
+  // of waiting for a runner to happen into it.
+  //
+  // Asserted here and not folded into the test above because that one should
+  // keep exercising the ordinary layout; this is the awkward one.
+  const layout = {
+    version: 2, id: "ws_single_top", name: "Single top",
+    groups: {},
+    rows: [
+      // One pane: no column divider in this row at all.
+      { id: "r1", height: 1, split: [1],
+        panes: [{ id: "p1", widget: "chart", link: "none" }] },
+      // Two panes: the first column divider on the page lives HERE, below a
+      // row divider.
+      { id: "r2", height: 1, split: [1, 1],
+        panes: [{ id: "p2", widget: "financials", link: "none" },
+                { id: "p3", widget: "news", link: "none" }] },
+    ],
+  };
+  await page.request.put("http://localhost:8000/api/v1/workspaces", {
+    headers: { Authorization: `Bearer ${await apiToken(page)}` },
+    data: { layouts: [layout], active_id: layout.id },
+  });
+  await page.reload();
+  await expect(page.getByRole("heading", { name: "WORKSPACE" })).toBeVisible();
+
+  // The premise, asserted rather than assumed: the first handle on the page is
+  // a ROW divider. If this ever stops being true the seeded layout has changed
+  // and the rest of this test is no longer testing what it says.
+  const anyHandle = page.locator('[title^="Drag to resize"]').first();
+  await expect(anyHandle).toHaveAttribute("title", "Drag to resize rows");
+
+  // And the fix: asking for the column divider by name still finds one, in
+  // row 2, together with the column it actually resizes.
+  const handle = page.getByTitle("Drag to resize columns").first();
+  await expect(handle).toBeVisible();
+  const column = handle.locator("xpath=preceding-sibling::div[1]");
+
+  await expect(async () => {
+    const before = (await column.boundingBox())!.width;
+    const box = (await handle.boundingBox())!;
+    await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(box.x + box.width / 2 + 120, box.y + box.height / 2,
+      { steps: 10 });
+    await page.mouse.up();
+    const after = (await column.boundingBox())!.width;
+    expect(after, "the column divider did not resize its column")
+      .toBeGreaterThan(before + 8);
   }).toPass({ timeout: 20_000, intervals: [500, 1000, 2000] });
 });
 

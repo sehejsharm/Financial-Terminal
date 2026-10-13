@@ -156,9 +156,29 @@ test("OWN says the stakes do not sum to 100 and that filings lag", async ({ page
 
 test("DES reports performance over real calendar windows", async ({ page }) => {
   await open(page, "DES");
-  await expect(page.getByText("Performance")).toBeVisible({ timeout: 45_000 });
+  // EXACT, and the loop below is what waits for the data.
+  //
+  // This was `getByText("Performance")`, which is a case-insensitive SUBSTRING
+  // match and so resolved to two elements whenever the panel had not finished
+  // loading: the "Performance" heading, which renders immediately, and the
+  // honest note "Not enough price history loaded to measure performance",
+  // which priceStats.performanceNote returns while `bars.length < 3`. Strict
+  // mode then failed with a confusing violation that named neither problem.
+  //
+  // That is why this test failed intermittently in CI and could not be
+  // reproduced on demand: it depended on whether the history fetch had
+  // resolved before the first assertion ran, and it reported the race as an
+  // ambiguous locator rather than as missing data.
+  //
+  // The heading is present in BOTH states, so asserting it tells us nothing
+  // about whether the data arrived. The window headers only exist once it has,
+  // so they are the real assertion — and Playwright's auto-waiting on them
+  // does the waiting, failing with "1 week not visible" if the data never
+  // comes, which says what actually went wrong.
+  await expect(page.getByText("Performance", { exact: true }))
+    .toBeVisible({ timeout: 45_000 });
   for (const h of ["1 week", "1 month", "1 year", "Year to date"]) {
-    await expect(page.getByText(h, { exact: true })).toBeVisible();
+    await expect(page.getByText(h, { exact: true })).toBeVisible({ timeout: 45_000 });
   }
   await expect(page.getByText(/Worst drawdown/)).toBeVisible();
 });

@@ -74,7 +74,16 @@ function Divider({ vertical, onDrag }: {
 
   return (
     <div onPointerDown={down} onPointerMove={move} onPointerUp={up} onPointerCancel={up}
-         title="Drag to resize"
+         // DISTINCT per axis. Both modes used to read "Drag to resize", which
+         // is ambiguous twice over: a screen-reader user is told two
+         // differently-behaving controls are the same thing, and a test
+         // cannot ask for the one it means. The second cost was real — the
+         // e2e drag test asked for the first handle on the page, sometimes got
+         // a ROW divider, and dragged it horizontally. A row divider reads
+         // e.clientY (see `move` above), so the X-only drag reported zero
+         // movement and the pane never resized: a reproducible CI failure that
+         // looked exactly like a hydration race and survived every retry.
+         title={vertical ? "Drag to resize rows" : "Drag to resize columns"}
          className={`group flex items-center justify-center shrink-0 touch-none
                      ${vertical ? "h-2 cursor-row-resize" : "w-2 cursor-col-resize"}`}>
       <div className={`rounded bg-line group-hover:bg-amber/70 transition-colors
