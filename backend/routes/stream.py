@@ -18,7 +18,7 @@ from fastapi import (APIRouter, Depends, Query, Request, WebSocket,
                      WebSocketDisconnect)
 from fastapi.responses import StreamingResponse
 
-from backend import auth, dataplane
+from backend import auth, dataplane, ratelimit
 from backend.stream import hub, ingest, session
 
 log = logging.getLogger("motherboard.stream")
@@ -26,6 +26,15 @@ router = APIRouter(tags=["stream"])
 
 _HB_SEC = 10          # heartbeat cadence
 _MAX_SYMBOLS = 60     # per-connection subscription cap
+
+# Close codes. RFC 6455 reserves 4000-4999 for the application, and these are
+# the only signal a refused handshake can carry — there is no response body on
+# a socket that was never accepted, so the code has to say which refusal it
+# was. 4429 mirrors HTTP 429 for the same reason 4401 mirrors 401: an operator
+# reading logs, or a client deciding whether to retry, must be able to tell
+# "slow down" from "your token is bad". A generic 1008 would collapse the two.
+_CLOSE_UNAUTHENTICATED = 4401
+_CLOSE_THROTTLED = 4429
 
 
 def _stat_frame() -> dict:
@@ -37,9 +46,27 @@ def _stat_frame() -> dict:
 
 @router.websocket("/stream")
 async def stream_ws(ws: WebSocket, token: str | None = Query(None)):
+    # Throttle FIRST, before the token is decoded and before accept().
+    #
+    # The rate-limit middleware cannot do this: it is BaseHTTPMiddleware, so it
+    # never runs for a WS upgrade and this route was the only one in the app
+    # with no ceiling (see backend/ratelimit.py). It has to be the handshake's
+    # own first act.
+    #
+    # Before the auth check on purpose: flooding does not require a valid
+    # token, so counting only authenticated attempts would leave the cheap
+    # attack uncounted and pay a JWT signature verification per attempt. Same
+    # `client_ip` as every HTTP rule, so there is one answer to "who is this"
+    # and the reverse-proxy handling is not reimplemented here.
+    if not ratelimit.allow_ws_handshake(ratelimit.client_ip(ws)):
+        # Close rather than leave it hanging: an unaccepted socket that is
+        # never closed is a client waiting forever on a connection that will
+        # not speak, and it holds a file descriptor on both ends.
+        await ws.close(code=_CLOSE_THROTTLED)
+        return
     claims = auth.decode_token(token)
     if claims is None:
-        await ws.close(code=4401)  # unauthenticated
+        await ws.close(code=_CLOSE_UNAUTHENTICATED)
         return
     await ws.accept()
     # The plane this socket is entitled to, taken from the plan in the token.
