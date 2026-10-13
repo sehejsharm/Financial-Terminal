@@ -176,7 +176,12 @@ export function ScreenBuilder({ onRun, busy }: {
       )}
 
       {/* ── clauses ── */}
-      <div className="flex flex-col gap-2">
+      {/* data-testid so the e2e suite can assert on THESE selects rather than
+          counting every <select> on the page. It used to do the latter, and the
+          Sector select below renders only once provider metadata has arrived —
+          so the count changed with the weather and the test failed in CI while
+          passing locally. Same reason the alert form carries one. */}
+      <div data-testid="screen-clauses" className="flex flex-col gap-2">
         {filters.map((f, i) => {
           const fm = fieldOf(f.key);
           const cov = meta?.coverage[f.key];

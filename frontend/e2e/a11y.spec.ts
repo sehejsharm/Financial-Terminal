@@ -28,13 +28,34 @@ const ROUTES = ["/", "/terminal", "/screeners", "/portfolio", "/alerts",
 async function axeOn(page: Page) {
   return new AxeBuilder({ page })
     .withTags(["wcag2a", "wcag2aa", "wcag21a", "wcag21aa"])
+    // `nextjs-portal` is the custom element Next injects IN DEVELOPMENT for
+    // its error overlay and build indicator. It is not part of this app, it
+    // never reaches production, and its own contrast is Next's business — but
+    // the suite runs `npm run dev`, so axe was scanning it.
+    //
+    // This was not theoretical. It is the CI failure recorded in
+    // docs/OPEN-ITEMS.md §B2: on a runner where the market-data providers
+    // return nothing, enough routes surfaced the dev overlay that five of them
+    // reported `serious color-contrast x1 -> nextjs-portal,span` — a real red
+    // build, caused entirely by Next's dev tooling, and indistinguishable at a
+    // glance from a real violation. Excluding it is what makes the gate
+    // measure the application.
+    .exclude("nextjs-portal")
     .analyze();
 }
 
-/** A readable failure: axe's own output is enormous. */
+/** A readable failure: axe's own output is enormous.
+ *
+ *  Includes the offending MARKUP, not just the selector. The first version
+ *  printed `serious nested-interactive x1 -> .panel`, which names a class used
+ *  in dozens of components and sent me grepping; the element's own html says
+ *  which one it is immediately. A failure you cannot act on is only slightly
+ *  better than no failure.
+ */
 function summarise(violations: Awaited<ReturnType<typeof axeOn>>["violations"]) {
   return violations.map((v) =>
-    `${v.impact} ${v.id} x${v.nodes.length} -> ${v.nodes[0]?.target?.join(" ")}`);
+    `${v.impact} ${v.id} x${v.nodes.length} -> ${v.nodes[0]?.target?.join(" ")}`
+    + ` :: ${(v.nodes[0]?.html ?? "").replace(/\s+/g, " ").slice(0, 220)}`);
 }
 
 test("the sign-in screen has no violations", async ({ page }) => {
@@ -66,6 +87,85 @@ test("every signed-in route has no violations", async ({ page }) => {
   }
   expect(found).toEqual({});
 });
+
+// The two shapes a degraded data plane actually takes, because they render
+// DIFFERENT things and only one of them is an error state.
+//
+//   "the api errors"  — every data call 503s. Pages show error states.
+//   "market data is empty" — the API answers 200 with nothing in it, while the
+//        app's OWN stores (portfolios, alerts, workspaces) still work. This is
+//        the shape CI really has: the backend is up, and the market-data
+//        providers behind it return "no data found" for symbol after symbol.
+//        Pages show EMPTY states, which is a different rendering path — a table
+//        with headers and no rows, a chart with no series, a figure replaced by
+//        a dash.
+//
+// Guessing which one CI hit would have been a coin flip, so both run.
+const DEGRADED = [
+  {
+    name: "the api errors",
+    pattern: "http://localhost:8000/api/v1/**",
+    body: { status: 503, body: { detail: "Upstream data provider unavailable." } },
+  },
+  {
+    name: "market data comes back empty",
+    // Only the provider-backed namespaces. The app's own stores are left
+    // alone so these stay pages with a working session and real furniture.
+    pattern: "http://localhost:8000/api/v1/{market,screens,macro,fundamentals,options,deals,value_chain}/**",
+    body: { status: 200, body: {} },
+  },
+] as const;
+
+for (const mode of DEGRADED) {
+test(`every signed-in route has no violations WHEN ${mode.name}`, async ({ page }) => {
+  // THE GAP THIS CLOSES. The gate above runs where data loads, so it only ever
+  // measured the happy path. In CI, where the market-data providers are
+  // unreachable, the same routes render error and empty states instead — and
+  // that is arguably the case that matters more, because it is what a user
+  // sees when something is wrong, and it is the moment they most need the page
+  // to be navigable.
+  //
+  // It showed up the worst possible way: as a CI-only failure. The test passed
+  // on every developer machine and failed on the runner, which makes it look
+  // like infrastructure flake rather than a real violation, and that is how a
+  // real violation gets ignored. So the degraded state is forced here rather
+  // than waited for — every machine renders it, the result is the same
+  // everywhere, and a violation in an error state fails the same way a
+  // violation in a loaded state does.
+  //
+  // WHAT IS FAULTED, AND WHAT IS NOT: everything the app fetches from the API
+  // origin (localhost:8000) returns 503. The auth endpoints are untouched
+  // because the frontend reaches those through its OWN origin — next.config.js
+  // rewrites /api/v1/auth/* so the session cookie is first-party — so the
+  // session survives and these are genuinely signed-in pages with no data,
+  // not the login screen wearing a disguise. Faulting the session too would
+  // make this a second, slower copy of the sign-in test.
+  //
+  // 503 rather than abort(): in CI the backend is up and the PROVIDERS behind
+  // it are not, so an HTTP error is the honest shape. It also exercises the
+  // app's error-state rendering rather than its offline path, which
+  // offline.spec.ts already covers.
+  test.setTimeout(600_000);
+  await signIn(page);
+  await page.route(mode.pattern, (route) =>
+    route.fulfill({
+      status: mode.body.status,
+      contentType: "application/json",
+      body: JSON.stringify(mode.body.body),
+    }));
+
+  const found: Record<string, string[]> = {};
+  for (const route of ROUTES) {
+    await page.goto(route);
+    // Longer than the happy-path pass: a degraded state appears only after the
+    // request has been made and answered, and several of these routes retry.
+    await page.waitForTimeout(2500);
+    const { violations } = await axeOn(page);
+    if (violations.length) found[route] = summarise(violations);
+  }
+  expect(found).toEqual({});
+});
+}
 
 // ── what axe cannot check ────────────────────────────────────────────────
 

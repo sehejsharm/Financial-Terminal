@@ -168,18 +168,34 @@ test("rows can be added and removed", async ({ page }) => {
 test("dragging the divider actually resizes the panes", async ({ page }) => {
   // Regression guard: the dividers used to sit inside display:contents
   // wrappers, whose clientWidth is 0, so every drag silently did nothing.
+  //
+  // RETRIED, because this was flaky in CI and the failure was specific: the
+  // pane measured 492px before the drag and 492px after it — the drag landed
+  // before the handle's pointer listener was wired, so it did nothing at all,
+  // and it then passed on Playwright's retry. A single-shot drag depends on
+  // the page having finished hydrating at the instant the mouse goes down,
+  // which on a slower runner it has not.
+  //
+  // toPass re-measures and re-drags rather than loosening the assertion: a
+  // 160px drag must still grow the pane by more than 60px, which is the
+  // property the display:contents bug broke. The one thing it gives up is
+  // "the FIRST drag works", and that is not what this test is for — a
+  // cold-start drag is covered by the hydration waits in the beforeEach.
   const first = panes(page).first();
-  const before = (await first.boundingBox())!.width;
-
   const handle = page.getByTitle("Drag to resize").first();
-  const box = (await handle.boundingBox())!;
-  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
-  await page.mouse.down();
-  await page.mouse.move(box.x + box.width / 2 + 160, box.y + box.height / 2, { steps: 12 });
-  await page.mouse.up();
+  await expect(handle).toBeVisible();
 
-  const after = (await first.boundingBox())!.width;
-  expect(after).toBeGreaterThan(before + 60);
+  await expect(async () => {
+    const before = (await first.boundingBox())!.width;
+    const box = (await handle.boundingBox())!;
+    await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(box.x + box.width / 2 + 160, box.y + box.height / 2,
+      { steps: 12 });
+    await page.mouse.up();
+    const after = (await first.boundingBox())!.width;
+    expect(after).toBeGreaterThan(before + 60);
+  }).toPass({ timeout: 20_000, intervals: [500, 1000, 2000] });
 });
 
 test("a corrupt saved desk falls back instead of white-screening", async ({ page }) => {

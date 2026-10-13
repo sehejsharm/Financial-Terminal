@@ -429,15 +429,37 @@ export function PriceChart({
     <div>
       {/* The chart is drawn to a canvas by lightweight-charts, so there is
           nothing in the DOM for assistive tech to read — it is an unlabelled
-          graphic. role="img" plus a name at least says WHAT it is and what it
+          graphic. A role plus a name at least says WHAT it is and what it
           covers, instead of silence.
-          
+
           This is a floor, not parity: the figures behind the chart are the
           real answer for a screen-reader user, and the surrounding panels
           already carry them as text. A full data table alternative would be
-          better and is not done here. */}
+          better and is not done here.
+
+          WHY `figure` AND NOT `img`, which is what this was. ARIA defines
+          role="img" as Children Presentational — assistive tech is told to
+          ignore everything inside it. But lightweight-charts INJECTS A LINK
+          into this container: `<a id="tv-attr-logo" href="tradingview.com"
+          target="_blank" title="Charting by TradingView">`, which its licence
+          requires and which must therefore stay reachable. So the markup said
+          "this is one image, ignore its contents" around a real, tabbable,
+          off-site link. A keyboard user lands on a control their screen reader
+          was told not to describe.
+
+          axe reports it as `nested-interactive`, and it was a live CI failure
+          (docs/OPEN-ITEMS.md §B2) that only appeared in the degraded state —
+          the chart mounts with 0 points when the API answers but the providers
+          have no data, and never mounts at all when the request fails
+          outright, so the happy-path gate could not see it.
+
+          role="figure" is the honest mapping and fixes it: a self-contained
+          graphic unit that takes an author-supplied name AND is allowed to
+          contain content, attribution link included. `img` was never quite
+          right anyway — the container is not the image, the canvas inside it
+          is. */}
       <div ref={ref}
-           role="img"
+           role="figure"
            aria-label={`Price chart${symbol ? ` for ${symbol}` : ""}`
              + ` — ${points.length} data points.`
              + " The same figures are available as text in the panels on this page."}

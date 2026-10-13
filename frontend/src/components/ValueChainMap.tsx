@@ -1705,8 +1705,24 @@ export function ValueChainMap({ ticker }: { ticker: string }) {
             once the graph is big enough to overflow. */}
         {suppliers.length + customers.length + competitors.length > 8 && (
           <div className="absolute bottom-2 right-2 rounded border border-line2 bg-bg/85 backdrop-blur-sm p-1">
+            {/* The label DESCRIBES the picture; it does not instruct a click.
+                It used to read "click to centre the view", which told a
+                screen-reader user to perform a gesture this control does not
+                support for them — it has no tabIndex and no key handler, so
+                the keyboard cannot reach it at all.
+
+                Deliberately left as an image rather than promoted to a
+                button, because "centre the view HERE" is a spatial pointing
+                gesture with no keyboard equivalent: Enter has no meaningful
+                coordinate. It stays a mouse-only enhancement, and that costs a
+                keyboard user nothing, because the viewport is not how they
+                navigate this graph — every node is already a real
+                role="button" tabIndex={0} control (see NodeBox above), so
+                tabbing reaches the content whatever the viewport shows. */}
             <svg width={148} height={148 * (H / W)} viewBox={`0 0 ${W} ${H}`}
-                 role="img" aria-label="Graph minimap — click to centre the view"
+                 role="img"
+                 aria-label="Minimap: an overview of the whole graph, with the
+                   currently visible area outlined."
                  style={{ cursor: "crosshair", display: "block" }}
                  onPointerDown={(e) => {
                    // Own the gesture: don't let it start a canvas pan.

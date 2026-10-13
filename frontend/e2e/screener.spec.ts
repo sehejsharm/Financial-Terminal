@@ -30,8 +30,22 @@ test("custom screen builder renders and accepts conditions", async ({ page }) =>
   await expect(page.getByText("WHERE")).toBeVisible();
   await expect(page.getByRole("button", { name: /Condition/ })).toBeVisible();
   await page.getByRole("button", { name: /Condition/ }).click();
-  // Two clause rows, each a field + operator select, plus the match selector.
-  await expect(page.locator("select")).toHaveCount(5);
+  // Two clause rows, each a field + operator select — asserted INSIDE the
+  // clause container, and the match selector asserted separately by name.
+  //
+  // This was `page.locator("select")).toHaveCount(5)`, counting every select
+  // on the page, and it was the CI failure. The builder also renders a SECTOR
+  // select, but only once the scan metadata has arrived (`meta &&
+  // meta.sectors.length > 0` in ScreenBuilder.tsx) — and the preset test above
+  // warms that cache, so by the time this test ran there were six selects, not
+  // five. It passed in isolation and failed in sequence, and it passed on a
+  // machine with no providers at all because then the sixth never appeared.
+  //
+  // A global count was also weaker than it looked: five selects somewhere on
+  // the page says nothing about the builder having rendered any of them.
+  const clauses = page.getByTestId("screen-clauses");
+  await expect(clauses.locator("select")).toHaveCount(4);
+  await expect(page.getByLabel("Match")).toBeVisible();
   await page.getByRole("button", { name: /Run screen/ }).click();
   await expect(
     page.getByRole("link", { name: "Open →" }).first()
