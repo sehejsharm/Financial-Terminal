@@ -121,13 +121,16 @@ deliberately *not* a live region.
    an actual violation — see the table above.)
 3. **The connection badge is `hidden sm:flex`**, so on the narrowest screens it
    is not rendered and therefore not announced either.
-4. **The axe gate now runs in CI, but does not block.** The Playwright suite
-   is wired in as the `e2e` job (`.github/workflows/ci.yml`), so the
-   accessibility checks execute on every push and report. The job is
-   `continue-on-error` because three unrelated specs depend on live market-data
-   providers and fail in CI — see docs/RELEASE.md for why that is deliberate
-   and what fixing it requires. So an accessibility regression is *visible* in
-   CI but will not stop a merge until the e2e job can be made blocking.
+4. ~~**The axe gate runs in CI but does not block.**~~ **CLOSED 2026-10-13 —
+   the `e2e` job is now BLOCKING.** An accessibility regression stops a merge.
+   It was advisory because three specs were believed to depend on live
+   market-data providers; none of them did (see docs/RELEASE.md). Flipped only
+   after two consecutive clean runs with no failure artifacts, not on
+   expectation.
+
+   What remains true, and is the more important caveat: **a blocking green axe
+   gate is still only a floor.** It measures the mechanical third of WCAG, in
+   one theme, in Chromium. Gap 1 above is the real one.
 5. **WCAG 2.5.8 target sizes** were measured and fixed in the UI/UX phase; see
    that commit. Inline text links are deliberately left alone — 2.5.8 exempts
    targets in a sentence.

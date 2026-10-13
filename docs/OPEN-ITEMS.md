@@ -249,21 +249,24 @@ for free.
 > writes, the missing backup and the unthrottled WebSocket handshake are all
 > done — see the status table at the top. The rest of this list stands.
 
-- **The e2e suite is not blocking in CI.** Three specs depend on live providers
-  and fail in CI; they pass in isolation and fail in sequence against a shared
-  data directory. Fixing it means a per-spec data directory or a stubbed
-  provider layer. Until then an accessibility or behavioural regression is
-  *visible* but will not stop a merge.
+- ~~**The e2e suite is not blocking in CI.**~~ **CLOSED 2026-10-13 — it
+  blocks now.** And the diagnosis in this bullet was wrong: not one of the four
+  CI failures involved a provider. Two of the named "flakes" are fully stubbed
+  specs, one counted every `<select>` on the page, and one asserted a drag
+  magnitude that was a property of one layout rather than of the code. The
+  actual cause of the sequence-dependence was that all 28 spec files signed in
+  as the *same account*. Flipped after two consecutive clean runs with zero
+  failure artifacts, not on expectation.
 - **Grievances have no SLA timer, admin queue or ageing reminder.** They land in
   `data/grievances.json` and an email. Somebody has to actually read them;
   nothing enforces the 7-working-day reply the page promises.
 - **The WebSocket handshake is unthrottled.** `BaseHTTPMiddleware` never runs for
   a WS upgrade, so the rate limiter does not apply to `/api/v1/stream`. Noted in
   `backend/ratelimit.py`.
-- **CSP `script-src` is report-only.** The enforceable path exists and does not
-  need Next 16: the pages are statically prerendered, so the `__next_f` inline
-  scripts are fixed at build time and *can* be hashed by a post-build step
-  (~46 hashes). Real work, not a flag. See `docs/NEXT16-TRIAL.md`.
+- **CSP `script-src` is report-only** — still true, but the rest of what this
+  bullet said is **measured and wrong**: the hashes are NOT stable across
+  builds, so the post-build hashing path cannot work. See §H above for the
+  measurement and for the collector that now makes report-only mean something.
 - **No staging environment.** A push is a deploy, of both halves.
 - **No metrics time series, no alerting** beyond the 15-minute healthcheck going
   red, and **no error aggregation unless `SENTRY_DSN` is set.**

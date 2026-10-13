@@ -250,7 +250,7 @@ owned elsewhere) and is the obvious next improvement.
 |---|---|---|
 | `test` | yes | ruff, the invariant suite (separately, and first), then the backend tests |
 | `frontend` | yes | typecheck, vitest, production build |
-| `e2e` | **no** (`continue-on-error`) | Playwright, with artifacts on failure |
+| `e2e` | **yes** (since 2026-10-13) | Playwright, with artifacts on failure |
 | `audit` | no | pip-audit, npm audit |
 
 **The frontend jobs are new. Before this, CI ran ruff and pytest only** — so
@@ -259,19 +259,36 @@ whoever remembered to run them. Every client-side guarantee added over the
 preceding phases (the session model, the request coalescing, the
 accessibility gates, the banned-claim check on public copy) was unguarded.
 
-### Why e2e is not blocking yet
+### Why e2e blocks now, and what the old reason got wrong
 
-Three specs depend on live market-data providers and fail when those are
-unreachable, which in CI they always are. They pass in isolation and fail in
-sequence against the suite's shared data directory. Making the job blocking
-before that coupling is fixed would train people to ignore a red build, which
-is worse than not having the job.
+This section used to say three specs depended on live market-data providers and
+failed when those were unreachable, naming `alerts.spec.ts`,
+`alerts-validation.spec.ts` and `market-screens.spec.ts`. **Reading the actual
+CI log — 196 passed / 2 failed / 2 flaky — not one of the four failures
+involved a provider.** Two of the three named specs are *fully stubbed*: every
+comp, rating, quote and candle is fulfilled from fixtures in the file.
 
-The named flakes: `alerts.spec.ts`, `alerts-validation.spec.ts`,
-`market-screens.spec.ts` (the DES calendar-window test). Fixing them means
-giving each spec its own backend data directory, or stubbing the provider
-layer in the e2e environment. **That is the next piece of work on this, and
-until it is done the e2e job reports rather than gates.**
+What the failures actually were:
+
+| | |
+|---|---|
+| **All 28 spec files signed in as the SAME account** (`e2e-admin`), so they shared one user's portfolios, workspaces and alerts. The suite's own comments recorded the symptom in three places — "passing alone and failing in sequence" — and each site had grown a local workaround. | Per-spec accounts, derived from the filename, provisioned through the admin API. No spec file changed: `signIn` is the one door all 28 go through, so isolation is structural rather than something each spec must remember to ask for. |
+| `screener.spec.ts` asserted `page.locator("select")).toHaveCount(5)` — every select on the page. The builder renders an extra SECTOR select once scan metadata arrives, which the preset test above it warms. Six in CI; five on a machine with no providers, where it passed. | Scoped to the clause container, with the match selector asserted by name. Also stronger: five selects *somewhere* never proved the builder had rendered any. |
+| `workspace.spec.ts` required a 160px drag to grow a pane by >60px. It measured 13px in CI — the drag worked, but the neighbouring pane can only shrink to its minimum, so the pull gets clamped. 60 was a property of one layout on one machine. | Asserts the direction and drags both ways: right then left, each move > 8px. Catches a stuck divider, a one-way divider and a divider that reports movement it did not make. |
+| Five real a11y violations, four of them invisible without data. | One was axe scanning `nextjs-portal`, Next's *development* error overlay — a red build caused by something that never ships. |
+
+A per-spec data directory, which this section used to recommend, would have
+meant a backend restart per spec file and would have isolated along a seam the
+app does not have. The app partitions every store **by user**
+(`tests/test_account_isolation.py` pins that), so per-account is the boundary
+that actually exists.
+
+**The flip came after two consecutive clean runs with zero failure artifacts
+uploaded, not on expectation.** The ordering is the whole point: a blocking
+gate turned on over a known-red suite is how a gate becomes a thing people
+skip, which is strictly worse than an advisory one. `retries: 1` stays, so a
+genuine one-off flake reports as flaky without failing the build, while a
+reproducible failure stops a merge.
 
 ## Not verified, and worth saying so
 

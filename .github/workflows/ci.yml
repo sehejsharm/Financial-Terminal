@@ -98,15 +98,39 @@ jobs:
   # browser and takes ~10 minutes — long enough that bundling it with the
   # fast checks would make every push wait on it.
   #
-  # NOT a required check yet, and the reason is honest rather than lazy: three
-  # specs depend on live market-data providers and fail when those are
-  # unreachable, which in CI they always are. They pass in isolation and fail
-  # in sequence against a shared data dir. Making this blocking before that
-  # coupling is fixed would train people to ignore a red build, which is worse
-  # than not having it. It runs, it reports, and the flakes are named below.
+  # BLOCKING, as of 2026-10-13. It was `continue-on-error` on the recorded
+  # grounds that "three specs depend on live market-data providers and fail
+  # when those are unreachable". That diagnosis was wrong about every one of
+  # them, and the actual CI log is what showed it: 196 passed / 2 failed /
+  # 2 flaky, and not one of the four involved a provider.
+  #
+  #   * All 28 spec files signed in as the SAME account, so they shared one
+  #     user's portfolios, workspaces and alerts. Per-spec accounts now.
+  #   * screener.spec.ts counted every <select> on the page, and the builder
+  #     renders an extra one once scan metadata arrives — which the preset test
+  #     above it warms. Scoped to the clause container.
+  #   * workspace.spec.ts asserted a 160px drag grows a pane by >60px. It
+  #     measured 13px in CI, because the neighbouring pane can only shrink to
+  #     its minimum. 60 was a property of one layout, not of the code.
+  #   * market-screens.spec.ts and alerts-validation.spec.ts are FULLY
+  #     STUBBED — no provider involved at all.
+  #
+  # Plus five real a11y violations, one of which was axe scanning Next's own
+  # development error overlay.
+  #
+  # Flipped only after two consecutive clean runs with no failure artifacts
+  # uploaded at all (201+ passed, 0 failed, 0 flaky), not on expectation. The
+  # ordering matters: a blocking gate turned on over a known-red suite is how a
+  # gate becomes a thing people skip, which is strictly worse than an advisory
+  # one. `retries: 1` stays in playwright.config.ts, so a genuine one-off flake
+  # reports as flaky and does not fail the build — but a reproducible failure
+  # now stops a merge, which is the whole point.
+  #
+  # If this starts failing on something environmental rather than on a
+  # regression, fix the spec or make it deterministic. Do NOT put
+  # continue-on-error back.
   e2e:
     runs-on: ubuntu-latest
-    continue-on-error: true
     steps:
       - uses: actions/checkout@v4
 
